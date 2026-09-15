@@ -1144,9 +1144,16 @@ class CyberDefenderRuntime:
         # snapshot is preserved. The plane remains read-only/non-authoritative.
         try:
             registry_path = state_root / "network_trust.json"
-            trust_registry = load_trust_registry(registry_path)
+            # v0.1.5: trust evidence is reloadable and fail-safe. The network
+            # plane remains non-authoritative; malformed evidence collapses to
+            # UNKNOWN instead of preserving stale AUTHORIZED labels.
+            # Do not parse optional trust evidence in the authoritative runtime
+            # bootstrap path. The collector performs bounded fail-safe reloads so
+            # malformed trust JSON degrades to UNKNOWN without disabling network
+            # observation.
             network_collector = PassiveNetworkInventory(
-                trust_registry=trust_registry,
+                trust_registry={},
+                trust_registry_path=registry_path,
                 max_devices=min(
                     self._positive_int(
                         os.getenv("CYBERDEFENDER_NETWORK_MAX_DEVICES"),

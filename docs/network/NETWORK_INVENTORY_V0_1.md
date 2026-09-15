@@ -120,3 +120,18 @@ current runtime session.
 Security invariants remain unchanged: passive-only, no ping, no port scan, no
 packet injection, no firewall mutation, no automatic authorization, and no
 vendor inference from remote IP addresses.
+
+
+## v0.1.5 — Explicit Trust Registry Foundation
+
+The optional local `network_trust.json` registry is reloadable at runtime without
+restarting the Agent. It remains evidence only: it cannot grant OS/network action
+authority and the Admin surface remains read-only. There is no auto-whitelist.
+
+Registry changes are detected by bounded file metadata checks. Missing or malformed
+registry evidence fails safe to `UNKNOWN`; stale `AUTHORIZED` labels are not retained
+when current evidence is invalid. Runtime telemetry exposes loaded-rule count, reloads,
+failures and the last registry error.
+
+Each matched peer exposes bounded trust evidence (`evidence_type`, optional
+`evidence_ref`) with `authoritative=false` and `authorization=NOT_GRANTED`.

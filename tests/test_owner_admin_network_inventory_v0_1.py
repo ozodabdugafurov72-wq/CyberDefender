@@ -24,8 +24,8 @@ def main() -> int:
         (root / "logs").mkdir()
 
         network = {
-            "schema": "cyberdefender.network-inventory.v0.1.4",
-            "version": "0.1.4",
+            "schema": "cyberdefender.network-inventory.v0.1.5",
+            "version": "0.1.5",
             "mode": "PASSIVE_ONLY",
             "authority": "NONE",
             "authoritative": False,

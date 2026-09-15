@@ -107,6 +107,8 @@ class DeviceTrustRule:
     label: str | None = None
     user_id: str | None = None
     user_verified: bool = False
+    evidence_type: str = "NONE"
+    evidence_ref: str | None = None
 
 
 class WindowsPassiveNetworkProvider:
@@ -248,7 +250,7 @@ class WindowsPassiveNetworkProvider:
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.4"
+    VERSION = "0.1.5"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -257,6 +259,7 @@ class PassiveNetworkInventory:
         provider: WindowsPassiveNetworkProvider | Callable[[], dict[str, Any]] | None = None,
         *,
         trust_registry: dict[str, dict[str, Any] | str] | None = None,
+        trust_registry_path: str | os.PathLike[str] | None = None,
         max_devices: int = 256,
         max_connections: int = 256,
         clock: Callable[[], float] = time.time,
@@ -267,6 +270,12 @@ class PassiveNetworkInventory:
         self.max_connections = max(16, min(int(max_connections), 4096))
         self._devices: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._trust = self._compile_registry(trust_registry or {})
+        self._trust_registry_path = os.fspath(trust_registry_path) if trust_registry_path is not None else None
+        self._trust_registry_fingerprint: tuple[int, int] | None = None
+        self.trust_registry_reloads = 0
+        self.trust_registry_failures = 0
+        self.trust_registry_last_error: str | None = None
+        self.trust_registry_last_loaded_at: float | None = None
         self.samples = 0
         self.failures = 0
         self.evictions = 0
@@ -300,8 +309,57 @@ class PassiveNetworkInventory:
                 label=_bounded_text(payload.get("label"), 128) or None,
                 user_id=user_id,
                 user_verified=user_verified,
+                evidence_type=_bounded_text(payload.get("evidence_type"), 48).upper() or "EXPLICIT_LOCAL_RULE",
+                evidence_ref=_bounded_text(payload.get("evidence_ref"), 160) or None,
             )
         return compiled
+
+    def _refresh_trust_registry(self) -> None:
+        """Reload optional local trust evidence without granting authority.
+
+        Missing or invalid registry evidence fails safe to UNKNOWN. A malformed
+        update can never preserve an AUTHORIZED label merely because an older
+        file was valid. The registry remains display/correlation evidence only.
+        """
+        path = self._trust_registry_path
+        if not path:
+            return
+        now = float(self.clock())
+        try:
+            stat = os.stat(path)
+            fingerprint = (int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))), int(stat.st_size))
+        except FileNotFoundError:
+            if self._trust or self._trust_registry_fingerprint is not None:
+                self._trust = {}
+                self._trust_registry_fingerprint = None
+                self.trust_registry_reloads += 1
+            self.trust_registry_last_error = None
+            self.trust_registry_last_loaded_at = now
+            return
+        except OSError as exc:
+            self._trust = {}
+            self._trust_registry_fingerprint = None
+            self.trust_registry_failures += 1
+            self.trust_registry_last_error = type(exc).__name__
+            return
+
+        if fingerprint == self._trust_registry_fingerprint:
+            return
+        try:
+            source = load_trust_registry(path)
+            compiled = self._compile_registry(source)
+        except Exception as exc:
+            self._trust = {}
+            self._trust_registry_fingerprint = fingerprint
+            self.trust_registry_failures += 1
+            self.trust_registry_last_error = type(exc).__name__
+            self.trust_registry_last_loaded_at = now
+            return
+        self._trust = compiled
+        self._trust_registry_fingerprint = fingerprint
+        self.trust_registry_reloads += 1
+        self.trust_registry_last_error = None
+        self.trust_registry_last_loaded_at = now
 
     @staticmethod
     def _normalized_active_networks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -372,6 +430,7 @@ class PassiveNetworkInventory:
         started = time.perf_counter()
         now = float(self.clock())
         try:
+            self._refresh_trust_registry()
             raw = self.provider.collect() if hasattr(self.provider, "collect") else self.provider()
             if not isinstance(raw, dict):
                 raise TypeError("NETWORK_PROVIDER_INVALID")
@@ -425,6 +484,13 @@ class PassiveNetworkInventory:
                     "last_seen": now,
                     "trust": trust.status,
                     "label": trust.label,
+                    "trust_evidence": {
+                        "source": "LOCAL_REGISTRY" if trust.status != "UNKNOWN" else "NO_MATCH",
+                        "evidence_type": trust.evidence_type if trust.status != "UNKNOWN" else "NONE",
+                        "evidence_ref": trust.evidence_ref if trust.status != "UNKNOWN" else None,
+                        "authoritative": False,
+                        "authorization": "NOT_GRANTED",
+                    },
                     "user_identity": {
                         "status": "VERIFIED" if trust.user_verified and trust.user_id else "UNKNOWN",
                         "user_id": trust.user_id if trust.user_verified else None,
@@ -488,7 +554,7 @@ class PassiveNetworkInventory:
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.4",
+                "schema": "cyberdefender.network-inventory.v0.1.5",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -530,6 +596,18 @@ class PassiveNetworkInventory:
                 "devices": devices[-self.max_devices :],
                 "connections": bounded_connections,
                 "process_attribution": raw.get("process_attribution", {}) if isinstance(raw.get("process_attribution"), dict) else {},
+                "trust_registry": {
+                    "schema": "cyberdefender.network-trust-runtime.v0.1.5",
+                    "mode": "EXPLICIT_LOCAL_EVIDENCE",
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "rules_loaded": len(self._trust),
+                    "reloads": self.trust_registry_reloads,
+                    "failures": self.trust_registry_failures,
+                    "last_error": self.trust_registry_last_error,
+                    "last_loaded_at": self.trust_registry_last_loaded_at,
+                    "auto_whitelist": False,
+                },
                 "bounds": {
                     "max_devices": self.max_devices,
                     "max_connections": self.max_connections,
@@ -580,4 +658,12 @@ class PassiveNetworkInventory:
             "last_duration_ms": self.last_duration_ms,
             "last_error": self.last_error,
             "process_attribution": process_health,
+            "trust_registry": {
+                "authority": "NONE",
+                "rules_loaded": len(self._trust),
+                "reloads": self.trust_registry_reloads,
+                "failures": self.trust_registry_failures,
+                "last_error": self.trust_registry_last_error,
+                "auto_whitelist": False,
+            },
         }
