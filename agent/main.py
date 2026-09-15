@@ -1136,7 +1136,7 @@ class CyberDefenderRuntime:
         )
 
         # ----------------------------------------------------
-        # PASSIVE NETWORK INVENTORY v0.1.3
+        # PASSIVE NETWORK INVENTORY v0.1.4
         # ----------------------------------------------------
         # Collection runs on exactly one bounded background worker. The core
         # security cycle never waits for Windows network telemetry. Failures,
@@ -3407,7 +3407,7 @@ class CyberDefenderRuntime:
             )
 
     # ========================================================
-    # PASSIVE NETWORK INVENTORY v0.1.3
+    # PASSIVE NETWORK INVENTORY v0.1.4
     # ========================================================
 
     def update_network_inventory(self) -> dict[str, Any] | None:

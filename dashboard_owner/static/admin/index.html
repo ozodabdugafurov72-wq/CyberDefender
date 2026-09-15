@@ -42,6 +42,9 @@
  </div>
  <div class="device-head"><span>TRUST</span><span>OBSERVED PEER</span><span>IP</span><span>MAC</span><span>ROLE / INTERFACE</span><span>STATE</span><span>USER BINDING</span></div>
  <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry only</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
+ <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS EVIDENCE · HASH/SIGNATURE ENRICHMENT IS BOUNDED AND NON-AUTHORITATIVE</small></div>
+ <div class="connection-head"><span>PROCESS</span><span>PID</span><span>LOCAL</span><span>REMOTE</span><span>STATE</span><span>SHA-256</span><span>SIGNATURE</span></div>
+ <div class="connections" id="networkConnections"><div class="connection-row"><div><b>Waiting for connection attribution</b><small>Local process identity only; no vendor inference from remote IP.</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
 </section>
 <section class="grid two">
  <article class="panel">
@@ -88,7 +91,7 @@
    <div><span>Session ID</span><b id="sessionCoverage">—</b><i><em id="sessionBar"></em></i></div>
    <div><span>Integrity Level</span><b id="integrityCoverage">—</b><i><em id="integrityBar"></em></i></div>
   </div>
-  <div class="note">Signer/hash enrichment remains a bounded Tier-2 future worker; it is intentionally not placed on the synchronous process snapshot hot path.</div>
+  <div class="note">Signer/hash enrichment is handled by a bounded background worker and remains non-authoritative; it never enters the synchronous process snapshot hot path.</div>
  </article>
 </section>
 <section class="grid two">

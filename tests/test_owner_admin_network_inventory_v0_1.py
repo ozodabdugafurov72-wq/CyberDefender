@@ -24,8 +24,8 @@ def main() -> int:
         (root / "logs").mkdir()
 
         network = {
-            "schema": "cyberdefender.network-inventory.v0.1.2",
-            "version": "0.1.2",
+            "schema": "cyberdefender.network-inventory.v0.1.4",
+            "version": "0.1.4",
             "mode": "PASSIVE_ONLY",
             "authority": "NONE",
             "authoritative": False,
@@ -111,6 +111,8 @@ def main() -> int:
         check("HOTSPOT CLIENTS" in html and "OBSERVED PEERS" in html, "Admin UI separates AP client count from neighbor evidence")
         check("NO PING" in html and "NO PORT SCAN" in html and "UNKNOWN ≠ UNAUTHORIZED" in html, "Admin UI declares passive-only safety boundaries")
         check("d.network_inventory" in js and "networkDevices" in js, "Admin JS consumes only API network inventory state")
+        check("CONNECTION → PROCESS ATTRIBUTION" in html and "networkConnections" in js, "Admin UI exposes bounded connection-to-process attribution")
+        check("sha256" in js and "signature" in js, "Admin UI renders local hash/signature evidence without granting trust")
         check("Get-NetNeighbor" not in js and "fetch(\"/admin/api/state\"" in js, "Admin browser code has no direct OS telemetry path")
 
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)

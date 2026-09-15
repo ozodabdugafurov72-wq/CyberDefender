@@ -18,7 +18,7 @@ class AsyncPassiveNetworkInventory:
       * close() is bounded and never blocks the security runtime indefinitely.
     """
 
-    VERSION = "0.1.3"
+    VERSION = "0.1.4"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -57,6 +57,12 @@ class AsyncPassiveNetworkInventory:
         self._last_success_at: float | None = None
         self._last_duration_ms: float | None = None
         self._last_error: str | None = None
+        self._last_failure_at: float | None = None
+        self._last_failure_type: str | None = None
+        self._last_failure_reason: str | None = None
+        self._last_failure_duration_ms: float | None = None
+        self._consecutive_failures = 0
+        self.stale_after_seconds = max(30.0, self.deadline_seconds * 12.0)
 
         self.requests = 0
         self.starts = 0
@@ -102,8 +108,17 @@ class AsyncPassiveNetworkInventory:
 
     def _integration_state_locked(self) -> dict[str, Any]:
         deadline_exceeded = self._deadline_exceeded_locked()
+        now = self.wall_clock()
+        last_success_age = None
+        if self._last_success_at is not None:
+            last_success_age = max(0.0, now - self._last_success_at)
+        stale = (
+            self._last_success_at is not None
+            and last_success_age is not None
+            and last_success_age > self.stale_after_seconds
+        )
         return {
-            "schema": "cyberdefender.network-inventory-integration.v0.1.3",
+            "schema": "cyberdefender.network-inventory-integration.v0.1.4",
             "version": self.VERSION,
             "mode": "ASYNC_BOUNDED",
             "authority": self.AUTHORITY,
@@ -117,13 +132,22 @@ class AsyncPassiveNetworkInventory:
             "starts": self.starts,
             "completed": self.completed,
             "failures": self.failures,
+            "failures_total": self.failures,
+            "consecutive_failures": self._consecutive_failures,
             "coalesced": self.coalesced,
             "deadline_exceeded_count": self.deadline_exceeded_count,
             "last_started_at": self._started_at,
             "last_completed_at": self._last_completed_at,
             "last_success_at": self._last_success_at,
+            "last_success_age_seconds": (round(last_success_age, 3) if last_success_age is not None else None),
+            "stale_after_seconds": self.stale_after_seconds,
+            "stale": bool(stale),
             "last_duration_ms": self._last_duration_ms,
             "last_error": self._last_error,
+            "last_failure_at": self._last_failure_at,
+            "last_failure_type": self._last_failure_type,
+            "last_failure_reason": self._last_failure_reason,
+            "last_failure_duration_ms": self._last_failure_duration_ms,
             "close_incomplete": self.close_incomplete,
         }
 
@@ -152,6 +176,7 @@ class AsyncPassiveNetworkInventory:
 
             started = self.monotonic_clock()
             error_name: str | None = None
+            error_reason: str | None = None
             result: dict[str, Any] | None = None
 
             try:
@@ -161,6 +186,7 @@ class AsyncPassiveNetworkInventory:
                 result = copy.deepcopy(candidate)
             except Exception as exc:  # failure is isolated from core runtime
                 error_name = type(exc).__name__
+                error_reason = str(exc).replace("\r", " ").replace("\n", " ").strip()[:256]
 
             completed_at = self.wall_clock()
             duration_ms = round((self.monotonic_clock() - started) * 1000.0, 2)
@@ -182,9 +208,15 @@ class AsyncPassiveNetworkInventory:
                     self._latest = result
                     self._last_success_at = completed_at
                     self._last_error = None
+                    self._consecutive_failures = 0
                 else:
                     self.failures += 1
+                    self._consecutive_failures += 1
                     self._last_error = error_name or "NETWORK_ASYNC_UNKNOWN_ERROR"
+                    self._last_failure_at = completed_at
+                    self._last_failure_type = error_name or "NETWORK_ASYNC_UNKNOWN_ERROR"
+                    self._last_failure_reason = error_reason or self._last_failure_type
+                    self._last_failure_duration_ms = duration_ms
 
     def health_check(self) -> dict[str, Any]:
         collector_health: dict[str, Any] = {}
@@ -205,10 +237,12 @@ class AsyncPassiveNetworkInventory:
             deadline_exceeded = bool(state["deadline_exceeded"])
             worker_alive = bool(state["worker_alive"])
             last_error = self._last_error
+            stale = bool(state.get("stale", False))
+            consecutive_failures = int(state.get("consecutive_failures", 0) or 0)
 
         if self._closed.is_set():
             status = "STOPPED"
-        elif not worker_alive or deadline_exceeded or last_error is not None:
+        elif not worker_alive or deadline_exceeded or stale or last_error is not None or consecutive_failures > 0:
             status = "DEGRADED"
         elif int(state.get("completed", 0) or 0) == 0:
             status = "STARTING"

@@ -75,3 +75,48 @@ injection, DNS probing, firewall mutation, or response actions.
 Shutdown waits for the optional worker only for a bounded interval. If the worker
 has not exited, `close_incomplete` remains observable and process shutdown is not
 held indefinitely.
+
+## v0.1.4 — Process Attribution + Failure Forensics
+
+Network Inventory v0.1.4 extends the passive/non-authoritative model without
+changing authorization or action semantics.
+
+### Connection → local process attribution
+
+Each bounded local socket observation may carry local process evidence:
+
+- PID and process create time;
+- technical process name;
+- executable path;
+- local username observation;
+- SHA-256 executable digest when bounded background enrichment completes;
+- Windows Authenticode status and signer subject when available.
+
+This is attribution evidence only. `SIGNED`, `HASHED`, `KNOWN`, and `RESOLVED`
+never mean `AUTHORIZED`. The enrichment worker performs no external network I/O
+and never executes the observed executable.
+
+Executable hash/signature work is moved to one bounded daemon worker with a
+small deduplicated queue/cache. Network collection can return `PENDING` or
+`DEFERRED` enrichment rather than blocking the XDR security runtime.
+
+### Async failure forensics
+
+The network integration now retains recovery-safe diagnostics:
+
+- `failures_total`;
+- `consecutive_failures`;
+- `last_failure_at`;
+- `last_failure_type`;
+- `last_failure_reason` (bounded);
+- `last_failure_duration_ms`;
+- `last_success_at` and `last_success_age_seconds`;
+- explicit `stale` / `stale_after_seconds`.
+
+A successful recovery clears the current `last_error` and resets consecutive
+failures, but historical `last_failure_*` evidence remains available for the
+current runtime session.
+
+Security invariants remain unchanged: passive-only, no ping, no port scan, no
+packet injection, no firewall mutation, no automatic authorization, and no
+vendor inference from remote IP addresses.

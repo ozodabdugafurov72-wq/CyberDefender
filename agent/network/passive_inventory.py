@@ -10,6 +10,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .process_attribution import ProcessAttributionResolver
+
 try:
     import psutil
 except Exception:  # pragma: no cover - runtime health reports dependency absence
@@ -120,6 +122,9 @@ class WindowsPassiveNetworkProvider:
     MAX_WINDOWS_JSON_BYTES = 1024 * 1024
     MAX_RAW_CONNECTIONS = 2048
 
+    def __init__(self, process_resolver: ProcessAttributionResolver | None = None) -> None:
+        self.process_resolver = process_resolver or ProcessAttributionResolver()
+
     def _interfaces(self) -> list[dict[str, Any]]:
         if psutil is None:
             return []
@@ -216,6 +221,16 @@ class WindowsPassiveNetworkProvider:
                 "status": _bounded_text(getattr(conn, "status", ""), 32).upper() or "UNKNOWN",
                 "pid": int(getattr(conn, "pid", 0) or 0),
             })
+
+        attribution = self.process_resolver.resolve_many([int(row.get("pid", 0) or 0) for row in rows])
+        for row in rows:
+            pid = int(row.get("pid", 0) or 0)
+            row["process"] = attribution.get(pid, {
+                "attribution_status": "UNAVAILABLE",
+                "pid": pid,
+                "authority": "NONE",
+                "authorization": "NOT_GRANTED",
+            })
         return rows
 
     def collect(self) -> dict[str, Any]:
@@ -225,11 +240,15 @@ class WindowsPassiveNetworkProvider:
             "active_networks": windows["active_networks"],
             "neighbors": windows["neighbors"],
             "connections": self._connections(),
+            "process_attribution": self.process_resolver.health_check(),
         }
+
+    def close(self) -> None:
+        self.process_resolver.close()
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.2"
+    VERSION = "0.1.4"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -444,6 +463,12 @@ class PassiveNetworkInventory:
                     "remote_port": int(item.get("remote_port", 0) or 0),
                     "status": _bounded_text(item.get("status"), 32).upper() or "UNKNOWN",
                     "pid": int(item.get("pid", 0) or 0),
+                    "process": item.get("process") if isinstance(item.get("process"), dict) else {
+                        "attribution_status": "UNAVAILABLE",
+                        "pid": int(item.get("pid", 0) or 0),
+                        "authority": "NONE",
+                        "authorization": "NOT_GRANTED",
+                    },
                     "passive": True,
                 })
 
@@ -463,7 +488,7 @@ class PassiveNetworkInventory:
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.2",
+                "schema": "cyberdefender.network-inventory.v0.1.4",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -504,6 +529,7 @@ class PassiveNetworkInventory:
                 "interfaces": interfaces[:32],
                 "devices": devices[-self.max_devices :],
                 "connections": bounded_connections,
+                "process_attribution": raw.get("process_attribution", {}) if isinstance(raw.get("process_attribution"), dict) else {},
                 "bounds": {
                     "max_devices": self.max_devices,
                     "max_connections": self.max_connections,
@@ -516,7 +542,25 @@ class PassiveNetworkInventory:
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             raise
 
+    def close(self) -> None:
+        method = getattr(self.provider, "close", None)
+        if callable(method):
+            try:
+                method()
+            except Exception:
+                pass
+
     def health_check(self) -> dict[str, Any]:
+        process_health: dict[str, Any] = {}
+        resolver = getattr(self.provider, "process_resolver", None)
+        method = getattr(resolver, "health_check", None)
+        if callable(method):
+            try:
+                candidate = method()
+                if isinstance(candidate, dict):
+                    process_health = candidate
+            except Exception as exc:
+                process_health = {"status": "DEGRADED", "error": type(exc).__name__, "authority": "NONE"}
         return {
             "component": "PassiveNetworkInventory",
             "version": self.VERSION,
@@ -535,4 +579,5 @@ class PassiveNetworkInventory:
             "last_sample_at": self.last_sample_at,
             "last_duration_ms": self.last_duration_ms,
             "last_error": self.last_error,
+            "process_attribution": process_health,
         }

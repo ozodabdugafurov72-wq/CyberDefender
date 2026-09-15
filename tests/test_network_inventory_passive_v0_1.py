@@ -87,7 +87,7 @@ def main() -> int:
     check(first["packet_injection"] is False and first["firewall_mutation"] is False, "no packet injection or firewall mutation is exposed")
     check(first["unknown_is_unauthorized"] is False, "UNKNOWN is not silently treated as unauthorized")
     check(first["user_identity_inference"] is False, "user identity inference from network identity is disabled")
-    check(first["schema"] == "cyberdefender.network-inventory.v0.1.2", "v0.1.2 schema is explicit")
+    check(first["schema"] == "cyberdefender.network-inventory.v0.1.4", "v0.1.4 schema is explicit")
     check(first["summary"]["local_endpoint_count"] == 1, "local endpoint is counted separately from neighbors")
     check(first["summary"]["observed_peers_online"] == 4, "only active-scope unicast neighbor identities are current peers")
     check(first["summary"]["gateways_observed"] == 1, "default gateway is classified separately")
@@ -96,6 +96,8 @@ def main() -> int:
     check(first["summary"]["authorized"] == 2, "explicit authorized peer rules are applied")
     check(first["summary"]["denied"] == 1, "explicit denied peer rule is applied")
     check(first["summary"]["connections_total"] == 2, "passive local connection evidence is retained")
+    check(all(isinstance(row.get("process"), dict) for row in first["connections"]), "connection schema reserves bounded process attribution evidence")
+    check(all(row["process"].get("authority") == "NONE" for row in first["connections"]), "process attribution grants no authority")
 
     by_ip = {row["ip_address"]: row for row in first["devices"]}
     check("192.168.1.255" not in by_ip and "224.0.0.1" not in by_ip and "10.10.10.1" not in by_ip, "broadcast, multicast, and inactive-interface rows are not peers")
