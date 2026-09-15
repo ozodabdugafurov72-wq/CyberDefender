@@ -1,0 +1,18 @@
+﻿{
+    "C_Cpp.files.exclude":  {
+                                "**/target/**":  true,
+                                "**/.venv/**":  true
+                            },
+    "files.watcherExclude":  {
+                                 "**/target/**":  true,
+                                 "**/.venv/**":  true
+                             },
+    "files.exclude":  {
+                          "**/.venv":  false
+                      },
+    "search.exclude":  {
+                           "**/.venv/**":  true,
+                           "**/target/**":  true,
+                           "**/__pycache__/**":  true
+                       }
+}

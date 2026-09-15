@@ -1,0 +1,15 @@
+{
+  "schema": "cd.process-sensor-runtime-config.v1",
+  "mode": "RUST_CANARY",
+  "rust_v05": {
+    "executable": "C:\\Program Files\\CyberDefender\\app\\native\\process_sensor\\cyberdefender-process-sensor-v0.5.1.exe",
+    "sha256": "REPLACED_BY_DEPLOYMENT_TRANSACTION"
+  },
+  "canary": {
+    "sample_every_cycles": 2,
+    "timeout_seconds": 5.0,
+    "max_restarts": 2,
+    "restart_window_seconds": 60.0,
+    "min_field_coverage": 0.98
+  }
+}

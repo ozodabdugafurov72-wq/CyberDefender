@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberDefender Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="cd-app">
+
+    <aside class="cd-sidebar">
+        <div class="cd-sidebar-brand">
+            <div class="cd-brand-shield">◇</div>
+            <div>
+                <div class="cd-sidebar-brand-title">CyberDefender</div>
+                <div class="cd-sidebar-brand-subtitle">Monitor</div>
+            </div>
+        </div>
+
+        <nav class="cd-nav">
+            <a class="cd-nav-item active" href="/dashboard">
+                <span class="cd-nav-icon">⌂</span><span class="cd-nav-label">Overview</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#incidents">
+                <span class="cd-nav-icon">△</span><span class="cd-nav-label">Incidents</span>
+                <span class="cd-nav-count danger" id="incidentNavCount">0</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#alerts">
+                <span class="cd-nav-icon">!</span><span class="cd-nav-label">Alerts</span>
+                <span class="cd-nav-count warning" id="navAlertCount">0</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#processes">
+                <span class="cd-nav-icon">▣</span><span class="cd-nav-label">Processes</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#network">
+                <span class="cd-nav-icon">⌁</span><span class="cd-nav-label">Network</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#system">
+                <span class="cd-nav-icon">▤</span><span class="cd-nav-label">System</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#endpoints">
+                <span class="cd-nav-icon">□</span><span class="cd-nav-label">Endpoints</span>
+                <span class="cd-nav-count success" id="endpointNavCount">0</span>
+            </a>
+
+            <div class="cd-nav-section">OPERATIONS</div>
+
+            <a class="cd-nav-item" href="/dashboard#logs">
+                <span class="cd-nav-icon">≡</span><span class="cd-nav-label">Logs</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#reports">
+                <span class="cd-nav-icon">▥</span><span class="cd-nav-label">Reports</span>
+            </a>
+            <a class="cd-nav-item" href="/dashboard#settings">
+                <span class="cd-nav-icon">⚙</span><span class="cd-nav-label">Settings</span>
+            </a>
+        </nav>
+
+        <div class="cd-sidebar-bottom">
+            <div class="cd-small-label">AGENT STATUS</div>
+            <div class="cd-agent-status">
+                <span class="cd-live-dot"></span>
+                <span id="agentStatus">ACTIVE</span>
+            </div>
+
+            <div class="cd-small-label version-label">VERSION</div>
+            <div class="cd-version" id="runtimeVersion">v2.3</div>
+
+            <div class="cd-footer">© 2026 CyberDefender</div>
+        </div>
+    </aside>
+
+    <main class="cd-main">
+
+        <header class="cd-header">
+            <div class="cd-header-left">
+                <div class="cd-header-title">CyberDefender <span>Monitor</span></div>
+            </div>
+
+            <div class="cd-system-status">
+                <span class="cd-live-dot"></span>
+                SYSTEM STATUS:
+                <strong id="systemStatus">UNKNOWN</strong>
+            </div>
+
+            <div class="cd-header-right">
+                <div class="cd-clock-block">
+                    <div id="clock" class="cd-clock">--:--:--</div>
+                    <div id="date" class="cd-date">--/--/----</div>
+                </div>
+                <button class="cd-header-btn" type="button" aria-label="Notifications">♧<span class="cd-notification-count" id="notificationCount">0</span></button>
+                <button class="cd-header-btn" type="button" aria-label="Settings">⚙</button>
+                <button class="cd-header-btn" type="button" aria-label="Menu">⋮</button>
+            </div>
+        </header>
+
+        <section class="cd-kpi-grid">
+
+            <article class="cd-kpi-card" data-kpi-target="alerts">
+                <div class="cd-kpi-icon blue">◉</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">TOTAL ALERTS</div>
+                    <div class="cd-kpi-value" id="totalAlerts">0</div>
+                    <div class="cd-kpi-meta">vs last 24h</div>
+                </div>
+            </article>
+
+            <article class="cd-kpi-card" data-kpi-target="alerts">
+                <div class="cd-kpi-icon red">△</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">HIGH RISK</div>
+                    <div class="cd-kpi-value" id="highAlerts">0</div>
+                    <div class="cd-kpi-meta">vs last 24h</div>
+                </div>
+            </article>
+
+            <article class="cd-kpi-card" data-kpi-target="alerts">
+                <div class="cd-kpi-icon amber">△</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">MEDIUM RISK</div>
+                    <div class="cd-kpi-value" id="mediumAlerts">0</div>
+                    <div class="cd-kpi-meta">vs last 24h</div>
+                </div>
+            </article>
+
+            <article class="cd-kpi-card" data-kpi-target="alerts">
+                <div class="cd-kpi-icon green">◇</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">LOW RISK</div>
+                    <div class="cd-kpi-value" id="lowAlerts">0</div>
+                    <div class="cd-kpi-meta">Normal activity</div>
+                </div>
+            </article>
+
+            <article class="cd-kpi-card" data-kpi-target="endpoints">
+                <div class="cd-kpi-icon blue">□</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">ENDPOINTS</div>
+                    <div class="cd-kpi-value" id="endpointCount">0</div>
+                    <div class="cd-kpi-meta green-text" id="endpointMeta">No endpoints</div>
+                </div>
+            </article>
+
+            <article class="cd-kpi-card" data-kpi-target="runtime">
+                <div class="cd-kpi-icon neutral">◷</div>
+                <div class="cd-kpi-content">
+                    <div class="cd-kpi-label">AGENT UPTIME</div>
+                    <div class="cd-kpi-value uptime" id="uptime">00:00:00</div>
+                    <div class="cd-kpi-meta">Since Started</div>
+                </div>
+            </article>
+
+        </section>
+
+        <section class="cd-dashboard-grid">
+
+            <article class="cd-panel cd-resources" id="system">
+                <div class="cd-panel-header">
+                    <div>
+                        <div class="cd-panel-title">SYSTEM RESOURCES</div>
+                        <div class="cd-panel-subtitle">Real-time host telemetry</div>
+                    </div>
+                    <span class="cd-panel-menu">⌄</span>
+                </div>
+
+                <div class="cd-resource-list">
+
+                    <div class="cd-resource-row">
+                        <div class="cd-resource-info">
+                            <span class="cd-small-label">CPU USAGE</span>
+                            <strong id="cpu">--</strong>
+                        </div>
+                        <div class="cd-mini-chart">
+                            <span>100%</span>
+                            <canvas id="cpuChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="cd-resource-row">
+                        <div class="cd-resource-info">
+                            <span class="cd-small-label">MEMORY USAGE</span>
+                            <strong id="memory">--</strong>
+                        </div>
+                        <div class="cd-mini-chart">
+                            <span>100%</span>
+                            <canvas id="memoryChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="cd-resource-row">
+                        <div class="cd-resource-info">
+                            <span class="cd-small-label">DISK USAGE</span>
+                            <strong id="disk">--</strong>
+                        </div>
+                        <div class="cd-mini-chart">
+                            <span>100%</span>
+                            <canvas id="diskChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="cd-resource-row network-row" id="network">
+                        <div class="cd-resource-info network-values">
+                            <span class="cd-small-label">NETWORK I/O</span>
+                            <strong id="networkOut" class="network-up">↑ -- Mbps</strong>
+                            <strong id="networkIn" class="network-down">↓ -- Mbps</strong>
+                        </div>
+                        <div class="cd-mini-chart network-chart">
+                            <span>Mbps</span>
+                            <canvas id="networkChart"></canvas>
+                        </div>
+                    </div>
+
+                </div>
+            </article>
+
+            <article class="cd-panel cd-alert-chart" id="alerts">
+                <div class="cd-panel-header">
+                    <div class="cd-panel-title">ALERTS OVER TIME <span>(24H)</span></div>
+                    <div class="cd-chart-legend">
+                        <span class="legend-high">High</span>
+                        <span class="legend-medium">Medium</span>
+                        <span class="legend-low">Low</span>
+                    </div>
+                </div>
+                <div class="cd-large-chart">
+                    <div class="cd-y-axis"><span>60</span><span>40</span><span>20</span><span>0</span></div>
+                    <canvas id="alertsChart"></canvas>
+                    <div class="cd-x-axis" id="alertXAxis"><span>--:--</span><span>--:--</span><span>--:--</span><span>--:--</span><span>--:--</span><span>--:--</span><span>--:--</span></div>
+                </div>
+            </article>
+
+            <article class="cd-panel cd-latest-alerts" id="latest">
+                <div class="cd-panel-header">
+                    <div class="cd-panel-title">LATEST ALERTS</div>
+                    <span class="cd-see-all">See all</span>
+                </div>
+                <div class="cd-alert-list" id="latestAlerts"></div>
+            </article>
+
+            <article class="cd-panel cd-processes" id="processes">
+                <div class="cd-panel-header">
+                    <div class="cd-panel-title">TOP PROCESSES <span>(CPU)</span></div>
+                    <span class="cd-see-all">See all</span>
+                </div>
+                <div class="cd-process-list" id="processList"></div>
+            </article>
+
+            <article class="cd-panel cd-endpoint-health" id="endpoints">
+                <div class="cd-panel-header">
+                    <div class="cd-panel-title">ENDPOINT HEALTH</div>
+                </div>
+                <div class="cd-health-ring-wrap">
+                    <div class="cd-health-ring">
+                        <div class="cd-health-ring-inner">
+                            <strong id="healthPercent">100%</strong>
+                            <span id="healthLabel">HEALTHY</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="cd-health-checks">
+                    <div><span>Agent</span><b>✓</b></div>
+                    <div><span>Protection</span><b>✓</b></div>
+                    <div><span>Updates</span><b>✓</b></div>
+                    <div><span>Network</span><b>✓</b></div>
+                </div>
+                <div class="cd-last-check">Last check: <span id="lastCheck">--:--:--</span></div>
+            </article>
+
+            <article class="cd-panel cd-events" id="logs">
+                <div class="cd-panel-header">
+                    <div>
+                        <div class="cd-panel-title">EVENT LOG</div>
+                        <div class="cd-panel-subtitle">Trusted security telemetry</div>
+                    </div>
+                    <span class="cd-see-all">See all</span>
+                </div>
+
+                <div class="cd-table-wrapper">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>TIME</th>
+                            <th>EVENT</th>
+                            <th>DETAILS</th>
+                            <th>LEVEL</th>
+                            <th>SOURCE</th>
+                        </tr>
+                        </thead>
+                        <tbody id="events"></tbody>
+                    </table>
+                </div>
+                <div class="cd-event-footer" id="eventCount">0 events</div>
+            </article>
+
+        </section>
+
+        <footer class="cd-footer-main">
+            <span>CyberDefender Security-First Autonomous XDR Platform</span>
+            <span>Runtime v2.1 • <span id="footerStatus">READ-ONLY MONITOR</span></span>
+        </footer>
+
+    </main>
+</div>
+
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+{
+  "schema": "cyberdefender.polyglot-ownership.v1",
+  "principle": "best language per security component; no language-count theater",
+  "current_state": {
+    "python_control_plane": "PROTOTYPE_AND_CONTRACT_TESTED",
+    "rust_process_sensor": "IMPLEMENTED_AND_TESTED",
+    "go_new_foundation": "CONTRACT_ONLY"
+  },
+  "languages": [
+    {
+      "language": "Rust",
+      "priority": "P0",
+      "roles": [
+        "endpoint sensors",
+        "local deterministic security kernel",
+        "crypto/replay admission",
+        "probability fusion",
+        "self-protection-sensitive code"
+      ],
+      "authority_policy": "eligible only behind Policy/Safety/Verification contracts"
+    },
+    {
+      "language": "Go",
+      "priority": "P0",
+      "roles": [
+        "NDR edge collection",
+        "bounded concurrent flow aggregation",
+        "fleet/control-plane services",
+        "distributed ingestion"
+      ],
+      "authority_policy": "telemetry and orchestration do not grant authorization"
+    },
+    {
+      "language": "C#",
+      "priority": "P1",
+      "roles": [
+        "Windows ETW/EventLog/WMI/SCM integration",
+        "Windows enterprise adapters"
+      ],
+      "authority_policy": "adapter only; no AI or telemetry signal grants authority"
+    },
+    {
+      "language": "C++",
+      "priority": "P1",
+      "roles": [
+        "isolated high-performance native integration",
+        "vendor SDK/ML inference bridge"
+      ],
+      "authority_policy": "narrow ABI and memory-safety containment required"
+    },
+    {
+      "language": "C",
+      "priority": "P2_EXCEPTIONAL",
+      "roles": [
+        "kernel/firmware/eBPF/vendor ABI only when unavoidable"
+      ],
+      "authority_policy": "minimal audited surface; never broad control logic"
+    },
+    {
+      "language": "Python",
+      "priority": "P0_SUPPORTING",
+      "roles": [
+        "AI/ML",
+        "calibration",
+        "offline analytics",
+        "research",
+        "tests/orchestration"
+      ],
+      "authority_policy": "must not be sole privileged enforcement dependency"
+    },
+    {
+      "language": "TypeScript",
+      "priority": "P1_UI",
+      "roles": [
+        "dashboard",
+        "visualization",
+        "operator workflow"
+      ],
+      "authority_policy": "presentation only"
+    },
+    {
+      "language": "PowerShell",
+      "priority": "P1_OPERATIONS",
+      "roles": [
+        "Windows deployment",
+        "diagnostics",
+        "lab orchestration"
+      ],
+      "authority_policy": "no long-lived privileged decision engine"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+CyberDefender P0.8.5.2 Managed Runtime Service Hotfix — Verification
+Date: 2026-09-07
+
+Validated in build environment
+- Current tests/: 43 / 43 PASS
+- Major runtime/security regression: 16 / 16 PASS
+- Windows verify.ps1 equivalent: 34 / 34 PASS
+- Python compileall: PASS
+- Canonical managed runtime factory: PASS
+- Managed ServiceRunner one-cycle integration: PASS
+- Non-authoritative fleet telemetry failure isolation: PASS
+- Machine installer fail-closed runtime-state contract: PASS
+
+Windows validation evidence incorporated
+- P0.8.5.1 ControlPlane service reached RUNNING.
+- P0.8.5.1 OwnerUI service reached RUNNING.
+- P0.8.5.1 Agent failed because CyberDefenderRuntime was incorrectly used as a zero-argument factory.
+- Installer detected the failure, emitted deterministic diagnostics, and rolled back service registrations.
+
+Remaining validation boundary
+The build environment cannot execute Windows SCM. P0.8.5.2 is only CLOSED after the user's Windows machine reports all three services RUNNING, the Agent publishes fresh runtime state with runtime.running=true/status=HEALTHY/component_failures=0, and services survive a reboot.
+
+SCM Event 7039 note
+The Python venv launcher can cause SCM to report that a different interpreter process connected than the launcher PID. In P0.8.5.1 this warning was non-fatal for ControlPlane and OwnerUI. It remains observable and is not treated as proof of failure; a future native service wrapper will remove this Python-host artifact.

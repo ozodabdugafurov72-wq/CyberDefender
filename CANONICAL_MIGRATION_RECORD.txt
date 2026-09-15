@@ -1,0 +1,16 @@
+CYBERDEFENDER CANONICAL WORKING COPY
+
+Created: 09/11/2026 12:15:05
+
+Canonical source:
+C:\CD\MAIN\CyberDefender_Migration_20260911_105848\01_CURRENT_PROJECT\CyberDefender
+
+Working repository:
+C:\Users\HP\Desktop\CyberDefender
+
+Verification:
+Critical hashes = PASS
+Tests files = 62
+Native files = 2
+
+Recovery archive remains read-only historical backup.

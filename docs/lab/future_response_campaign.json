@@ -1,0 +1,562 @@
+[
+  {
+    "case_id": "FUTURE-H1D9-RECOVERY",
+    "objective": "H1D9 recovery and reboot",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "existing H1D9 admitted phase",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 4,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-RESPONSE-ADMISSION",
+    "objective": "Response admission denial and acceptance",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only prepare",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-TICKET-REPLAY",
+    "objective": "Copied/renamed/consumed ticket replay",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only simulate",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-PROCESS-QUARANTINE",
+    "objective": "Future process quarantine",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "NOT_IMPLEMENTED",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-FILE-QUARANTINE",
+    "objective": "Future file quarantine",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "NOT_IMPLEMENTED",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-NETWORK-LIMITED",
+    "objective": "Future limited network containment",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "NOT_IMPLEMENTED",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-ENDPOINT-ISOLATION",
+    "objective": "Future endpoint isolation",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "NOT_IMPLEMENTED",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-PROTECTED-DENY",
+    "objective": "Protected target denial",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only prepare",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-POLICY-DENY",
+    "objective": "Policy denial",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only prepare",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-SAFETY-DENY",
+    "objective": "Safety denial",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only prepare",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-INDEPENDENT-VERIFY",
+    "objective": "Independent observation disagreement",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "fixture-only simulate",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-ROLLBACK",
+    "objective": "Future actual response rollback",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "NOT_IMPLEMENTED",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 0,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-REBOOT-RECOVERY",
+    "objective": "Bounded state across guest reboot",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "existing H1D9 admitted phase",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 4,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  },
+  {
+    "case_id": "FUTURE-STATE-RESTORE",
+    "objective": "Checkpoint restoration with current evidence",
+    "status": "DEFINED",
+    "execution": "DESIGN_ONLY",
+    "implementation": "existing H1D9 admitted phase",
+    "preconditions": [
+      "Named staff approval for exact case, target and time window",
+      "Verified package and external evidence custody",
+      "Proven C0/C2 recovery and isolated disposable target",
+      "All required software gates passed",
+      "Real-action cases require a separately implemented and reviewed executor"
+    ],
+    "authorized_target": "UNASSIGNED_DISPOSABLE_TARGET_UUID_REQUIRED",
+    "authorized_action": "NONE_UNTIL_EXPLICIT_CASE_APPROVAL",
+    "expected_telemetry": [
+      "Sanitized admission and state transitions",
+      "Independent target observations",
+      "Resource bounds and scoped action identity"
+    ],
+    "expected_state_transitions": "Use frozen H1D9 phase machine for H1D9; response simulations use PROPOSED through VERIFIED only after independent checks; ambiguity REVIEW_REQUIRED/DEGRADED_SAFE",
+    "expected_evidence": [
+      "Bound staff authorization",
+      "Complete evidence and report SHA verification",
+      "All variants and absent failure conditions",
+      "Recovery verification"
+    ],
+    "expected_recovery": "Fixture: unchanged target, no rollback actuator. Guest: staff restores exact approved checkpoint with latest evidence and verifies independently.",
+    "abort_conditions": [
+      "Identity or isolation mismatch",
+      "Missing/corrupt/stale evidence",
+      "Unexpected effect",
+      "Resource tripwire",
+      "Budget exhausted",
+      "Verification or recovery uncertainty"
+    ],
+    "maximum_duration_seconds": 1800,
+    "maximum_fault_count": 4,
+    "verification_method": "Independent observations plus full case checklist; executor receipts alone insufficient"
+  }
+]

@@ -1,0 +1,637 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>CyberDefender | Secure Administration</title>
+
+    <style>
+        :root {
+            --bg: #050a10;
+            --bg-soft: #08111a;
+            --panel: #0b1621;
+            --panel-2: #0e1c28;
+
+            --border: rgba(110, 180, 220, 0.14);
+            --border-strong: rgba(110, 180, 220, 0.24);
+
+            --text: #edf6ff;
+            --muted: #8496a8;
+            --muted-2: #617384;
+
+            --cyan: #22d3ee;
+            --cyan-soft: rgba(34, 211, 238, 0.12);
+
+            --green: #28d17c;
+            --red: #ff5c72;
+
+            --shadow:
+                0 30px 80px rgba(0, 0, 0, 0.48);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            min-height: 100%;
+        }
+
+        body {
+            min-height: 100vh;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            padding: 32px;
+
+            color: var(--text);
+
+            font-family:
+                Inter,
+                ui-sans-serif,
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+
+            background:
+                radial-gradient(
+                    circle at 50% 0%,
+                    rgba(34, 211, 238, 0.08),
+                    transparent 34%
+                ),
+                radial-gradient(
+                    circle at 100% 100%,
+                    rgba(30, 100, 160, 0.08),
+                    transparent 35%
+                ),
+                var(--bg);
+
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: "";
+
+            position: fixed;
+            inset: 0;
+
+            pointer-events: none;
+
+            background-image:
+                linear-gradient(
+                    rgba(255,255,255,0.018) 1px,
+                    transparent 1px
+                ),
+                linear-gradient(
+                    90deg,
+                    rgba(255,255,255,0.018) 1px,
+                    transparent 1px
+                );
+
+            background-size: 42px 42px;
+
+            mask-image:
+                linear-gradient(
+                    to bottom,
+                    black,
+                    transparent 85%
+                );
+        }
+
+        .login-shell {
+            width: min(100%, 460px);
+
+            position: relative;
+
+            z-index: 1;
+        }
+
+        .brand {
+            text-align: center;
+
+            margin-bottom: 28px;
+        }
+
+        .brand-mark {
+            width: 66px;
+            height: 66px;
+
+            margin: 0 auto 18px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            border: 1px solid var(--border-strong);
+
+            border-radius: 18px;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(34, 211, 238, 0.10),
+                    rgba(255,255,255,0.025)
+                );
+
+            box-shadow:
+                0 0 0 6px rgba(34, 211, 238, 0.025),
+                0 15px 40px rgba(0,0,0,0.30);
+
+            color: var(--cyan);
+
+            font-size: 30px;
+        }
+
+        .brand-mark::before {
+            content: "◇";
+
+            font-size: 35px;
+            line-height: 1;
+        }
+
+        .brand-name {
+            font-size: 27px;
+            font-weight: 700;
+
+            letter-spacing: -0.6px;
+        }
+
+        .brand-subtitle {
+            margin-top: 7px;
+
+            color: var(--muted);
+
+            font-size: 13px;
+
+            letter-spacing: 0.5px;
+        }
+
+        .login-card {
+            position: relative;
+
+            padding: 34px;
+
+            border: 1px solid var(--border);
+
+            border-radius: 20px;
+
+            background:
+                linear-gradient(
+                    145deg,
+                    rgba(14, 28, 40, 0.96),
+                    rgba(7, 16, 25, 0.98)
+                );
+
+            box-shadow: var(--shadow);
+
+            backdrop-filter: blur(18px);
+        }
+
+        .login-card::before {
+            content: "";
+
+            position: absolute;
+
+            top: 0;
+            left: 32px;
+            right: 32px;
+
+            height: 1px;
+
+            background:
+                linear-gradient(
+                    90deg,
+                    transparent,
+                    rgba(34, 211, 238, 0.55),
+                    transparent
+                );
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+
+            margin-bottom: 13px;
+
+            color: var(--cyan);
+
+            font-size: 11px;
+            font-weight: 700;
+
+            letter-spacing: 1.7px;
+            text-transform: uppercase;
+        }
+
+        .eyebrow::before {
+            content: "";
+
+            width: 6px;
+            height: 6px;
+
+            border-radius: 50%;
+
+            background: var(--cyan);
+
+            box-shadow:
+                0 0 12px rgba(34, 211, 238, 0.8);
+        }
+
+        .title {
+            font-size: 26px;
+            font-weight: 700;
+
+            letter-spacing: -0.5px;
+        }
+
+        .description {
+            margin-top: 10px;
+
+            color: var(--muted);
+
+            font-size: 13px;
+            line-height: 1.65;
+        }
+
+        .error {
+            display: none;
+
+            margin-top: 22px;
+            padding: 12px 14px;
+
+            border: 1px solid rgba(255, 92, 114, 0.22);
+
+            border-radius: 10px;
+
+            background: rgba(255, 92, 114, 0.07);
+
+            color: #ff9aaa;
+
+            font-size: 12px;
+        }
+
+        .error.visible {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+
+        .error-icon {
+            font-size: 14px;
+        }
+
+        .form {
+            margin-top: 28px;
+        }
+
+        .field {
+            margin-bottom: 18px;
+        }
+
+        .field-label {
+            display: block;
+
+            margin-bottom: 8px;
+
+            color: #c7d5e2;
+
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input {
+            width: 100%;
+
+            height: 48px;
+
+            padding: 0 14px;
+
+            border: 1px solid var(--border);
+
+            border-radius: 10px;
+
+            outline: none;
+
+            color: var(--text);
+
+            background: rgba(4, 11, 18, 0.72);
+
+            font-size: 14px;
+
+            transition:
+                border-color 160ms ease,
+                box-shadow 160ms ease,
+                background 160ms ease;
+        }
+
+        .input::placeholder {
+            color: var(--muted-2);
+        }
+
+        .input:hover {
+            border-color: var(--border-strong);
+        }
+
+        .input:focus {
+            border-color: rgba(34, 211, 238, 0.55);
+
+            background: rgba(4, 14, 22, 0.92);
+
+            box-shadow:
+                0 0 0 3px rgba(34, 211, 238, 0.08);
+        }
+
+        .submit {
+            width: 100%;
+            height: 48px;
+
+            margin-top: 8px;
+
+            border: 1px solid rgba(34, 211, 238, 0.38);
+
+            border-radius: 10px;
+
+            color: #021015;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #45e2f5,
+                    #1bbdd7
+                );
+
+            font-size: 13px;
+            font-weight: 800;
+
+            letter-spacing: 0.4px;
+
+            cursor: pointer;
+
+            transition:
+                transform 160ms ease,
+                box-shadow 160ms ease,
+                filter 160ms ease;
+        }
+
+        .submit:hover {
+            transform: translateY(-1px);
+
+            filter: brightness(1.06);
+
+            box-shadow:
+                0 12px 30px rgba(34, 211, 238, 0.16);
+        }
+
+        .submit:active {
+            transform: translateY(0);
+        }
+
+        .security-strip {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+
+            margin-top: 22px;
+
+            color: var(--muted-2);
+
+            font-size: 11px;
+        }
+
+        .security-dot {
+            width: 6px;
+            height: 6px;
+
+            border-radius: 50%;
+
+            background: var(--green);
+
+            box-shadow:
+                0 0 9px rgba(40, 209, 124, 0.55);
+        }
+
+        .footer {
+            margin-top: 22px;
+
+            text-align: center;
+
+            color: var(--muted-2);
+
+            font-size: 10px;
+
+            letter-spacing: 0.5px;
+        }
+
+        .footer strong {
+            color: #8da2b4;
+        }
+
+        @media (max-width: 560px) {
+            body {
+                padding: 20px;
+            }
+
+            .login-card {
+                padding: 26px 22px;
+            }
+
+            .brand-name {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <main class="login-shell">
+
+        <section class="brand">
+
+            <div class="brand-mark"></div>
+
+            <div class="brand-name">
+                CyberDefender
+            </div>
+
+            <div class="brand-subtitle">
+                Security Operations Platform
+            </div>
+
+        </section>
+
+
+        <section class="login-card">
+
+            <div class="eyebrow">
+                Secure Administration
+            </div>
+
+            <h1 class="title">
+                Admin Control Console
+            </h1>
+
+            <p class="description">
+                Authenticate to access the CyberDefender
+                security operations dashboard.
+            </p>
+
+
+            <div
+                id="loginError"
+                class="error"
+                role="alert"
+            >
+                <span class="error-icon">⚠</span>
+
+                <span>
+                    Authentication failed.
+                    Please verify your credentials.
+                </span>
+            </div>
+
+
+            <form
+                class="form"
+                method="POST"
+                action="/login"
+                autocomplete="on"
+            >
+
+                <div class="field">
+
+                    <label
+                        class="field-label"
+                        for="username"
+                    >
+                        Username
+                    </label>
+
+                    <div class="input-wrap">
+
+                        <input
+                            id="username"
+                            class="input"
+                            type="text"
+                            name="username"
+                            placeholder="Enter administrator username"
+                            autocomplete="username"
+                            required
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <div class="field">
+
+                    <label
+                        class="field-label"
+                        for="password"
+                    >
+                        Password
+                    </label>
+
+                    <div class="input-wrap">
+
+                        <input
+                            id="password"
+                            class="input"
+                            type="password"
+                            name="password"
+                            placeholder="Enter secure password"
+                            autocomplete="current-password"
+                            required
+                        >
+
+                    </div>
+
+                </div>
+
+
+                <button
+                    class="submit"
+                    type="submit"
+                >
+                    SIGN IN TO CONSOLE
+                </button>
+
+            </form>
+
+
+            <div class="security-strip">
+
+                <span class="security-dot"></span>
+
+                <span>
+                    Protected by
+                    <strong>CyberDefender Security Core</strong>
+                </span>
+
+            </div>
+
+        </section>
+
+
+        <footer class="footer">
+
+            <strong>CYBERDEFENDER</strong>
+            &nbsp;•&nbsp;
+            SECURITY-FIRST ARCHITECTURE
+            &nbsp;•&nbsp;
+            ADMIN ACCESS
+
+        </footer>
+
+    </main>
+
+
+    <script>
+        (function () {
+
+            const params =
+                new URLSearchParams(
+                    window.location.search
+                );
+
+            const error =
+                params.get("error");
+
+            if (error === "1") {
+
+                const element =
+                    document.getElementById(
+                        "loginError"
+                    );
+
+                if (element) {
+                    element.classList.add(
+                        "visible"
+                    );
+                }
+
+            }
+
+        })();
+    </script>
+
+</body>
+</html>

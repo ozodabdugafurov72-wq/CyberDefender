@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CyberDefender — Admin Operations</title>
+<link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+<div class="shell">
+<header class="top">
+  <div class="brand"><img class="brand-logo" src="/owner/static/assets/cyberdefender-shield-c.png" alt="CyberDefender shield C logo"><div><b>CYBERDEFENDER</b><small>ADMIN OPERATIONS · READ ONLY</small></div></div>
+  <div class="top-actions"><a href="/owner">OWNER CONTROL</a><span class="live"><i></i><b id="connection">CONNECTING</b><small id="freshness">waiting for runtime</small></span></div>
+</header>
+<main>
+<section class="hero">
+ <div><span class="eyebrow">24/7 ENDPOINT OPERATIONS</span><h1>Technical Operations Console</h1><p>Runtime, sensor authority, persistent native IPC, enrichment parity and security-pipeline health. This surface is observational only and has no operating-system action path.</p></div>
+ <div class="hero-state"><span>RUNTIME</span><b id="overall">UNKNOWN</b><small id="runtimeMeta">—</small></div>
+</section>
+<section class="kpis">
+ <article><span>AUTHORITY MODE</span><b id="authorityMode">—</b><small id="authoritySensor">—</small></article>
+ <article><span>RUST CANARY</span><b id="canaryStatus">—</b><small id="canaryReady">—</small></article>
+ <article><span>IPC SUPERVISOR</span><b id="ipcStatus">—</b><small id="ipcMeta">—</small></article>
+ <article><span>PARITY</span><b id="parityVerdict">—</b><small id="parityMeta">—</small></article>
+ <article><span>RESOURCE</span><b id="resourceStatus">—</b><small id="resourceMeta">—</small></article>
+ <article><span>INCIDENTS</span><b id="incidentCount">0</b><small id="incidentMeta">—</small></article>
+</section>
+<section class="grid two">
+ <article class="panel">
+  <div class="head"><div><span class="eyebrow">PROCESS SENSOR AUTHORITY</span><h2>Single-Authority Plane</h2></div><span class="badge safe" id="primaryLock">LOCK CLOSED</span></div>
+  <div class="authority-flow">
+   <div class="node primary"><span>AUTHORITATIVE</span><b>Python ProcessSensor</b><small id="pythonStatus">UNKNOWN</small></div>
+   <div class="arrow">→</div>
+   <div class="node"><span>LIFECYCLE</span><b>ProcessGraph 1.6</b><small id="graphStatus">UNKNOWN</small></div>
+  </div>
+  <div class="separator"></div>
+  <div class="authority-flow">
+   <div class="node canary"><span>NON-AUTHORITATIVE</span><b>Rust ProcessSensor v0.5.1</b><small id="canaryDetail">waiting</small></div>
+   <div class="blocked">╳</div>
+   <div class="node muted"><span>BLOCKED PATH</span><b>Graph / EventBus / Actions</b><small>no authority edge</small></div>
+  </div>
+  <div class="guard">RUST CANARY CANNOT GRANT AUTHORIZATION · PYTHON REMAINS SOURCE OF TRUTH</div>
+ </article>
+ <article class="panel">
+  <div class="head"><div><span class="eyebrow">NATIVE SENSOR SUPERVISOR</span><h2>Persistent IPC</h2></div><span class="badge" id="ipcBadge">UNKNOWN</span></div>
+  <div class="detail-grid">
+   <div><span>SENSOR PID</span><b id="sensorPid">—</b></div><div><span>GENERATION</span><b id="generation">—</b></div>
+   <div><span>SEQUENCE</span><b id="sequence">—</b></div><div><span>RESTARTS</span><b id="restarts">—</b></div>
+   <div><span>LAUNCH BINDING</span><b id="launchBinding">—</b></div><div><span>DIRECT PID</span><b id="directPid">—</b></div>
+   <div><span>SAMPLE LATENCY</span><b id="latency">—</b></div><div><span>SAMPLE AGE</span><b id="sampleAge">—</b></div>
+  </div>
+  <div class="epoch"><span>SENSOR EPOCH</span><code id="epoch">—</code></div>
+ </article>
+</section>
+<section class="grid two">
+ <article class="panel">
+  <div class="head"><div><span class="eyebrow">ENRICHMENT PARITY</span><h2>Python ↔ Rust</h2></div><span class="badge" id="parityBadge">NO SAMPLE</span></div>
+  <div class="parity-table">
+   <div class="th"><span>FIELD</span><span>MATCH</span><span>MISMATCH</span><span>COVERAGE</span></div>
+   <div><b>Executable</b><span id="exeMatch">—</span><span id="exeMismatch">—</span><span id="exeCoverage">—</span></div>
+   <div><b>Username</b><span id="userMatch">—</span><span id="userMismatch">—</span><span id="userCoverage">—</span></div>
+   <div><b>Command line</b><span id="cmdMatch">—</span><span id="cmdMismatch">—</span><span id="cmdCoverage">—</span></div>
+  </div>
+  <div class="triplet"><div><span>IDENTITY Δ</span><b id="identityDiff">—</b></div><div><span>PARENT Δ</span><b id="parentDiff">—</b></div><div><span>NAME CONFLICT</span><b id="nameDiff">—</b></div></div>
+ </article>
+ <article class="panel">
+  <div class="head"><div><span class="eyebrow">NATIVE-ONLY CONTEXT</span><h2>Windows Security Enrichment</h2></div><span class="badge safe">OBSERVE</span></div>
+  <div class="coverage-list">
+   <div><span>SID</span><b id="sidCoverage">—</b><i><em id="sidBar"></em></i></div>
+   <div><span>Session ID</span><b id="sessionCoverage">—</b><i><em id="sessionBar"></em></i></div>
+   <div><span>Integrity Level</span><b id="integrityCoverage">—</b><i><em id="integrityBar"></em></i></div>
+  </div>
+  <div class="note">Signer/hash enrichment remains a bounded Tier-2 future worker; it is intentionally not placed on the synchronous process snapshot hot path.</div>
+ </article>
+</section>
+<section class="grid two">
+ <article class="panel"><div class="head"><div><span class="eyebrow">SECURITY PIPELINE</span><h2>Component Health</h2></div><span class="badge safe">NO BYPASS</span></div><div class="pipeline" id="pipeline"></div></article>
+ <article class="panel"><div class="head"><div><span class="eyebrow">RUNTIME EVIDENCE</span><h2>Recent Event Groups</h2></div><span class="badge">READ ONLY</span></div><div class="events" id="events"></div></article>
+</section>
+<section class="panel applications-panel">
+ <div class="head"><div><span class="eyebrow">AUTHORITATIVE PROCESS VIEW</span><h2>Active Applications</h2></div><span class="badge safe">HUMAN-FRIENDLY</span></div>
+ <div class="applications-note">Display names are presentation labels only. Raw process names and sample PIDs remain visible and never alter ProcessGraph identity.</div>
+ <div class="app-head"><span>APPLICATION</span><span>PROCESSES</span><span>MEMORY</span><span>CPU</span><span>USER</span></div>
+ <div class="applications" id="applications"><div class="app-row"><div><b>Waiting for authoritative process inventory</b><small>Python ProcessSensor</small></div><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
+</section>
+<footer>CYBERDEFENDER · ADMIN OPERATIONS v1.1 · PRESENTATION READINESS · LOOPBACK ONLY · NO DIRECT OS ACTION · <span id="updated">—</span></footer>
+</main>
+</div>
+<script src="/admin/static/admin.js" defer></script>
+</body>
+</html>

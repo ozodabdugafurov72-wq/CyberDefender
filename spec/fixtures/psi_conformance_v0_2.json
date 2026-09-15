@@ -1,0 +1,776 @@
+{
+  "schema": "cd.psi.v0.2.conformance",
+  "authorization": "NOT_GRANTED",
+  "calibration": "UNVERIFIED",
+  "windows": [
+    5,
+    30,
+    300,
+    3600,
+    21600,
+    86400
+  ],
+  "cases": [
+    {
+      "case": "independent_short",
+      "prior": 0.1,
+      "data_quality": 1.0,
+      "epistemic_uncertainty": 0.0,
+      "trusted_sources": [
+        {
+          "source_id": "s1",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s2",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "a",
+          "dependency_group": "net",
+          "source_id": "s1",
+          "signed_log_lr": 2,
+          "claimed_reliability": 0.9,
+          "independence_weight": 1,
+          "sensor_integrity": 0.9,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "b",
+          "dependency_group": "endpoint",
+          "source_id": "s2",
+          "signed_log_lr": 1.4,
+          "claimed_reliability": 0.8,
+          "independence_weight": 1,
+          "sensor_integrity": 0.9,
+          "telemetry_quality": 0.9,
+          "observed_age_seconds": 2
+        }
+      ],
+      "expected_windows": {
+        "5": {
+          "posterior_probability": 0.45035794005496954,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "30": {
+          "posterior_probability": 0.5550305077666905,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "300": {
+          "posterior_probability": 0.5789794685187978,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "3600": {
+          "posterior_probability": 0.5815213533812073,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "21600": {
+          "posterior_probability": 0.5817147117149181,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "86400": {
+          "posterior_probability": 0.5817437250987826,
+          "model_confidence": 0.6354132513569417,
+          "effective_data_quality": 0.95,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        }
+      }
+    },
+    {
+      "case": "low_and_slow",
+      "prior": 0.1,
+      "data_quality": 1.0,
+      "epistemic_uncertainty": 0.0,
+      "trusted_sources": [
+        {
+          "source_id": "s1",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s2",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s3",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "a",
+          "dependency_group": "net",
+          "source_id": "s1",
+          "signed_log_lr": 3,
+          "claimed_reliability": 0.95,
+          "independence_weight": 1,
+          "sensor_integrity": 0.95,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 900
+        },
+        {
+          "evidence_id": "b",
+          "dependency_group": "endpoint",
+          "source_id": "s2",
+          "signed_log_lr": 3,
+          "claimed_reliability": 0.95,
+          "independence_weight": 1,
+          "sensor_integrity": 0.95,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1800
+        },
+        {
+          "evidence_id": "c",
+          "dependency_group": "identity",
+          "source_id": "s3",
+          "signed_log_lr": 3,
+          "claimed_reliability": 0.95,
+          "independence_weight": 1,
+          "sensor_integrity": 0.95,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 2400
+        }
+      ],
+      "expected_windows": {
+        "5": {
+          "posterior_probability": 0.1,
+          "model_confidence": 0.0,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.25,
+          "evidence_count": 0,
+          "unique_source_count": 0,
+          "dependency_group_count": 0,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.0,
+          "dependency_concentration": 0.0,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "30": {
+          "posterior_probability": 0.1,
+          "model_confidence": 0.0,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.25,
+          "evidence_count": 0,
+          "unique_source_count": 0,
+          "dependency_group_count": 0,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.0,
+          "dependency_concentration": 0.0,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "300": {
+          "posterior_probability": 0.1,
+          "model_confidence": 0.0,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.25,
+          "evidence_count": 0,
+          "unique_source_count": 0,
+          "dependency_group_count": 0,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.0,
+          "dependency_concentration": 0.0,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": []
+        },
+        "3600": {
+          "posterior_probability": 0.9676505945092478,
+          "model_confidence": 0.8215838362577492,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.09999999999999999,
+          "evidence_count": 3,
+          "unique_source_count": 3,
+          "dependency_group_count": 3,
+          "supporting_evidence_count": 3,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.3333333333333333,
+          "dependency_concentration": 0.3333333333333333,
+          "disposition": "SUPPORT",
+          "poisoning_signals": []
+        },
+        "21600": {
+          "posterior_probability": 0.9952173015574639,
+          "model_confidence": 0.8215838362577492,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.09999999999999999,
+          "evidence_count": 3,
+          "unique_source_count": 3,
+          "dependency_group_count": 3,
+          "supporting_evidence_count": 3,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.3333333333333333,
+          "dependency_concentration": 0.3333333333333333,
+          "disposition": "SUPPORT",
+          "poisoning_signals": []
+        },
+        "86400": {
+          "posterior_probability": 0.9968866329865292,
+          "model_confidence": 0.8215838362577492,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.09999999999999999,
+          "evidence_count": 3,
+          "unique_source_count": 3,
+          "dependency_group_count": 3,
+          "supporting_evidence_count": 3,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.3333333333333333,
+          "dependency_concentration": 0.3333333333333333,
+          "disposition": "SUPPORT",
+          "poisoning_signals": []
+        }
+      }
+    },
+    {
+      "case": "dependency_poisoning",
+      "prior": 0.1,
+      "data_quality": 1.0,
+      "epistemic_uncertainty": 0.0,
+      "trusted_sources": [
+        {
+          "source_id": "s1",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s2",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s3",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s4",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "a",
+          "dependency_group": "same",
+          "source_id": "s1",
+          "signed_log_lr": 4,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "b",
+          "dependency_group": "same",
+          "source_id": "s2",
+          "signed_log_lr": 4,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "c",
+          "dependency_group": "same",
+          "source_id": "s3",
+          "signed_log_lr": 4,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "d",
+          "dependency_group": "same",
+          "source_id": "s4",
+          "signed_log_lr": 4,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        }
+      ],
+      "expected_windows": {
+        "5": {
+          "posterior_probability": 0.9261644049739575,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        },
+        "30": {
+          "posterior_probability": 0.9641374095033868,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        },
+        "300": {
+          "posterior_probability": 0.9693993374355312,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        },
+        "3600": {
+          "posterior_probability": 0.9699074455609645,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        },
+        "21600": {
+          "posterior_probability": 0.9699457290949488,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        },
+        "86400": {
+          "posterior_probability": 0.9699514690804353,
+          "model_confidence": 0.9013878188659973,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.1875,
+          "evidence_count": 4,
+          "unique_source_count": 4,
+          "dependency_group_count": 1,
+          "supporting_evidence_count": 4,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 0,
+          "source_concentration": 0.25,
+          "dependency_concentration": 1.0,
+          "disposition": "SUPPORT",
+          "poisoning_signals": [
+            "DEPENDENCY_CONCENTRATION"
+          ]
+        }
+      }
+    },
+    {
+      "case": "unknown_source_discount",
+      "prior": 0.1,
+      "data_quality": 1.0,
+      "epistemic_uncertainty": 0.0,
+      "trusted_sources": [],
+      "evidence": [
+        {
+          "evidence_id": "a",
+          "dependency_group": "g1",
+          "source_id": "unknown1",
+          "signed_log_lr": 6,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "b",
+          "dependency_group": "g2",
+          "source_id": "unknown2",
+          "signed_log_lr": 6,
+          "claimed_reliability": 1,
+          "independence_weight": 1,
+          "sensor_integrity": 1,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        }
+      ],
+      "expected_windows": {
+        "5": {
+          "posterior_probability": 0.3900208499252912,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        },
+        "30": {
+          "posterior_probability": 0.45885164693323444,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        },
+        "300": {
+          "posterior_probability": 0.4739732150779373,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        },
+        "3600": {
+          "posterior_probability": 0.4755675371950099,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        },
+        "21600": {
+          "posterior_probability": 0.4756887369489082,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        },
+        "86400": {
+          "posterior_probability": 0.4757069219989329,
+          "model_confidence": 0.4937104414532875,
+          "effective_data_quality": 0.75,
+          "epistemic_uncertainty": 0.35,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 2,
+          "counter_evidence_count": 0,
+          "unknown_source_count": 2,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "UNKNOWN",
+          "poisoning_signals": [
+            "UNKNOWN_SOURCE_DOMINANCE"
+          ]
+        }
+      }
+    },
+    {
+      "case": "counter_evidence",
+      "prior": 0.5,
+      "data_quality": 1.0,
+      "epistemic_uncertainty": 0.0,
+      "trusted_sources": [
+        {
+          "source_id": "s1",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        },
+        {
+          "source_id": "s2",
+          "reliability_cap": 0.95,
+          "integrity_cap": 0.95
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "a",
+          "dependency_group": "endpoint",
+          "source_id": "s1",
+          "signed_log_lr": -4,
+          "claimed_reliability": 0.95,
+          "independence_weight": 1,
+          "sensor_integrity": 0.95,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 1
+        },
+        {
+          "evidence_id": "b",
+          "dependency_group": "identity",
+          "source_id": "s2",
+          "signed_log_lr": -4,
+          "claimed_reliability": 0.95,
+          "independence_weight": 1,
+          "sensor_integrity": 0.95,
+          "telemetry_quality": 1,
+          "observed_age_seconds": 2
+        }
+      ],
+      "expected_windows": {
+        "5": {
+          "posterior_probability": 0.003732621909620628,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        },
+        "30": {
+          "posterior_probability": 0.0010292209336414267,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        },
+        "300": {
+          "posterior_probability": 0.0007579769179205311,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        },
+        "3600": {
+          "posterior_probability": 0.0007334678475099711,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        },
+        "21600": {
+          "posterior_probability": 0.0007316337203362054,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        },
+        "86400": {
+          "posterior_probability": 0.0007313588749766923,
+          "model_confidence": 0.6519202405202649,
+          "effective_data_quality": 1.0,
+          "epistemic_uncertainty": 0.15,
+          "evidence_count": 2,
+          "unique_source_count": 2,
+          "dependency_group_count": 2,
+          "supporting_evidence_count": 0,
+          "counter_evidence_count": 2,
+          "unknown_source_count": 0,
+          "source_concentration": 0.5,
+          "dependency_concentration": 0.5,
+          "disposition": "COUNTER",
+          "poisoning_signals": []
+        }
+      }
+    }
+  ]
+}

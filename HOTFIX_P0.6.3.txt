@@ -1,0 +1,23 @@
+CyberDefender P0.6.3 — 24/7 Evidence Retention Hardening
+Date: 2026-09-07
+
+Changes:
+- EventLogger v1.2 bounded rotation/retention.
+- CorrelationEngine v1.3 cumulative event_count + bounded evidence_count.
+- Owner/legacy dashboards preserve live-tail continuity across log rotation.
+- Owner Component Matrix distinguishes OPERATIONAL from NOMINAL pressure posture.
+- Removed obsolete duplicate recovery test debt.
+
+Default local event-log cap:
+- Active: 16 MiB
+- Backups: 6
+- Approximate maximum retained JSONL bytes: ~112 MiB plus one oversized single record edge case.
+
+Optional environment overrides:
+CYBERDEFENDER_EVENT_LOG_MAX_BYTES
+CYBERDEFENDER_EVENT_LOG_BACKUP_COUNT
+
+Safety posture unchanged:
+- No autonomous privileged OS executor.
+- Policy / Independent Verification / Safety Core remain mandatory boundaries.
+- Response path remains DRY-RUN / plan-only where applicable.

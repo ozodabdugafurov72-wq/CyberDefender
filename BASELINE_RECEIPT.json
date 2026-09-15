@@ -1,0 +1,35 @@
+﻿{
+    "schema":  "cyberdefender.canonical-baseline.v1",
+    "created_utc":  "2026-09-15T16:54:10.5765252Z",
+    "claim_scope":  "VERIFIED_SOFTWARE_FOUNDATION",
+    "security_priority":  [
+                              "PROTECTION",
+                              "OBSERVATION",
+                              "CONTROL",
+                              "INDEPENDENT_VERIFICATION",
+                              "RECOVERY",
+                              "PERFORMANCE"
+                          ],
+    "source_manifest":  "BASELINE_SOURCE_SHA256.txt",
+    "source_manifest_sha256":  "2c96f7c4ccbbfc0d96684daf3be3ab1b153779f04c056880cbef0978927fc1a8",
+    "source_file_count":  414,
+    "evidence_manifest":  "BASELINE_EVIDENCE_SHA256.txt",
+    "evidence_manifest_sha256":  "24cb0338ee5392a677ffc21b389e70143d82e95618f0bc1281e6934101181aed",
+    "evidence_file_count":  3456,
+    "authority_invariants":  {
+                                 "detection_is_authorization":  false,
+                                 "risk_is_authorization":  false,
+                                 "ai_authority":  "NONE",
+                                 "unknown_is_pass":  false,
+                                 "partial_success_is_full_success":  false
+                             },
+    "known_open_promotion_gates":  [
+                                       "storage provisioning / canonical runtime verification",
+                                       "Windows Go race prerequisite",
+                                       "PSI calibration",
+                                       "live passive NDR",
+                                       "real disposable-machine restore"
+                                   ],
+    "lab_verified":  false,
+    "production_validated":  false
+}

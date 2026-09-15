@@ -1,0 +1,190 @@
+{
+  "schema": "cd.h1d9.results.v1",
+  "package_sha256": "",
+  "guest_uuid_sha256": "",
+  "checkpoints": {},
+  "cases": [
+    {
+      "id": 1,
+      "title": "clean install",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 2,
+      "title": "installer ACLs",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 3,
+      "title": "three services",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 4,
+      "title": "SCM recovery",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 5,
+      "title": "finite restart storm",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 6,
+      "title": "process replacement persistence",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 7,
+      "title": "reboot persistence",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 8,
+      "title": "clean restart recovery",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 9,
+      "title": "sleep wake",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 10,
+      "title": "Job Object containment",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 11,
+      "title": "abrupt Agent death",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 12,
+      "title": "hung Rust",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 13,
+      "title": "no orphan",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 14,
+      "title": "one child",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 15,
+      "title": "restricted environment",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 16,
+      "title": "per-launch pin",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 17,
+      "title": "Python authority",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 18,
+      "title": "Rust non-authority",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 19,
+      "title": "primary lock",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 20,
+      "title": "honest runtime status",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 21,
+      "title": "watchdog progress",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 22,
+      "title": "store tamper",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 23,
+      "title": "interrupted writes",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 24,
+      "title": "resource bounds",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 25,
+      "title": "diagnostic privacy",
+      "status": "BLOCKED",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    },
+    {
+      "id": 26,
+      "title": "rollback",
+      "status": "REQUIRES OPERATOR STEP",
+      "reason": "Disposable guest has not been provisioned or executed",
+      "evidence": []
+    }
+  ]
+}

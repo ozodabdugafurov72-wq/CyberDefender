@@ -1,0 +1,93 @@
+{
+  "schema": "cd.probability-conformance.v1",
+  "cases": [
+    {
+      "case": "prior_only",
+      "prior": 0.1,
+      "evidence": [],
+      "expected_posterior": 0.1,
+      "authorization": "NOT_GRANTED"
+    },
+    {
+      "case": "independent_supporting",
+      "prior": 0.1,
+      "evidence": [
+        {
+          "dependency_group": "netflow",
+          "signed_log_lr": 2.0,
+          "reliability": 0.9,
+          "independence_weight": 1.0,
+          "freshness_weight": 1.0
+        },
+        {
+          "dependency_group": "endpoint",
+          "signed_log_lr": 1.4,
+          "reliability": 0.8,
+          "independence_weight": 1.0,
+          "freshness_weight": 0.9
+        }
+      ],
+      "expected_posterior": 0.648117666175,
+      "authorization": "NOT_GRANTED"
+    },
+    {
+      "case": "support_with_counterevidence",
+      "prior": 0.1,
+      "evidence": [
+        {
+          "dependency_group": "netflow",
+          "signed_log_lr": 2.0,
+          "reliability": 0.9,
+          "independence_weight": 1.0,
+          "freshness_weight": 1.0
+        },
+        {
+          "dependency_group": "asset_context",
+          "signed_log_lr": -1.2,
+          "reliability": 0.95,
+          "independence_weight": 1.0,
+          "freshness_weight": 1.0
+        }
+      ],
+      "expected_posterior": 0.176939101835,
+      "authorization": "NOT_GRANTED"
+    },
+    {
+      "case": "correlated_duplicate_discounted",
+      "prior": 0.1,
+      "evidence": [
+        {
+          "dependency_group": "same_packet_stream",
+          "signed_log_lr": 2.0,
+          "reliability": 0.9,
+          "independence_weight": 1.0,
+          "freshness_weight": 1.0
+        },
+        {
+          "dependency_group": "same_packet_stream",
+          "signed_log_lr": 2.0,
+          "reliability": 0.9,
+          "independence_weight": 0.15,
+          "freshness_weight": 1.0
+        }
+      ],
+      "expected_posterior": 0.468236687773,
+      "authorization": "NOT_GRANTED"
+    },
+    {
+      "case": "stale_signal_discounted",
+      "prior": 0.1,
+      "evidence": [
+        {
+          "dependency_group": "netflow",
+          "signed_log_lr": 2.0,
+          "reliability": 0.9,
+          "independence_weight": 1.0,
+          "freshness_weight": 0.2
+        }
+      ],
+      "expected_posterior": 0.137379867692,
+      "authorization": "NOT_GRANTED"
+    }
+  ]
+}

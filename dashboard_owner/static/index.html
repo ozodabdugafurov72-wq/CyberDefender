@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CyberDefender — Owner Master Control</title>
+<link rel="stylesheet" href="/owner/static/owner.css">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand"><img class="brand-logo" src="/owner/static/assets/cyberdefender-shield-c.png" alt="CyberDefender shield C logo"><div><strong>CYBERDEFENDER</strong><small>OWNER MASTER CONTROL</small></div></div>
+  <div class="plane"><span class="dot"></span><div><b>LOCAL CONTROL PLANE</b><small>Safety-enforced endpoint authority</small></div></div>
+  <div class="section-label">CONTROL SURFACES</div>
+  <nav>
+    <button class="nav active" data-target="command"><i>01</i><span>Command Center</span></button>
+    <button class="nav" data-target="incidents"><i>02</i><span>Incident Command</span><em id="navIncidents">0</em></button>
+    <button class="nav" data-target="decision"><i>03</i><span>Decision Control</span></button>
+    <button class="nav" data-target="endpoint"><i>04</i><span>Endpoint Control</span></button>
+    <button class="nav" data-target="evidence"><i>05</i><span>Evidence & Audit</span></button>
+    <button class="nav" data-target="governance"><i>06</i><span>Governance</span></button>
+    <button class="nav" data-target="fleet"><i>07</i><span>Fleet & Distribution</span><em id="navFleet">0</em></button>
+    <button class="nav" data-target="sensor-plane"><i>08</i><span>Sensor Authority</span><em id="navCanary">—</em></button>
+    <button class="nav" data-target="applications-panel"><i>09</i><span>Active Applications</span></button>
+  </nav>
+  <div class="sidebar-bottom">
+    <div class="operator"><span class="avatar">O</span><div><b>OWNER / OPERATOR</b><small>Local control session</small></div></div>
+    <div class="authority"><span>OPERATOR SESSION</span><b>ACTIVE · CONTROL SURFACE</b><small>Privileged execution remains protected</small></div>
+  </div>
+</aside>
+<main class="main">
+<header class="topbar"><div><span class="crumb">SECURITY CONTROL SYSTEM <i>/</i> OWNER</span><h1>Master Control</h1></div><div class="top-right"><a class="admin-link" href="/admin">ADMIN OPERATIONS</a><div class="connection"><span class="status-dot"></span><div><b id="connection">CONNECTING</b><small id="freshness">Synchronizing runtime state</small></div></div><div class="clock" id="clock">--:--:--</div></div></header>
+
+<section class="hero" id="command">
+  <div class="hero-main"><div class="eyebrow">COMMAND AUTHORITY · OWNER PLANE</div><div class="hero-title"><h2>Master Control</h2><span class="active-pill">ACTIVE</span><span class="unlocked-pill">CONTROL SURFACE</span></div><p>Central security command surface for investigation, decision review, response simulation and governed action requests. No control path can bypass Policy, Independent Verification or Safety Core.</p><div class="guard-strip"><span>SAFETY ENFORCED</span><span>DRY-RUN ONLY</span><span>NO DIRECT OS ACCESS</span><span>RISK ≠ AUTHORIZATION</span></div></div>
+  <div class="hero-posture"><div class="posture-ring" id="postureRing"><div><strong id="postureScore">—</strong><small>RISK</small></div></div><div><span class="eyebrow">SECURITY POSTURE</span><b id="posture">UNKNOWN</b><small id="postureNote">Awaiting runtime decision state</small></div></div>
+</section>
+
+<section class="posture-grid">
+ <article class="metric-card primary"><span>THREAT POSTURE</span><strong id="threatPosture">UNKNOWN</strong><small id="threatNote">Security incidents</small></article>
+ <article class="metric-card"><span>RESOURCE POSTURE</span><strong id="resourcePosture">UNKNOWN</strong><small id="resourceNote">Endpoint pressure</small></article>
+ <article class="metric-card"><span>RUNTIME HEALTH</span><strong id="runtimeHealth">UNKNOWN</strong><small id="runtimeMeta">— cycles</small></article>
+ <article class="metric-card"><span>ACTIVE INCIDENTS</span><strong id="incidentTotal">0</strong><small id="incidentBreakdown">0 security · 0 resource</small></article>
+ <article class="metric-card"><span>EVENT PIPELINE</span><strong id="admitted">0</strong><small id="pipelineMeta">0 created · 0 rejected</small></article>
+</section>
+
+<section class="control-layout">
+ <article class="panel command-panel"><div class="panel-head"><div><span class="eyebrow">OPERATOR COMMAND MATRIX</span><h3>Control Center</h3></div><span class="policy-badge">POLICY-GOVERNED</span></div>
+  <div class="command-grid">
+   <button class="command-card" data-action="incident-investigation"><span class="icon">⌕</span><div><b>Investigate</b><small>Open incident evidence, process context and correlated activity.</small></div><span class="arrow">→</span></button>
+   <button class="command-card" data-action="demo-critical-threat"><span class="icon">◇</span><div><b>Presentation Threat Demo</b><small>Run a synthetic threat chain and show detection, decision and safe-response visualization.</small></div><span class="arrow">→</span></button>
+   <button class="command-card" data-action="review-decision"><span class="icon">≡</span><div><b>Review Decision</b><small>Inspect Risk → Policy → Verification → Safety state.</small></div><span class="arrow">→</span></button>
+   <button class="command-card protected" data-action="Privileged action"><span class="icon">⊘</span><div><b>Privileged Action</b><small>Protected until bounded response and post-action verification exist.</small></div><span class="protected-tag">PROTECTED</span></button>
+  </div>
+  <div class="command-footer"><span><i class="dot"></i>Control surface available</span><b>REAL-WORLD EFFECT: BLOCKED</b></div>
+ </article>
+ <article class="panel authority-panel"><div class="panel-head"><div><span class="eyebrow">CONTROL AUTHORITY</span><h3>Safety Constitution</h3></div><span class="safe-pill" id="safetyPill">SAFE</span></div>
+  <div class="authority-stack">
+   <div class="authority-row hero-row"><div><b>Safety Core</b><small id="safeMode">NORMAL</small></div><strong id="safetyCore">UNKNOWN</strong></div>
+   <div class="authority-row"><div><b>Policy Engine</b><small>deterministic governance</small></div><strong id="policy">UNKNOWN</strong></div>
+   <div class="authority-row"><div><b>Independent Verifier</b><small>decision integrity</small></div><strong id="verifier">UNKNOWN</strong></div>
+   <div class="authority-row"><div><b>Authorization Gate</b><small>single-use capability</small></div><strong id="auth">DRY-RUN</strong></div>
+   <div class="authority-row"><div><b>Action Gateway</b><small>bounded no-op executor</small></div><strong id="gateway">NO EFFECT</strong></div>
+  </div>
+  <div class="authority-note"><span>✓</span><div><b>Control authority is subordinate to safety.</b><small>Owner commands cannot directly reach the operating system.</small></div></div>
+ </article>
+</section>
+
+<section class="panel decision-panel" id="decision"><div class="panel-head"><div><span class="eyebrow">DETERMINISTIC DECISION PATH</span><h3>Security Decision Control</h3></div><span class="path-badge">NO BYPASS PATH</span></div><div class="pipeline" id="pipeline"></div><div class="decision-banner"><span class="banner-icon">!</span><div><b>Risk prioritizes urgency — it does not grant authority.</b><small>Policy governs permission. Independent Verification validates the decision. Safety Core remains the final local trust boundary.</small></div></div></section>
+
+<section class="split" id="incidents">
+ <article class="panel incident-panel"><div class="panel-head"><div><span class="eyebrow">INCIDENT COMMAND</span><h3>Priority Queue</h3></div><span class="count-pill" id="incidentBadge">0 ACTIVE</span></div><div class="incident-summary"><div><span>SECURITY</span><b id="securityIncidentCount">0</b></div><div><span>RESOURCE</span><b id="resourceIncidentCount">0</b></div><div><span>CRITICAL SECURITY</span><b id="criticalIncidentCount">0</b></div></div><div class="incident-filters"><input id="incidentSearch" type="search" maxlength="96" placeholder="Search incident / correlation key"><select id="incidentSeverity"><option value="">ALL SEVERITIES</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>INFO</option></select><select id="incidentClass"><option value="">ALL CLASSES</option><option>SECURITY</option><option>RESOURCE</option></select><button id="incidentRefresh" type="button">REFRESH</button></div><div class="incident-list" id="incidentList"></div></article>
+ <article class="panel posture-panel"><div class="panel-head"><div><span class="eyebrow">POSTURE ANALYSIS</span><h3>Threat vs Resource</h3></div><span class="live-pill">LIVE</span></div><div class="dual-posture"><div class="posture-block"><span>THREAT</span><b id="threatBig">CLEAR</b><small>Security incidents</small></div><div class="posture-divider"></div><div class="posture-block"><span>RESOURCE</span><b id="resourceBig">UNKNOWN</b><small>Endpoint pressure</small></div></div><div class="mini-bars"><div><span>CPU</span><i><b id="cpuBar"></b></i><strong id="cpu">—</strong></div><div><span>MEMORY</span><i><b id="memoryBar"></b></i><strong id="memory">—</strong></div><div><span>DISK</span><i><b id="diskBar"></b></i><strong id="disk">—</strong></div></div></article>
+</section>
+
+<section class="split" id="endpoint">
+ <article class="panel endpoint-panel"><div class="panel-head"><div><span class="eyebrow">LIVE ENDPOINT</span><h3>Endpoint Control Surface</h3></div><span class="small-pill" id="endpointState">UNKNOWN</span></div><div class="endpoint-top"><div><span>HOST</span><b id="host">LOCAL ENDPOINT</b></div><div><span>PROCESSES</span><b id="processes">—</b></div><div><span>AVAILABLE MEMORY</span><b id="availableMemory">—</b></div><div><span>CYCLES</span><b id="cycles">—</b></div></div><div class="endpoint-controls"><button data-action="endpoint-investigation">Endpoint Investigation</button><button data-action="demo-critical-threat">Response Simulation</button><button class="locked" data-action="Privileged endpoint action">Privileged Action · PROTECTED</button></div></article>
+ <article class="panel component-panel"><div class="panel-head"><div><span class="eyebrow">CONTROL PLANE INTEGRITY</span><h3>Component Matrix</h3></div><span class="small-pill" id="componentHealth">—</span></div><div class="component-grid" id="components"></div></article>
+</section>
+
+
+<section class="panel sensor-plane-panel" id="sensor-plane">
+ <div class="panel-head"><div><span class="eyebrow">NATIVE SENSOR AUTHORITY</span><h3>Process Sensor Plane</h3></div><span class="small-pill" id="sensorPlaneBadge">PYTHON PRIMARY</span></div>
+ <div class="sensor-authority-strip">
+  <div class="sensor-authority-node primary"><span>AUTHORITATIVE</span><b id="processAuthoritySensor">ProcessSensor</b><small id="processAuthorityMode">PYTHON_ONLY</small></div>
+  <div class="sensor-authority-link">→</div>
+  <div class="sensor-authority-node"><span>LIFECYCLE OWNER</span><b>ProcessGraph 1.6</b><small id="processGraphHealth">UNKNOWN</small></div>
+  <div class="sensor-authority-lock"><span>PRIMARY LOCK</span><b id="rustPrimaryLock">CLOSED</b><small>Rust cannot own graph</small></div>
+ </div>
+ <div class="sensor-canary-grid">
+  <div class="sensor-canary-card"><span>RUST v0.5.1 CANARY</span><b id="rustCanaryStatus">DISABLED</b><small id="rustCanaryReadiness">non-authoritative</small></div>
+  <div class="sensor-canary-card"><span>PERSISTENT IPC</span><b id="rustIpcStatus">—</b><small id="rustIpcMeta">PID — · gen —</small></div>
+  <div class="sensor-canary-card"><span>SAMPLES</span><b id="rustCanarySamples">0</b><small id="rustCanarySampleMeta">0 failures · — ms</small></div>
+  <div class="sensor-canary-card"><span>COMMON PROCESSES</span><b id="rustParityCommon">—</b><small id="rustParityVerdict">NO SAMPLE</small></div>
+ </div>
+ <div class="sensor-parity-grid">
+  <div><span>IDENTITY Δ</span><b id="rustIdentityDiff">—</b></div><div><span>PARENT Δ</span><b id="rustParentDiff">—</b></div><div><span>NAME CONFLICT</span><b id="rustNameDiff">—</b></div>
+  <div><span>EXE PARITY</span><b id="rustExeParity">—</b></div><div><span>USER PARITY</span><b id="rustUserParity">—</b></div><div><span>CMDLINE PARITY</span><b id="rustCmdParity">—</b></div>
+  <div><span>SID COVERAGE</span><b id="rustSidCoverage">—</b></div><div><span>SESSION COVERAGE</span><b id="rustSessionCoverage">—</b></div><div><span>INTEGRITY COVERAGE</span><b id="rustIntegrityCoverage">—</b></div>
+ </div>
+ <div class="sensor-safety-note"><b>NON-AUTHORITATIVE CANARY</b><span>Rust telemetry is compared after successful Python ProcessGraph ingestion. It has no edge to EventBus, Policy, Safety Core or Action Gateway.</span><a href="/admin">Open technical Admin Operations →</a></div>
+</section>
+
+<section class="panel applications-panel" id="applications-panel">
+ <div class="panel-head"><div><span class="eyebrow">AUTHORITATIVE PROCESS VIEW</span><h3>Active Applications</h3></div><span class="read-only">READ-ONLY</span></div>
+ <div class="applications-note">Human-friendly application names are derived from the authoritative Python ProcessSensor snapshot. Technical process names and sample PIDs remain visible for forensic accuracy.</div>
+ <div class="app-head"><span>APPLICATION</span><span>PROCESSES</span><span>MEMORY</span><span>CPU</span><span>USER</span></div>
+ <div class="applications-list" id="applications"><div class="app-row app-empty"><div><b>Waiting for process inventory</b><small>Authoritative runtime telemetry will appear here.</small></div><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
+</section>
+
+<section class="panel fleet-panel" id="fleet">
+ <div class="panel-head"><div><span class="eyebrow">REAL DISTRIBUTION TELEMETRY</span><h3>Fleet & Distribution</h3></div><span class="small-pill" id="fleetStatus">UNAVAILABLE</span></div>
+ <div class="fleet-metrics">
+  <div><span>DOWNLOAD EVENTS</span><b id="fleetDownloads">0</b><small>exact completed transfers</small></div>
+  <div><span>INSTALLED</span><b id="fleetInstalled">0</b><small>registered endpoints</small></div>
+  <div><span>ONLINE</span><b id="fleetOnline">0</b><small>recent heartbeat</small></div>
+  <div><span>OFFLINE</span><b id="fleetOffline">0</b><small>heartbeat stale</small></div>
+  <div><span>DEGRADED</span><b id="fleetDegraded">0</b><small>endpoint health</small></div>
+  <div><span>PENDING / FAILED</span><b id="fleetPending">0</b><small>install pipeline</small></div>
+ </div>
+ <div class="fleet-note">Download Events are exact completed transfer events recorded by the CyberDefender distribution endpoint. They are not a guessed count of people. Unique user/account analytics will be added only when an authenticated website/account layer exists.</div>
+ <div class="fleet-head"><span>ENDPOINT</span><span>INSTALL</span><span>HEALTH</span><span>SERVICE</span><span>VERSION</span><span>LAST SEEN</span></div>
+ <div class="fleet-list" id="fleetList"><div class="fleet-row"><b>No fleet telemetry yet</b><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
+</section>
+
+<section class="panel evidence-panel" id="evidence"><div class="panel-head"><div><span class="eyebrow">FORENSIC STREAM</span><h3>Evidence & Audit</h3></div><span class="read-only">READ-ONLY</span></div><div class="evidence-head"><span>EVENT</span><span>LEVEL</span><span>OCCURRENCES</span><span>LAST SEEN</span></div><div class="evidence-list" id="events"></div></section>
+
+<section class="panel governance-panel" id="governance"><div class="panel-head"><div><span class="eyebrow">GOVERNANCE</span><h3>Security Guarantees</h3></div><span class="policy-badge">SECURITY-FIRST</span></div><div class="guarantees"><div><b>RISK ≠ AUTHORIZATION</b><span>Risk prioritizes urgency; Policy and Safety determine permission.</span></div><div><b>AI PRIVILEGED AUTHORITY</b><span>NONE — AI cannot directly authorize operating-system actions.</span></div><div><b>L6 ACTIONS</b><span>Explicit human approval remains required.</span></div><div><b>POST-ACTION VERIFICATION</b><span>DEPLOYED · DRY-RUN CONTRACT</span></div><div><b>RECOVERY</b><span>PLAN-ONLY · VERIFIED SAFETY PATH</span></div><div><b>DASHBOARD OS ACCESS</b><span>NONE — isolated local control surface.</span></div></div></section>
+<footer>CYBERDEFENDER · OWNER MASTER CONTROL v3.5 API · UI v3.7 PRESENTATION READINESS · P0.8.5.2 + NATIVE CANARY · <span id="footerHost">LOCAL ENDPOINT</span> · SEQUENCE <span id="sequence">—</span> · <span id="updated">—</span></footer>
+</main></div>
+
+<div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+<aside class="ops-drawer" id="opsDrawer" aria-hidden="true">
+  <div class="drawer-head"><div><span class="eyebrow" id="drawerEyebrow">DEMO OPERATIONS</span><h3 id="drawerTitle">Details</h3></div><button id="drawerClose" type="button" aria-label="Close">×</button></div>
+  <div class="drawer-body" id="drawerBody"><div class="drawer-empty">Select an incident or endpoint investigation.</div></div>
+</aside>
+<div class="toast" id="toast"><b id="toastTitle">CONTROL SURFACE</b><span id="toastText">Dry-run only. No real-world action was performed.</span></div>
+<script src="/owner/static/owner.js" defer></script>
+</body></html>

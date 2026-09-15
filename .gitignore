@@ -1,0 +1,33 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+state/*
+!state/.gitkeep
+logs/*
+!logs/.gitkeep
+evidence/*
+!evidence/.gitkeep
+quarantine/*
+!quarantine/.gitkeep
+*.tmp
+*.bak
+*.backup*
+*.previous
+*.before-*
+*.broken-*
+* (1).py
+**/target/
+_backup_before_*/
+_v6_backups/
+.env
+.env.*
+!.env.example
+secrets/
+**/secrets/
+storage_key.b64
+*.pfx
+*.p12
+*.key
+
+# CyberDefender canonical-baseline local/build exclusions

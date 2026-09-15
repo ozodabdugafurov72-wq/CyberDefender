@@ -1,0 +1,38 @@
+{
+  "schema": "cyberdefender.ai-trust-boundary.v1",
+  "ai_in_tcb": false,
+  "classification": "UNTRUSTED_ADVISORY_INPUT",
+  "authorization": "NOT_GRANTED",
+  "can_mint_authorization_ticket": false,
+  "can_call_privileged_executor": false,
+  "can_modify_policy": false,
+  "can_modify_safety": false,
+  "can_mark_verification_pass": false,
+  "generic_shell_tool_allowed": false,
+  "cross_tenant_memory_allowed": false,
+  "required_fields": [
+    "hypotheses",
+    "supporting_evidence",
+    "counter_evidence",
+    "posterior_probability",
+    "data_quality",
+    "evidence_independence",
+    "epistemic_uncertainty",
+    "recommended_action",
+    "alternative_action",
+    "abstain"
+  ],
+  "required_post_ai_gates": [
+    "Admission",
+    "Risk",
+    "Policy",
+    "SafetyCore",
+    "AuthorizationBoundary",
+    "IndependentVerification"
+  ],
+  "failure_states": [
+    "ABSTAIN",
+    "REVIEW_REQUIRED",
+    "DEGRADED_SAFE"
+  ]
+}

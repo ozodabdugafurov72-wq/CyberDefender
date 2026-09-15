@@ -1,0 +1,34 @@
+{
+  "restore_receipt": {
+    "schema": "cd.lab.restore-receipt.v1",
+    "session": "",
+    "package_sha256": "",
+    "machine_sha256": "",
+    "checkpoint": "",
+    "nonce": "",
+    "state_sha256": "",
+    "export_sha256": "",
+    "current_boot": "",
+    "staff_reference": "",
+    "restored": false,
+    "preserved_evidence": false
+  },
+  "operator_case_receipt": {
+    "schema": "cd.lab.operator-receipt.v1",
+    "case_id": "",
+    "status": "BLOCKED",
+    "package_sha256": "",
+    "machine_uuid_sha256": "",
+    "session": "",
+    "staff_reference": "",
+    "checks": {
+      "PRECONDITIONS_MET": false,
+      "EXPECTED_RESULTS_MET": false,
+      "FAIL_CONDITIONS_ABSENT": false,
+      "EVIDENCE_COMPLETE": false,
+      "RECOVERY_VERIFIED": false,
+      "ALL_VARIANTS_COMPLETE": false
+    },
+    "evidence_files": []
+  }
+}

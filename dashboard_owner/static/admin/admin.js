@@ -1,0 +1,37 @@
+(() => {
+  const $=id=>document.getElementById(id);
+  const text=(id,v,f="—")=>{const e=$(id);if(e)e.textContent=(v===null||v===undefined||v==="")?f:String(v)};
+  const num=(v,d=1)=>{const n=Number(v);return Number.isFinite(n)?n.toFixed(d):"—"};
+  const pct=v=>{const n=Number(v);return Number.isFinite(n)?`${(n*100).toFixed(1)}%`:"—"};
+  const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+  const cls=s=>{s=String(s||"").toUpperCase();if(["HEALTHY","SAFE","READY","RUST_CANARY","PYTHON_ONLY"].includes(s))return"good";if(["DEGRADED","STARTING","STALE","UNKNOWN"].includes(s))return"warn";return"bad"};
+  const humanEvent=value=>{const raw=String(value||"EVENT").trim();const known={HIGH_MEMORY_USAGE:"High Memory Usage",LOW_AVAILABLE_MEMORY:"Low Available Memory",HIGH_CPU_USAGE:"High CPU Usage",CPU_PRESSURE:"CPU Pressure",MEMORY_PRESSURE:"Memory Pressure",HIGH_PROCESS_COUNT:"High Process Count",PROCESS_COUNT_PRESSURE:"Process Count Pressure",RECOVERY:"Recovery",DETECTION:"Detection",HOST_SNAPSHOT:"Host Snapshot"};return known[raw]||raw.replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase())};
+  const setBar=(id,v)=>{const e=$(id);const n=Math.max(0,Math.min(100,Number(v||0)*100));if(e)e.style.width=`${n}%`};
+  function fieldRow(sp,name,prefix){const f=sp?.parity?.[name]||{};text(prefix+"Match",f.matches);text(prefix+"Mismatch",f.mismatches);text(prefix+"Coverage",pct(f.coverage_rate));}
+  function render(d){
+    const rt=d.runtime||{}, sp=d.sensor_plane||{}, c=sp.canary||{}, ipc=sp.ipc||{}, p=sp.parity||{}, res=d.resource_state||{}, inc=d.incident_summary||{};
+    const fresh=d.runtime_freshness||{};
+    text("connection",fresh.available?(fresh.stale?"STALE":"LIVE"):"OFFLINE"); text("freshness",fresh.age_seconds==null?"runtime unavailable":`${num(fresh.age_seconds)}s state age`);
+    text("overall",d.overall_status||"UNKNOWN"); text("runtimeMeta",`${rt.cycle_count??0} cycles · ${rt.component_failures??0} core failures`);
+    text("authorityMode",sp.mode||"—"); text("authoritySensor",`${sp.authoritative_sensor||"—"} authoritative`);
+    text("canaryStatus",c.status||"DISABLED"); text("canaryReady",c.candidate_ready?"readiness gate PASS":(c.readiness_reason||"not authority-bound"));
+    text("ipcStatus",ipc.status||"—"); text("ipcMeta",`${ipc.restart_count??0} restarts · seq ${ipc.sequence??"—"}`);
+    text("parityVerdict",p.verdict||"NO SAMPLE"); text("parityMeta",`${p.common_processes??0} common processes`);
+    text("resourceStatus",res.status||"UNKNOWN"); text("resourceMeta",`${num(res.memory_percent)}% memory · ${num(res.cpu_percent)}% cpu`);
+    const total=Number(inc.security_incidents||0)+Number(inc.resource_incidents||0);text("incidentCount",total);text("incidentMeta",`${inc.security_incidents||0} security · ${inc.resource_incidents||0} resource`);
+    text("primaryLock",sp.primary_lock==="OPEN"?"PRIMARY ENABLED":"LOCK CLOSED"); text("pythonStatus",sp.python_sensor_status||"UNKNOWN"); text("graphStatus",sp.process_graph_status||"UNKNOWN");
+    text("canaryDetail",`${c.sensor_version||"0.5.1"} · ${c.sample_count??0} samples · ${c.failure_count??0} failures`);
+    text("ipcBadge",ipc.status||"UNKNOWN"); text("sensorPid",ipc.sensor_pid); text("generation",ipc.generation); text("sequence",ipc.sequence); text("restarts",ipc.restart_count??0);
+    text("launchBinding",ipc.launch_binding_verified?"VERIFIED":"NO"); text("directPid",ipc.direct_pid_verified?"VERIFIED":"NO"); text("latency",c.last_sample_latency_ms==null?"—":`${num(c.last_sample_latency_ms,2)} ms`); text("sampleAge",c.last_sample_age_seconds==null?"—":`${num(c.last_sample_age_seconds,1)} s`); text("epoch",ipc.sensor_epoch||"—");
+    text("parityBadge",p.verdict||"NO SAMPLE"); text("identityDiff",p.identity_disagreements); text("parentDiff",p.parent_disagreements); text("nameDiff",p.canonical_name_conflicts);
+    fieldRow(sp,"exe","exe"); fieldRow(sp,"username","user"); fieldRow(sp,"cmdline","cmd");
+    const ne=sp.native_enrichment||{}; for(const [key,id] of [["sid","sid"],["session_id","session"],["integrity_level","integrity"]]){const v=ne[key]||{};text(id+"Coverage",`${v.collected??0}/${v.total??0} · ${pct(v.coverage_rate)}`);setBar(id+"Bar",v.coverage_rate)}
+    const pe=$("pipeline");if(pe)pe.innerHTML=(d.pipeline||[]).map(x=>`<div class="${cls(x.status)}"><span>${esc(x.component||x.key)}</span><b>${esc(x.status||"UNKNOWN")}</b><small>${esc(x.version||"")}</small></div>`).join("");
+    const apps=$("applications");if(apps){const rows=d.process_inventory||[];apps.innerHTML=rows.length?rows.slice(0,20).map(x=>`<div class="app-row"><div><b>${esc(x.display_name||"Unknown Process")}</b><small>${esc(x.technical_name||"unknown")} · PID ${esc((x.pids||[]).slice(0,3).join(", ")||"—")}</small></div><span>${esc(x.processes||1)}×</span><span>${esc(num(x.memory_percent,2))}%</span><span>${esc(num(x.cpu_percent,2))}%</span><span>${esc(x.username||"SYSTEM / unknown")}</span></div>`).join(""):`<div class="app-row"><div><b>No application inventory yet</b><small>Waiting for Python ProcessSensor.</small></div><span>—</span><span>—</span><span>—</span><span>—</span></div>`}
+    const ee=$("events");if(ee){const ev=d.event_groups||[];ee.innerHTML=ev.length?ev.slice(0,18).map(x=>{const raw=String(x.kind||"EVENT");return `<div><span class="sev ${esc(String(x.level||"INFO").toLowerCase())}">${esc(x.level||"INFO")}</span><p><b>${esc(humanEvent(raw))}</b><small>${esc(x.detail||"runtime evidence")} · code: ${esc(raw)}</small></p><em>${esc(x.count||1)}×</em></div>`}).join(""):`<div class="empty">No runtime evidence groups.</div>`}
+    document.querySelectorAll(".badge").forEach(e=>{e.classList.remove("good","warn","bad");e.classList.add(cls(e.textContent))});
+    text("updated",`UPDATED ${new Date().toLocaleTimeString()}`);
+  }
+  async function refresh(){try{const r=await fetch("/admin/api/state",{cache:"no-store"});if(!r.ok)throw new Error();render(await r.json())}catch{text("connection","OFFLINE");text("overall","AGENT_OFFLINE")}}
+  refresh();setInterval(refresh,1500);
+})();

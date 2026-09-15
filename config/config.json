@@ -1,0 +1,26 @@
+{
+    "mode": "OBSERVE",
+    "enabled": true,
+
+    "safety": {
+        "fail_safe": true,
+        "allow_system_changes": false,
+        "allow_firewall_changes": false,
+        "allow_registry_changes": false,
+        "allow_service_changes": false
+    },
+
+    "detection": {
+        "memory_warning": 85.0,
+        "memory_critical": 95.0,
+
+        "cpu_warning": 85.0,
+        "cpu_critical": 95.0,
+
+        "process_warning": 300,
+        "process_critical": 400,
+
+        "available_memory_warning": 1024,
+        "available_memory_critical": 512
+    }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "cyberdefender-psi-core-v0-2"
+version = "0.2.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "cyberdefender_psi_core_v0_2"
+path = "src/lib.rs"
+
+[dependencies]

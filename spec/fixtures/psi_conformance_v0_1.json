@@ -1,0 +1,48 @@
+{
+  "schema": "cd.psi-conformance.v0.1",
+  "calibration": "UNVERIFIED",
+  "authorization": "NOT_GRANTED",
+  "cases": [
+    {
+      "case": "prior_only",
+      "prior": 0.1,
+      "evidence": [],
+      "expected_posterior": 0.1
+    },
+    {
+      "case": "independent_supporting",
+      "prior": 0.1,
+      "evidence": [
+        {"id":"ev-1","dependency_group":"netflow","signed_log_lr":2.0,"reliability":0.9,"independence":1.0,"freshness":1.0,"sensor_integrity":1.0},
+        {"id":"ev-2","dependency_group":"endpoint","signed_log_lr":1.4,"reliability":0.8,"independence":1.0,"freshness":0.9,"sensor_integrity":1.0}
+      ],
+      "expected_posterior": 0.6481176661751409
+    },
+    {
+      "case": "support_with_counterevidence",
+      "prior": 0.1,
+      "evidence": [
+        {"id":"ev-1","dependency_group":"netflow","signed_log_lr":2.0,"reliability":0.9,"independence":1.0,"freshness":1.0,"sensor_integrity":1.0},
+        {"id":"ev-2","dependency_group":"asset_context","signed_log_lr":-1.2,"reliability":0.95,"independence":1.0,"freshness":1.0,"sensor_integrity":1.0}
+      ],
+      "expected_posterior": 0.17693910183506345
+    },
+    {
+      "case": "correlated_duplicate_discounted",
+      "prior": 0.1,
+      "evidence": [
+        {"id":"ev-1","dependency_group":"same_packet_stream","signed_log_lr":2.0,"reliability":0.9,"independence":1.0,"freshness":1.0,"sensor_integrity":1.0},
+        {"id":"ev-2","dependency_group":"same_packet_stream","signed_log_lr":2.0,"reliability":0.9,"independence":0.15,"freshness":1.0,"sensor_integrity":1.0}
+      ],
+      "expected_posterior": 0.4682366877732213
+    },
+    {
+      "case": "stale_signal_discounted",
+      "prior": 0.1,
+      "evidence": [
+        {"id":"ev-1","dependency_group":"netflow","signed_log_lr":2.0,"reliability":0.9,"independence":1.0,"freshness":0.2,"sensor_integrity":1.0}
+      ],
+      "expected_posterior": 0.13737986769209481
+    }
+  ]
+}

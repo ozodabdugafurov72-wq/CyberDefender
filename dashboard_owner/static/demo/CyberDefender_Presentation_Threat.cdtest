@@ -1,0 +1,8 @@
+CYBERDEFENDER_PRESENTATION_SAFE_THREAT_V1
+classification=SIMULATED_SUSPICIOUS_ARTIFACT
+real_malware=false
+executable=false
+network_activity=false
+system_modification=false
+destructive_behavior=false
+purpose=Demonstrate CyberDefender detection/correlation/response visualization without exposing the laptop to real malware.
