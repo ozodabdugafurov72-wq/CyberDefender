@@ -72,7 +72,8 @@ from agent.sensors.process import (
     ProcessSensor,
 )
 
-from agent.network.passive_inventory import (
+from agent.network import (
+    AsyncPassiveNetworkInventory,
     PassiveNetworkInventory,
     load_trust_registry,
 )
@@ -386,6 +387,7 @@ class CyberDefenderRuntime:
         self.last_network_inventory: dict[str, Any] | None = None
         self.network_inventory_failures = 0
         self.network_inventory_sample_every_cycles = 5
+        self.network_inventory_deadline_seconds = 5
 
         self.last_process_graph_result: dict[str, Any] | None = None
         # Bounded, display-only inventory derived from the authoritative
@@ -506,7 +508,7 @@ class CyberDefenderRuntime:
         ) = None
 
         self.network_inventory: (
-            PassiveNetworkInventory | None
+            AsyncPassiveNetworkInventory | None
         ) = None
 
         self.detector: (
@@ -1134,14 +1136,16 @@ class CyberDefenderRuntime:
         )
 
         # ----------------------------------------------------
-        # PASSIVE NETWORK INVENTORY v0.1
+        # PASSIVE NETWORK INVENTORY v0.1.3
         # ----------------------------------------------------
-        # This is a non-authoritative read-only observability plane.  Its
-        # failure is visible but must never stop or authorize the core runtime.
+        # Collection runs on exactly one bounded background worker. The core
+        # security cycle never waits for Windows network telemetry. Failures,
+        # deadline overruns and stale data remain observable while the last good
+        # snapshot is preserved. The plane remains read-only/non-authoritative.
         try:
             registry_path = state_root / "network_trust.json"
             trust_registry = load_trust_registry(registry_path)
-            self.network_inventory = PassiveNetworkInventory(
+            network_collector = PassiveNetworkInventory(
                 trust_registry=trust_registry,
                 max_devices=min(
                     self._positive_int(
@@ -1164,6 +1168,17 @@ class CyberDefenderRuntime:
                     5,
                 ),
                 120,
+            )
+            self.network_inventory_deadline_seconds = min(
+                self._positive_int(
+                    os.getenv("CYBERDEFENDER_NETWORK_DEADLINE_SECONDS"),
+                    5,
+                ),
+                60,
+            )
+            self.network_inventory = AsyncPassiveNetworkInventory(
+                network_collector,
+                deadline_seconds=self.network_inventory_deadline_seconds,
             )
         except Exception as exc:
             self.network_inventory = None
@@ -3392,39 +3407,51 @@ class CyberDefenderRuntime:
             )
 
     # ========================================================
-    # PASSIVE NETWORK INVENTORY v0.1
+    # PASSIVE NETWORK INVENTORY v0.1.3
     # ========================================================
 
     def update_network_inventory(self) -> dict[str, Any] | None:
-        """Refresh bounded passive local network telemetry.
+        """Schedule passive network telemetry without blocking this cycle.
 
-        This path is explicitly non-authoritative.  Collection failure is
-        observable but does not degrade the core security runtime.  No active
-        scan, packet injection, DNS resolution, firewall mutation, or host
-        response action is performed here.
+        One background worker owns collection. Runtime cycles only enqueue a
+        bounded/coalesced refresh request and consume the latest completed good
+        snapshot. Slow/hung/failing telemetry cannot delay Detection, Policy,
+        Safety Core, Independent Verification, EventBus, or dashboard publish.
         """
-        collector = self.network_inventory
-        if collector is None:
-            return None
+        worker = self.network_inventory
+        if worker is None:
+            return self.last_network_inventory
 
-        if (
-            self.last_network_inventory is not None
-            and self.cycle_count % self.network_inventory_sample_every_cycles != 0
-        ):
+        should_request = (
+            self.last_network_inventory is None
+            or self.cycle_count % self.network_inventory_sample_every_cycles == 0
+        )
+
+        if should_request:
+            try:
+                worker.request_sample()
+            except Exception:
+                # Request scheduling itself is non-authoritative and isolated.
+                self.network_inventory_failures += 1
+
+        try:
+            latest = worker.get_latest_snapshot()
+            worker_state = worker.integration_state()
+        except Exception:
+            self.network_inventory_failures += 1
             return self.last_network_inventory
 
         try:
-            result = collector.collect()
-            if not isinstance(result, dict):
-                raise RuntimeError("NETWORK_INVENTORY_INVALID_RESULT")
-            self.last_network_inventory = result
-            return result
-        except Exception as exc:
-            self.network_inventory_failures += 1
-            self.last_error = f"network_inventory:{type(exc).__name__}"
-            # Preserve the last trusted observation rather than replacing it
-            # with fabricated/empty success.
-            return self.last_network_inventory
+            observed_failures = int(worker_state.get("failures", 0) or 0)
+            if observed_failures > self.network_inventory_failures:
+                self.network_inventory_failures = observed_failures
+        except (TypeError, ValueError):
+            pass
+
+        if isinstance(latest, dict):
+            self.last_network_inventory = latest
+
+        return self.last_network_inventory
 
     # ========================================================
     # STRUCTURED DATA READ-MODEL SYNC (P0.7)
@@ -4698,6 +4725,15 @@ class CyberDefenderRuntime:
                 # Retain ownership; caller may keep Python alive but cannot
                 # create another native owner until exit is verified.
                 self.child_cleanup_verified = False
+
+        network_inventory = self.network_inventory
+        self.network_inventory = None
+        if network_inventory is not None:
+            try:
+                network_inventory.close()
+            except Exception:
+                # Optional read-only telemetry must never block shutdown.
+                pass
 
         repository = self.data_repository
         self.data_repository = None

@@ -24,8 +24,8 @@ def main() -> int:
         (root / "logs").mkdir()
 
         network = {
-            "schema": "cyberdefender.network-inventory.v0.1",
-            "version": "0.1",
+            "schema": "cyberdefender.network-inventory.v0.1.2",
+            "version": "0.1.2",
             "mode": "PASSIVE_ONLY",
             "authority": "NONE",
             "authoritative": False,
@@ -34,20 +34,32 @@ def main() -> int:
             "firewall_mutation": False,
             "user_identity_inference": False,
             "unknown_is_unauthorized": False,
+            "hotspot_client_count": None,
+            "hotspot_client_count_authoritative": False,
+            "hotspot_client_count_reason": "AP_CONTROLLER_EVIDENCE_UNAVAILABLE",
             "sampled_at": time.time(),
             "summary": {
-                "devices_total": 3,
-                "online": 2,
+                "local_endpoint_count": 1,
+                "observed_peers_total": 2,
+                "observed_peers_online": 1,
+                "gateways_observed": 1,
+                "other_peers_observed": 0,
+                "devices_total": 2,
+                "online": 1,
                 "connections_total": 5,
-                "local": 1,
                 "authorized": 1,
-                "unknown": 1,
+                "unknown": 0,
                 "denied": 0,
                 "revoked": 0,
             },
+            "count_semantics": {
+                "devices_total": "OBSERVED_NEIGHBOR_IDENTITIES_NOT_CONNECTED_CLIENTS",
+                "hotspot_client_count": "UNAVAILABLE_WITHOUT_AP_CONTROLLER_EVIDENCE",
+            },
+            "active_networks": [{"interface":"Wi-Fi","interface_index":9,"local_ipv4":"10.28.239.128","prefix_length":24,"gateway":"10.28.239.252","role":"DEFAULT_ROUTE"}],
             "devices": [
-                {"device_id":"mac:aa:bb:cc:dd:ee:01","ip_address":"192.168.1.20","mac_address":"AA:BB:CC:DD:EE:01","interface":"Wi-Fi","neighbor_state":"REACHABLE","online":True,"trust":"AUTHORIZED","label":"Managed laptop","user_identity":{"status":"UNKNOWN","user_id":None},"source":"NEIGHBOR_CACHE","passive":True},
-                {"device_id":"mac:aa:bb:cc:dd:ee:02","ip_address":"192.168.1.30","mac_address":"AA:BB:CC:DD:EE:02","interface":"Wi-Fi","neighbor_state":"STALE","online":False,"trust":"UNKNOWN","label":None,"user_identity":{"status":"UNKNOWN","user_id":None},"source":"NEIGHBOR_CACHE","passive":True},
+                {"device_id":"mac:06:94:e9:22:9f:21","ip_address":"10.28.239.252","mac_address":"06:94:E9:22:9F:21","interface":"Wi-Fi","neighbor_state":"REACHABLE","online":True,"trust":"AUTHORIZED","label":"Phone hotspot gateway","user_identity":{"status":"UNKNOWN","user_id":None},"role":"GATEWAY","source":"NEIGHBOR_CACHE","passive":True},
+                {"device_id":"mac:aa:bb:cc:dd:ee:02","ip_address":"192.168.1.30","mac_address":"AA:BB:CC:DD:EE:02","interface":"Wi-Fi","neighbor_state":"STALE","online":False,"trust":"UNKNOWN","label":None,"user_identity":{"status":"UNKNOWN","user_id":None},"role":"PEER","source":"NEIGHBOR_CACHE","passive":True},
             ],
             "connections": [],
         }
@@ -65,7 +77,7 @@ def main() -> int:
                 "runtime": {"status":"HEALTHY"},
                 "safety_core": {"status":"SAFE"},
                 "resource_guard": {"status":"HEALTHY","state":"NORMAL"},
-                "network_inventory": {"component":"PassiveNetworkInventory","status":"HEALTHY","version":"0.1","mode":"PASSIVE_ONLY","authority":"NONE","authoritative":False,"active_scan_enabled":False},
+                "network_inventory": {"component":"PassiveNetworkInventory","status":"HEALTHY","version":"0.1.2","mode":"PASSIVE_ONLY","authority":"NONE","authoritative":False,"active_scan_enabled":False,"hotspot_client_count_authoritative":False},
                 "policy_engine": {"status":"HEALTHY"},
                 "independent_verifier": {"status":"HEALTHY"},
                 "authorization_gate": {"status":"HEALTHY","dry_run_only":True},
@@ -87,13 +99,16 @@ def main() -> int:
 
         admin = server.build_admin_state()
         check(admin["read_only"] is True and admin["authoritative"] is False, "Admin surface remains read-only and non-authoritative")
-        check(admin["network_inventory"]["summary"]["devices_total"] == 3, "Admin state exposes bounded device summary")
+        check(admin["network_inventory"]["summary"]["observed_peers_online"] == 1, "Admin state exposes current observed-peer summary")
+        check(admin["network_inventory"]["summary"]["local_endpoint_count"] == 1, "Admin state separates local endpoint from peers")
+        check(admin["network_inventory"]["hotspot_client_count"] is None, "Admin state does not fabricate hotspot client count")
         check(admin["network_inventory"]["active_scan_enabled"] is False, "Admin state cannot present active scan as enabled")
         check(admin["network_inventory"]["unknown_is_unauthorized"] is False, "Admin state preserves UNKNOWN != unauthorized")
 
         html = (server.ADMIN_STATIC / "index.html").read_text(encoding="utf-8")
         js = (server.ADMIN_STATIC / "admin.js").read_text(encoding="utf-8")
-        check("NETWORK & DEVICES" in html and "Passive Network Inventory" in html, "Admin UI contains Network & Devices surface")
+        check("NETWORK & DEVICES" in html and "Passive Network Observations" in html, "Admin UI contains Network & Devices surface")
+        check("HOTSPOT CLIENTS" in html and "OBSERVED PEERS" in html, "Admin UI separates AP client count from neighbor evidence")
         check("NO PING" in html and "NO PORT SCAN" in html and "UNKNOWN ≠ UNAUTHORIZED" in html, "Admin UI declares passive-only safety boundaries")
         check("d.network_inventory" in js and "networkDevices" in js, "Admin JS consumes only API network inventory state")
         check("Get-NetNeighbor" not in js and "fetch(\"/admin/api/state\"" in js, "Admin browser code has no direct OS telemetry path")

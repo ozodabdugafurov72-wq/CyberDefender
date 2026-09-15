@@ -28,24 +28,36 @@ class FixtureProvider:
                 ],
             }
         ]
+        active_networks = [
+            {
+                "InterfaceAlias": "Wi-Fi",
+                "InterfaceIndex": 7,
+                "IPv4Address": "192.168.1.10",
+                "PrefixLength": 24,
+                "Gateway": "192.168.1.1",
+            }
+        ]
         if self.round == 1:
             neighbors = [
-                {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.10", "LinkLayerAddress": "AA-BB-CC-DD-EE-10", "State": "Reachable"},
+                {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.1", "LinkLayerAddress": "AA-BB-CC-DD-EE-01", "State": "Reachable"},
                 {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.20", "LinkLayerAddress": "AA-BB-CC-DD-EE-20", "State": "Reachable"},
                 {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.30", "LinkLayerAddress": "AA-BB-CC-DD-EE-30", "State": "Stale"},
                 {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.40", "LinkLayerAddress": "AA-BB-CC-DD-EE-40", "State": "Reachable"},
-                {"InterfaceAlias": "Wi-Fi", "IPAddress": "224.0.0.1", "LinkLayerAddress": "01-00-5E-00-00-01", "State": "Reachable"},
+                {"InterfaceAlias": "Wi-Fi", "IPAddress": "224.0.0.1", "LinkLayerAddress": "01-00-5E-00-00-01", "State": "Permanent"},
+                {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.255", "LinkLayerAddress": "FF-FF-FF-FF-FF-FF", "State": "Permanent"},
+                {"InterfaceAlias": "Ethernet", "IPAddress": "10.10.10.1", "LinkLayerAddress": "AA-BB-CC-DD-EE-55", "State": "Reachable"},
             ]
         else:
             neighbors = [
-                {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.10", "LinkLayerAddress": "AA-BB-CC-DD-EE-10", "State": "Reachable"},
+                {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.1", "LinkLayerAddress": "AA-BB-CC-DD-EE-01", "State": "Reachable"},
                 {"InterfaceAlias": "Wi-Fi", "IPAddress": "192.168.1.20", "LinkLayerAddress": "AA-BB-CC-DD-EE-20", "State": "Reachable"},
+                {"InterfaceAlias": "Wi-Fi", "IPAddress": "255.255.255.255", "LinkLayerAddress": "FF-FF-FF-FF-FF-FF", "State": "Permanent"},
             ]
         connections = [
             {"local_ip": "192.168.1.10", "local_port": 54000, "remote_ip": "192.168.1.20", "remote_port": 443, "status": "ESTABLISHED", "pid": 123},
             {"local_ip": "192.168.1.10", "local_port": 54001, "remote_ip": "8.8.8.8", "remote_port": 443, "status": "ESTABLISHED", "pid": 124},
         ]
-        return {"interfaces": interfaces, "neighbors": neighbors, "connections": connections}
+        return {"interfaces": interfaces, "active_networks": active_networks, "neighbors": neighbors, "connections": connections}
 
 
 def main() -> int:
@@ -75,19 +87,26 @@ def main() -> int:
     check(first["packet_injection"] is False and first["firewall_mutation"] is False, "no packet injection or firewall mutation is exposed")
     check(first["unknown_is_unauthorized"] is False, "UNKNOWN is not silently treated as unauthorized")
     check(first["user_identity_inference"] is False, "user identity inference from network identity is disabled")
-    check(first["summary"]["devices_total"] == 4, "multicast neighbor is excluded and four bounded devices remain")
-    check(first["summary"]["local"] == 1, "local endpoint is identified separately")
-    check(first["summary"]["authorized"] == 2, "explicit authorized device rules are applied")
-    check(first["summary"]["denied"] == 1, "explicit denied device rule is applied")
+    check(first["schema"] == "cyberdefender.network-inventory.v0.1.2", "v0.1.2 schema is explicit")
+    check(first["summary"]["local_endpoint_count"] == 1, "local endpoint is counted separately from neighbors")
+    check(first["summary"]["observed_peers_online"] == 4, "only active-scope unicast neighbor identities are current peers")
+    check(first["summary"]["gateways_observed"] == 1, "default gateway is classified separately")
+    check(first["summary"]["other_peers_observed"] == 3, "non-gateway peers remain visible")
+    check(first["hotspot_client_count"] is None and first["hotspot_client_count_authoritative"] is False, "hotspot client count is unavailable without AP evidence")
+    check(first["summary"]["authorized"] == 2, "explicit authorized peer rules are applied")
+    check(first["summary"]["denied"] == 1, "explicit denied peer rule is applied")
     check(first["summary"]["connections_total"] == 2, "passive local connection evidence is retained")
 
     by_ip = {row["ip_address"]: row for row in first["devices"]}
+    check("192.168.1.255" not in by_ip and "224.0.0.1" not in by_ip and "10.10.10.1" not in by_ip, "broadcast, multicast, and inactive-interface rows are not peers")
+    check(by_ip["192.168.1.1"]["role"] == "GATEWAY", "gateway role is visible")
     check(by_ip["192.168.1.20"]["trust"] == "AUTHORIZED", "authorized device is visible")
     check(by_ip["192.168.1.30"]["trust"] == "DENIED", "denied device is visible")
     check(by_ip["192.168.1.40"]["user_identity"]["status"] == "UNKNOWN", "unverified user claim is not promoted")
     check(by_ip["192.168.1.40"]["user_identity"]["user_id"] is None, "unverified user identifier is redacted from identity binding")
     check(all(row.get("passive") is True for row in first["devices"]), "all device evidence is explicitly passive")
     check(all(row.get("passive") is True for row in first["connections"]), "all connection evidence is explicitly passive")
+    check(first["count_semantics"]["devices_total"] == "OBSERVED_NEIGHBOR_IDENTITIES_NOT_CONNECTED_CLIENTS", "neighbor count cannot be presented as connected-client count")
 
     second = inventory.collect()
     by_ip2 = {row["ip_address"]: row for row in second["devices"]}

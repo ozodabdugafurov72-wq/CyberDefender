@@ -17,9 +17,9 @@ except Exception:  # pragma: no cover - runtime health reports dependency absenc
 
 
 _MAC_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
-_ALLOWED_TRUST = {"AUTHORIZED", "UNKNOWN", "DENIED", "REVOKED", "LOCAL"}
+_ALLOWED_TRUST = {"AUTHORIZED", "UNKNOWN", "DENIED", "REVOKED"}
 _ALLOWED_DEVICE_STATES = {
-    "REACHABLE", "STALE", "DELAY", "PROBE", "PERMANENT", "UNKNOWN", "LOCAL",
+    "REACHABLE", "STALE", "DELAY", "PROBE", "PERMANENT", "UNKNOWN",
 }
 
 
@@ -27,11 +27,31 @@ def _bounded_text(value: Any, limit: int = 160) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _canonical_mac_text(value: Any) -> str:
+    return _bounded_text(value, 64).upper().replace("-", ":")
+
+
 def _normalize_mac(value: Any) -> str | None:
-    text = _bounded_text(value, 64).upper().replace("-", ":")
-    if not text or text in {"00:00:00:00:00:00", "FF:FF:FF:FF:FF:FF"}:
+    text = _canonical_mac_text(value)
+    if not text or not _MAC_RE.fullmatch(text):
         return None
-    return text if _MAC_RE.fullmatch(text) else None
+    # Neighbor identities are unicast L2 identities only. Broadcast/multicast
+    # MACs (including 01:00:5E IPv4 and 33:33 IPv6 multicast mappings) are
+    # protocol control addresses, not peer devices.
+    first_octet = int(text.split(":", 1)[0], 16)
+    if first_octet & 0x01:
+        return None
+    if text == "00:00:00:00:00:00":
+        return None
+    return text
+
+
+def _raw_mac_is_non_unicast(value: Any) -> bool:
+    text = _canonical_mac_text(value)
+    if not text or not _MAC_RE.fullmatch(text):
+        return False
+    first_octet = int(text.split(":", 1)[0], 16)
+    return bool(first_octet & 0x01)
 
 
 def _normalize_ip(value: Any) -> str | None:
@@ -42,7 +62,9 @@ def _normalize_ip(value: Any) -> str | None:
         ip = ipaddress.ip_address(text.split("%", 1)[0])
     except ValueError:
         return None
-    if ip.is_multicast or ip.is_unspecified:
+    if ip.is_multicast or ip.is_unspecified or ip.is_loopback:
+        return None
+    if isinstance(ip, ipaddress.IPv4Address) and ip == ipaddress.IPv4Address("255.255.255.255"):
         return None
     return str(ip)
 
@@ -55,7 +77,7 @@ def _device_key(ip: str, mac: str | None, interface: str) -> str:
 
 
 def load_trust_registry(path: str | os.PathLike[str]) -> dict[str, dict[str, Any] | str]:
-    """Load a bounded, non-executable device trust registry.
+    """Load a bounded, non-executable peer trust registry.
 
     The registry is configuration evidence only; it does not grant OS/network
     authority and UNKNOWN entries are never promoted to DENIED implicitly.
@@ -89,12 +111,13 @@ class WindowsPassiveNetworkProvider:
     """Read-only local Windows telemetry provider.
 
     No probes, pings, socket connect attempts, packet injection, firewall changes,
-    DNS resolution, or port scanning are performed.  Get-NetNeighbor only reads
-    the host neighbor cache; psutil reads local adapter/connection state.
+    DNS resolution, or port scanning are performed. A single PowerShell snapshot
+    identifies active default-route interfaces and reads only their neighbor cache.
+    psutil reads local adapter/connection state.
     """
 
     POWERSHELL_TIMEOUT_SECONDS = 3.0
-    MAX_NEIGHBOR_JSON_BYTES = 1024 * 1024
+    MAX_WINDOWS_JSON_BYTES = 1024 * 1024
     MAX_RAW_CONNECTIONS = 2048
 
     def _interfaces(self) -> list[dict[str, Any]]:
@@ -119,16 +142,26 @@ class WindowsPassiveNetworkProvider:
             })
         return rows
 
-    def _neighbors(self) -> list[dict[str, Any]]:
+    def _windows_network_snapshot(self) -> dict[str, Any]:
         if os.name != "nt":
-            return []
+            return {"active_networks": [], "neighbors": []}
         script = (
             "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
             "$ErrorActionPreference='Stop';"
-            "$rows=Get-NetNeighbor | Where-Object {"
+            "$cfgs=@(Get-NetIPConfiguration | Where-Object {"
+            "$_.NetAdapter.Status -eq 'Up' -and $null -ne $_.IPv4DefaultGateway"
+            "});"
+            "$active=@();$neighbors=@();"
+            "foreach($cfg in $cfgs){"
+            "$ip=$null;$prefix=$null;"
+            "if($cfg.IPv4Address){$ip=$cfg.IPv4Address[0].IPAddress;$prefix=$cfg.IPv4Address[0].PrefixLength};"
+            "$gw=$cfg.IPv4DefaultGateway.NextHop;"
+            "$active += [pscustomobject]@{InterfaceAlias=$cfg.InterfaceAlias;InterfaceIndex=$cfg.InterfaceIndex;IPv4Address=$ip;PrefixLength=$prefix;Gateway=$gw};"
+            "$neighbors += @(Get-NetNeighbor -InterfaceIndex $cfg.InterfaceIndex | Where-Object {"
             "$_.State -notin @('Unreachable','Incomplete')"
-            "} | Select-Object InterfaceAlias,IPAddress,LinkLayerAddress,State,AddressFamily;"
-            "$rows | ConvertTo-Json -Compress -Depth 3"
+            "} | Select-Object InterfaceAlias,InterfaceIndex,IPAddress,LinkLayerAddress,State,AddressFamily)"
+            "};"
+            "[pscustomobject]@{ActiveNetworks=$active;Neighbors=$neighbors} | ConvertTo-Json -Compress -Depth 4"
         )
         completed = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -139,19 +172,26 @@ class WindowsPassiveNetworkProvider:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
-            raise RuntimeError("NETWORK_NEIGHBOR_QUERY_FAILED")
+            raise RuntimeError("NETWORK_WINDOWS_SNAPSHOT_FAILED")
         raw = bytes(completed.stdout or b"")
-        if len(raw) > self.MAX_NEIGHBOR_JSON_BYTES:
-            raise RuntimeError("NETWORK_NEIGHBOR_OUTPUT_TOO_LARGE")
+        if len(raw) > self.MAX_WINDOWS_JSON_BYTES:
+            raise RuntimeError("NETWORK_WINDOWS_OUTPUT_TOO_LARGE")
         text = raw.decode("utf-8-sig", errors="strict").strip()
         if not text:
-            return []
+            return {"active_networks": [], "neighbors": []}
         payload = json.loads(text)
-        if isinstance(payload, dict):
-            payload = [payload]
-        if not isinstance(payload, list):
-            return []
-        return [item for item in payload[:1024] if isinstance(item, dict)]
+        if not isinstance(payload, dict):
+            return {"active_networks": [], "neighbors": []}
+        active = payload.get("ActiveNetworks", [])
+        neighbors = payload.get("Neighbors", [])
+        if isinstance(active, dict):
+            active = [active]
+        if isinstance(neighbors, dict):
+            neighbors = [neighbors]
+        return {
+            "active_networks": [x for x in active[:32] if isinstance(x, dict)] if isinstance(active, list) else [],
+            "neighbors": [x for x in neighbors[:1024] if isinstance(x, dict)] if isinstance(neighbors, list) else [],
+        }
 
     def _connections(self) -> list[dict[str, Any]]:
         if psutil is None:
@@ -179,15 +219,17 @@ class WindowsPassiveNetworkProvider:
         return rows
 
     def collect(self) -> dict[str, Any]:
+        windows = self._windows_network_snapshot()
         return {
             "interfaces": self._interfaces(),
-            "neighbors": self._neighbors(),
+            "active_networks": windows["active_networks"],
+            "neighbors": windows["neighbors"],
             "connections": self._connections(),
         }
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1"
+    VERSION = "0.1.2"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -232,7 +274,6 @@ class PassiveNetworkInventory:
                 continue
             user_verified = bool(payload.get("user_verified", False))
             user_id = _bounded_text(payload.get("user_id"), 128) or None
-            # A user identifier is never treated as verified unless explicitly bound.
             if not user_verified:
                 user_id = None
             compiled[key] = DeviceTrustRule(
@@ -244,22 +285,60 @@ class PassiveNetworkInventory:
         return compiled
 
     @staticmethod
-    def _local_ips(interfaces: list[dict[str, Any]]) -> set[str]:
-        values: set[str] = set()
-        for interface in interfaces[:128]:
-            if not isinstance(interface, dict):
+    def _normalized_active_networks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for raw in rows[:32]:
+            if not isinstance(raw, dict):
                 continue
-            for addr in interface.get("addresses", [])[:32] if isinstance(interface.get("addresses"), list) else []:
-                if not isinstance(addr, dict):
-                    continue
-                ip = _normalize_ip(addr.get("address"))
-                if ip:
-                    values.add(ip)
-        return values
+            interface = _bounded_text(raw.get("InterfaceAlias", raw.get("interface")), 128) or "UNKNOWN"
+            index = int(raw.get("InterfaceIndex", raw.get("interface_index", 0)) or 0)
+            local_ip = _normalize_ip(raw.get("IPv4Address", raw.get("local_ipv4")))
+            gateway = _normalize_ip(raw.get("Gateway", raw.get("gateway")))
+            try:
+                prefix = int(raw.get("PrefixLength", raw.get("prefix_length", 0)) or 0)
+            except (TypeError, ValueError):
+                prefix = 0
+            if prefix < 0 or prefix > 32:
+                prefix = 0
+            result.append({
+                "interface": interface,
+                "interface_index": index,
+                "local_ipv4": local_ip,
+                "prefix_length": prefix,
+                "gateway": gateway,
+                "role": "DEFAULT_ROUTE",
+            })
+        return result
 
-    def _trust_for(self, ip: str, mac: str | None, *, local: bool) -> DeviceTrustRule:
-        if local:
-            return DeviceTrustRule("LOCAL", label="This endpoint")
+    @staticmethod
+    def _active_interface_names(active_networks: list[dict[str, Any]]) -> set[str]:
+        return {
+            str(row.get("interface", "")).lower()
+            for row in active_networks
+            if row.get("interface")
+        }
+
+    @staticmethod
+    def _gateway_ips(active_networks: list[dict[str, Any]]) -> set[str]:
+        return {str(row["gateway"]) for row in active_networks if row.get("gateway")}
+
+    @staticmethod
+    def _broadcast_ips(active_networks: list[dict[str, Any]]) -> set[str]:
+        result: set[str] = {"255.255.255.255"}
+        for row in active_networks:
+            ip = row.get("local_ipv4")
+            prefix = row.get("prefix_length")
+            if not ip or not isinstance(prefix, int) or prefix <= 0:
+                continue
+            try:
+                network = ipaddress.ip_network(f"{ip}/{prefix}", strict=False)
+            except ValueError:
+                continue
+            if isinstance(network, ipaddress.IPv4Network):
+                result.add(str(network.broadcast_address))
+        return result
+
+    def _trust_for(self, ip: str, mac: str | None) -> DeviceTrustRule:
         keys = []
         if mac:
             keys.extend([f"mac:{mac.lower()}", mac.lower()])
@@ -278,33 +357,50 @@ class PassiveNetworkInventory:
             if not isinstance(raw, dict):
                 raise TypeError("NETWORK_PROVIDER_INVALID")
             interfaces = raw.get("interfaces", []) if isinstance(raw.get("interfaces"), list) else []
+            active_networks = self._normalized_active_networks(
+                raw.get("active_networks", []) if isinstance(raw.get("active_networks"), list) else []
+            )
             neighbors = raw.get("neighbors", []) if isinstance(raw.get("neighbors"), list) else []
             connections = raw.get("connections", []) if isinstance(raw.get("connections"), list) else []
-            local_ips = self._local_ips(interfaces)
+
+            active_names = self._active_interface_names(active_networks)
+            gateway_ips = self._gateway_ips(active_networks)
+            broadcast_ips = self._broadcast_ips(active_networks)
 
             seen_keys: set[str] = set()
             for item in neighbors[:4096]:
                 if not isinstance(item, dict):
                     continue
-                ip = _normalize_ip(item.get("IPAddress", item.get("ip")))
-                if not ip:
-                    continue
-                mac = _normalize_mac(item.get("LinkLayerAddress", item.get("mac")))
                 interface = _bounded_text(item.get("InterfaceAlias", item.get("interface")), 128) or "UNKNOWN"
+                # If active-route context exists, only that scope can contribute current peers.
+                if active_names and interface.lower() not in active_names:
+                    continue
+
+                raw_ip = item.get("IPAddress", item.get("ip"))
+                ip = _normalize_ip(raw_ip)
+                if not ip or ip in broadcast_ips:
+                    continue
+
+                raw_mac = item.get("LinkLayerAddress", item.get("mac"))
+                if _raw_mac_is_non_unicast(raw_mac):
+                    continue
+                mac = _normalize_mac(raw_mac)
+
                 state = _bounded_text(item.get("State", item.get("state")), 32).upper() or "UNKNOWN"
                 if state not in _ALLOWED_DEVICE_STATES:
                     state = "UNKNOWN"
-                local = ip in local_ips
+
                 identity = _device_key(ip, mac, interface)
                 seen_keys.add(identity)
-                trust = self._trust_for(ip, mac, local=local)
+                trust = self._trust_for(ip, mac)
                 previous = self._devices.get(identity, {})
+                role = "GATEWAY" if ip in gateway_ips else "PEER"
                 row = {
                     "device_id": identity,
                     "ip_address": ip,
                     "mac_address": mac,
                     "interface": interface,
-                    "neighbor_state": "LOCAL" if local else state,
+                    "neighbor_state": state,
                     "online": True,
                     "first_seen": float(previous.get("first_seen", now)),
                     "last_seen": now,
@@ -314,15 +410,17 @@ class PassiveNetworkInventory:
                         "status": "VERIFIED" if trust.user_verified and trust.user_id else "UNKNOWN",
                         "user_id": trust.user_id if trust.user_verified else None,
                     },
-                    "source": "LOCAL" if local else "NEIGHBOR_CACHE",
+                    "role": role,
+                    "source": "NEIGHBOR_CACHE",
                     "passive": True,
                 }
                 self._devices[identity] = row
                 self._devices.move_to_end(identity)
 
-            # Keep previously observed identities as stale evidence rather than silently deleting them.
+            # Historical evidence is retained as stale, but current/online counts are
+            # always derived from this sample only.
             for identity, row in list(self._devices.items()):
-                if identity not in seen_keys and row.get("source") != "LOCAL":
+                if identity not in seen_keys:
                     row = dict(row)
                     row["online"] = False
                     row["neighbor_state"] = "STALE"
@@ -350,17 +448,22 @@ class PassiveNetworkInventory:
                 })
 
             devices = list(self._devices.values())
-            counts = {name: 0 for name in ("LOCAL", "AUTHORIZED", "UNKNOWN", "DENIED", "REVOKED")}
-            for row in devices:
+            online_devices = [row for row in devices if row.get("online")]
+            counts = {name: 0 for name in ("AUTHORIZED", "UNKNOWN", "DENIED", "REVOKED")}
+            for row in online_devices:
                 status = str(row.get("trust", "UNKNOWN")).upper()
                 counts[status if status in counts else "UNKNOWN"] += 1
+
+            gateways_observed = sum(1 for row in online_devices if row.get("role") == "GATEWAY")
+            other_peers_observed = sum(1 for row in online_devices if row.get("role") == "PEER")
+            local_endpoint_count = 1 if active_networks else 0
 
             self.samples += 1
             self.last_error = None
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1",
+                "schema": "cyberdefender.network-inventory.v0.1.2",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -371,18 +474,33 @@ class PassiveNetworkInventory:
                 "dns_resolution": False,
                 "user_identity_inference": False,
                 "unknown_is_unauthorized": False,
+                "hotspot_client_count": None,
+                "hotspot_client_count_authoritative": False,
+                "hotspot_client_count_reason": "AP_CONTROLLER_EVIDENCE_UNAVAILABLE",
                 "sampled_at": now,
                 "duration_ms": self.last_duration_ms,
                 "summary": {
-                    "devices_total": len(devices),
-                    "online": sum(1 for row in devices if row.get("online")),
+                    "local_endpoint_count": local_endpoint_count,
+                    "observed_peers_total": len(devices),
+                    "observed_peers_online": len(online_devices),
+                    "gateways_observed": gateways_observed,
+                    "other_peers_observed": other_peers_observed,
                     "connections_total": len(bounded_connections),
-                    "local": counts["LOCAL"],
                     "authorized": counts["AUTHORIZED"],
                     "unknown": counts["UNKNOWN"],
                     "denied": counts["DENIED"],
                     "revoked": counts["REVOKED"],
+                    # Compatibility aliases. These are explicitly NOT AP/client counts.
+                    "devices_total": len(devices),
+                    "online": len(online_devices),
                 },
+                "count_semantics": {
+                    "devices_total": "OBSERVED_NEIGHBOR_IDENTITIES_NOT_CONNECTED_CLIENTS",
+                    "online": "CURRENTLY_OBSERVED_NEIGHBOR_IDENTITIES",
+                    "connections_total": "LOCAL_SOCKET_FLOW_OBSERVATIONS",
+                    "hotspot_client_count": "UNAVAILABLE_WITHOUT_AP_CONTROLLER_EVIDENCE",
+                },
+                "active_networks": active_networks,
                 "interfaces": interfaces[:32],
                 "devices": devices[-self.max_devices :],
                 "connections": bounded_connections,
@@ -410,6 +528,7 @@ class PassiveNetworkInventory:
             "dashboard_direct_os_access": False,
             "packet_injection": False,
             "firewall_mutation": False,
+            "hotspot_client_count_authoritative": False,
             "samples": self.samples,
             "failures": self.failures,
             "evictions": self.evictions,
