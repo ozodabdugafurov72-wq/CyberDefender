@@ -247,7 +247,7 @@ def freshness(snapshot: dict) -> dict:
 def component_rows(health: dict) -> list[dict]:
     preferred = [
         ("Safety Core", "safety_core"), ("Key Manager", "key_manager"),
-        ("Resource Guard", "resource_guard"), ("Event Bus", "event_bus"),
+        ("Resource Guard", "resource_guard"), ("Network Inventory", "network_inventory"), ("Event Bus", "event_bus"),
         ("Admission Gateway", "admission_gateway"), ("Detection", "detector"),
         ("Correlation", "correlation_engine"), ("Process Graph", "process_graph"),
         ("Process Authority", "process_sensor_authority"), ("Rust Canary", "rust_process_canary"),
@@ -597,6 +597,7 @@ def build_admin_state() -> dict:
         "runtime": runtime,
         "resource_state": owner.get("resource_state", {}),
         "process_inventory": owner.get("process_inventory", [])[:24],
+        "network_inventory": owner.get("network_inventory", {}),
         "sensor_plane": owner.get("sensor_plane", {}),
         "pipeline": pipeline,
         "incident_summary": owner.get("incident_summary", {}),
@@ -614,6 +615,7 @@ def build_state() -> dict:
     runtime = snapshot.get("runtime", {}) if isinstance(snapshot.get("runtime"), dict) else {}
     health = snapshot.get("health", {}) if isinstance(snapshot.get("health"), dict) else {}
     observation = snapshot.get("observation", {}) if isinstance(snapshot.get("observation"), dict) else {}
+    network_inventory = runtime.get("network_inventory", {}) if isinstance(runtime.get("network_inventory"), dict) else {}
     incidents = snapshot.get("incidents", []) if isinstance(snapshot.get("incidents"), list) else []
     risk = health.get("risk_engine", {}) if isinstance(health.get("risk_engine"), dict) else {}
     resources = health.get("resource_guard", {}) if isinstance(health.get("resource_guard"), dict) else {}
@@ -731,6 +733,7 @@ def build_state() -> dict:
             if isinstance(runtime.get("process_inventory", []), list)
             else []
         ),
+        "network_inventory": network_inventory,
         "health": health,
         "resource_state": {
             "status": resource_status,

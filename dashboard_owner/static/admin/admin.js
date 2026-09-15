@@ -9,7 +9,7 @@
   const setBar=(id,v)=>{const e=$(id);const n=Math.max(0,Math.min(100,Number(v||0)*100));if(e)e.style.width=`${n}%`};
   function fieldRow(sp,name,prefix){const f=sp?.parity?.[name]||{};text(prefix+"Match",f.matches);text(prefix+"Mismatch",f.mismatches);text(prefix+"Coverage",pct(f.coverage_rate));}
   function render(d){
-    const rt=d.runtime||{}, sp=d.sensor_plane||{}, c=sp.canary||{}, ipc=sp.ipc||{}, p=sp.parity||{}, res=d.resource_state||{}, inc=d.incident_summary||{};
+    const rt=d.runtime||{}, sp=d.sensor_plane||{}, c=sp.canary||{}, ipc=sp.ipc||{}, p=sp.parity||{}, res=d.resource_state||{}, inc=d.incident_summary||{}, net=d.network_inventory||{}, ns=net.summary||{};
     const fresh=d.runtime_freshness||{};
     text("connection",fresh.available?(fresh.stale?"STALE":"LIVE"):"OFFLINE"); text("freshness",fresh.age_seconds==null?"runtime unavailable":`${num(fresh.age_seconds)}s state age`);
     text("overall",d.overall_status||"UNKNOWN"); text("runtimeMeta",`${rt.cycle_count??0} cycles · ${rt.component_failures??0} core failures`);
@@ -19,6 +19,8 @@
     text("parityVerdict",p.verdict||"NO SAMPLE"); text("parityMeta",`${p.common_processes??0} common processes`);
     text("resourceStatus",res.status||"UNKNOWN"); text("resourceMeta",`${num(res.memory_percent)}% memory · ${num(res.cpu_percent)}% cpu`);
     const total=Number(inc.security_incidents||0)+Number(inc.resource_incidents||0);text("incidentCount",total);text("incidentMeta",`${inc.security_incidents||0} security · ${inc.resource_incidents||0} resource`);
+    text("networkMode",net.mode||"PASSIVE ONLY"); text("netDevices",ns.devices_total??0); text("netOnline",`${ns.online??0} online`); text("netAuthorized",ns.authorized??0); text("netUnknown",ns.unknown??0); text("netDenied",Number(ns.denied||0)+Number(ns.revoked||0)); text("netConnections",ns.connections_total??0); text("netActiveScan",net.active_scan_enabled?"ENABLED":"DISABLED"); text("netSampleAge",net.sampled_at?`${Math.max(0,Math.round(Date.now()/1000-Number(net.sampled_at)))}s sample age`:"no sample");
+    const nd=$("networkDevices");if(nd){const rows=Array.isArray(net.devices)?net.devices:[];nd.innerHTML=rows.length?rows.slice(-32).reverse().map(x=>{const u=x.user_identity||{};const trust=String(x.trust||"UNKNOWN").toUpperCase();const user=u.status==="VERIFIED"&&u.user_id?`VERIFIED · ${esc(u.user_id)}`:"UNKNOWN";return `<div class="device-row"><span class="trust ${esc(trust.toLowerCase())}">${esc(trust)}</span><div><b>${esc(x.label||x.device_id||"Observed device")}</b><small>${esc(x.source||"NEIGHBOR_CACHE")} · ${x.passive===false?"ACTIVE":"PASSIVE"}</small></div><span>${esc(x.ip_address||"—")}</span><span>${esc(x.mac_address||"—")}</span><span>${esc(x.interface||"—")}</span><span>${esc(x.online?x.neighbor_state||"ONLINE":"STALE")}</span><span>${user}</span></div>`}).join(""):`<div class="device-row"><span>—</span><div><b>No passive device evidence yet</b><small>Active scanning remains disabled.</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div>`}
     text("primaryLock",sp.primary_lock==="OPEN"?"PRIMARY ENABLED":"LOCK CLOSED"); text("pythonStatus",sp.python_sensor_status||"UNKNOWN"); text("graphStatus",sp.process_graph_status||"UNKNOWN");
     text("canaryDetail",`${c.sensor_version||"0.5.1"} · ${c.sample_count??0} samples · ${c.failure_count??0} failures`);
     text("ipcBadge",ipc.status||"UNKNOWN"); text("sensorPid",ipc.sensor_pid); text("generation",ipc.generation); text("sequence",ipc.sequence); text("restarts",ipc.restart_count??0);

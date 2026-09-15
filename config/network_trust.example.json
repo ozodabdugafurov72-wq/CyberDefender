@@ -1,0 +1,15 @@
+{
+  "schema": "cyberdefender.network-trust.v0.1",
+  "devices": {
+    "mac:aa:bb:cc:dd:ee:ff": {
+      "status": "AUTHORIZED",
+      "label": "Example managed device",
+      "user_verified": false
+    },
+    "ip:192.168.1.250": {
+      "status": "DENIED",
+      "label": "Example policy-denied device",
+      "user_verified": false
+    }
+  }
+}

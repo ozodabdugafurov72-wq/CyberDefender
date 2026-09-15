@@ -72,6 +72,11 @@ from agent.sensors.process import (
     ProcessSensor,
 )
 
+from agent.network.passive_inventory import (
+    PassiveNetworkInventory,
+    load_trust_registry,
+)
+
 from agent.sensors.process_display import (
     build_process_inventory,
 )
@@ -376,6 +381,12 @@ class CyberDefenderRuntime:
 
         self.last_observation: dict[str, Any] | None = None
 
+        # Passive network inventory is observational only. It never probes hosts,
+        # grants authorization, mutates firewall state, or executes dashboard actions.
+        self.last_network_inventory: dict[str, Any] | None = None
+        self.network_inventory_failures = 0
+        self.network_inventory_sample_every_cycles = 5
+
         self.last_process_graph_result: dict[str, Any] | None = None
         # Bounded, display-only inventory derived from the authoritative
         # Python ProcessSensor snapshot. It is never an authority input.
@@ -492,6 +503,10 @@ class CyberDefenderRuntime:
 
         self.observer: (
             SystemObserver | None
+        ) = None
+
+        self.network_inventory: (
+            PassiveNetworkInventory | None
         ) = None
 
         self.detector: (
@@ -1117,6 +1132,43 @@ class CyberDefenderRuntime:
                 state_root
             )
         )
+
+        # ----------------------------------------------------
+        # PASSIVE NETWORK INVENTORY v0.1
+        # ----------------------------------------------------
+        # This is a non-authoritative read-only observability plane.  Its
+        # failure is visible but must never stop or authorize the core runtime.
+        try:
+            registry_path = state_root / "network_trust.json"
+            trust_registry = load_trust_registry(registry_path)
+            self.network_inventory = PassiveNetworkInventory(
+                trust_registry=trust_registry,
+                max_devices=min(
+                    self._positive_int(
+                        os.getenv("CYBERDEFENDER_NETWORK_MAX_DEVICES"),
+                        256,
+                    ),
+                    2048,
+                ),
+                max_connections=min(
+                    self._positive_int(
+                        os.getenv("CYBERDEFENDER_NETWORK_MAX_CONNECTIONS"),
+                        256,
+                    ),
+                    4096,
+                ),
+            )
+            self.network_inventory_sample_every_cycles = min(
+                self._positive_int(
+                    os.getenv("CYBERDEFENDER_NETWORK_SAMPLE_EVERY_CYCLES"),
+                    5,
+                ),
+                120,
+            )
+        except Exception as exc:
+            self.network_inventory = None
+            self.network_inventory_failures += 1
+            self.last_error = f"network_inventory_bootstrap:{type(exc).__name__}"
 
         # ----------------------------------------------------
         # STRUCTURED DATA READ MODEL (P0.7)
@@ -3287,6 +3339,12 @@ class CyberDefenderRuntime:
             )
 
             # =================================================
+            # PASSIVE NETWORK INVENTORY (NON-AUTHORITATIVE)
+            # =================================================
+
+            self.update_network_inventory()
+
+            # =================================================
             # INCIDENTS
             # =================================================
 
@@ -3332,6 +3390,41 @@ class CyberDefenderRuntime:
             self.last_cycle_completed = (
                 time.time()
             )
+
+    # ========================================================
+    # PASSIVE NETWORK INVENTORY v0.1
+    # ========================================================
+
+    def update_network_inventory(self) -> dict[str, Any] | None:
+        """Refresh bounded passive local network telemetry.
+
+        This path is explicitly non-authoritative.  Collection failure is
+        observable but does not degrade the core security runtime.  No active
+        scan, packet injection, DNS resolution, firewall mutation, or host
+        response action is performed here.
+        """
+        collector = self.network_inventory
+        if collector is None:
+            return None
+
+        if (
+            self.last_network_inventory is not None
+            and self.cycle_count % self.network_inventory_sample_every_cycles != 0
+        ):
+            return self.last_network_inventory
+
+        try:
+            result = collector.collect()
+            if not isinstance(result, dict):
+                raise RuntimeError("NETWORK_INVENTORY_INVALID_RESULT")
+            self.last_network_inventory = result
+            return result
+        except Exception as exc:
+            self.network_inventory_failures += 1
+            self.last_error = f"network_inventory:{type(exc).__name__}"
+            # Preserve the last trusted observation rather than replacing it
+            # with fabricated/empty success.
+            return self.last_network_inventory
 
     # ========================================================
     # STRUCTURED DATA READ-MODEL SYNC (P0.7)
@@ -3670,6 +3763,9 @@ class CyberDefenderRuntime:
                 "data_repository_failures":
                     self.data_repository_failures,
 
+                "network_inventory_failures":
+                    self.network_inventory_failures,
+
                 "data_repository_syncs":
                     self.data_repository_syncs,
 
@@ -3939,6 +4035,9 @@ class CyberDefenderRuntime:
 
             "observer":
                 self.observer,
+
+            "network_inventory":
+                self.network_inventory,
 
             "process_sensor":
                 self.process_sensor,
@@ -4238,6 +4337,11 @@ class CyberDefenderRuntime:
                 "response_recovery": self.last_response_recovery_result or {},
                 "response_lifecycle": self.last_response_lifecycle_result or {},
                 "process_inventory": list(self.last_process_inventory[:18]),
+                "network_inventory": (
+                    dict(self.last_network_inventory)
+                    if isinstance(self.last_network_inventory, dict)
+                    else {}
+                ),
             }
 
             

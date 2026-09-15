@@ -25,6 +25,20 @@
  <article><span>RESOURCE</span><b id="resourceStatus">—</b><small id="resourceMeta">—</small></article>
  <article><span>INCIDENTS</span><b id="incidentCount">0</b><small id="incidentMeta">—</small></article>
 </section>
+<section class="panel network-panel" id="network-inventory">
+ <div class="head"><div><span class="eyebrow">NETWORK & DEVICES</span><h2>Passive Network Inventory</h2></div><span class="badge safe" id="networkMode">PASSIVE ONLY</span></div>
+ <div class="network-guard">READ ONLY · NO PING · NO PORT SCAN · NO PACKET INJECTION · UNKNOWN ≠ UNAUTHORIZED · USER IDENTITY IS NEVER INFERRED FROM IP/MAC</div>
+ <div class="network-kpis">
+  <div><span>DEVICES</span><b id="netDevices">0</b><small id="netOnline">0 online</small></div>
+  <div><span>AUTHORIZED</span><b id="netAuthorized">0</b><small>explicit trust only</small></div>
+  <div><span>UNKNOWN</span><b id="netUnknown">0</b><small>not automatically denied</small></div>
+  <div><span>DENIED / REVOKED</span><b id="netDenied">0</b><small>policy evidence only</small></div>
+  <div><span>CONNECTIONS</span><b id="netConnections">0</b><small>local passive view</small></div>
+  <div><span>ACTIVE SCAN</span><b id="netActiveScan">DISABLED</b><small id="netSampleAge">—</small></div>
+ </div>
+ <div class="device-head"><span>TRUST</span><span>DEVICE</span><span>IP</span><span>MAC</span><span>INTERFACE</span><span>STATE</span><span>USER BINDING</span></div>
+ <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry only</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
+</section>
 <section class="grid two">
  <article class="panel">
   <div class="head"><div><span class="eyebrow">PROCESS SENSOR AUTHORITY</span><h2>Single-Authority Plane</h2></div><span class="badge safe" id="primaryLock">LOCK CLOSED</span></div>
