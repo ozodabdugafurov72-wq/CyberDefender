@@ -71,6 +71,8 @@ class FixtureProvider:
                 "schema": "cyberdefender.dns-cache-observation.v0.1.6",
                 "status": "HEALTHY",
                 "available": True,
+                "version": "0.1.6.1",
+                "raw_rows_observed": 5,
                 "entries_observed": 5,
                 "unique_names": 5,
                 "unique_ips": 2,
@@ -112,6 +114,9 @@ def main() -> int:
 
     dns = snap["dns_cache"]
     check(dns["available"] is True, "DNS cache health is observable")
+    check(dns["schema"] == "cyberdefender.dns-cache-runtime.v0.1.6.1", "DNS runtime hotfix schema is explicit")
+    check(dns["reader_version"] == "0.1.6.1", "DNS reader hotfix version is visible")
+    check(dns["raw_rows_observed"] == 5, "raw DNS cache row count is observable")
     check(dns["correlated_connections"] == 1, "correlated connection count is explicit")
     check(snap["summary"]["dns_correlated_connections"] == 1, "summary exposes DNS correlation count")
 

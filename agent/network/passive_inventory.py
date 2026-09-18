@@ -642,7 +642,8 @@ class PassiveNetworkInventory:
                 "devices": devices[-self.max_devices :],
                 "connections": bounded_connections,
                 "dns_cache": {
-                    "schema": "cyberdefender.dns-cache-runtime.v0.1.6",
+                    "schema": "cyberdefender.dns-cache-runtime.v0.1.6.1",
+                    "reader_version": _bounded_text(dns_cache.get("version"), 24) or None,
                     "mode": "PASSIVE_LOCAL_CACHE",
                     "status": _bounded_text(dns_cache.get("status"), 32).upper() or "UNAVAILABLE",
                     "available": bool(dns_cache.get("available", False)),
@@ -650,6 +651,7 @@ class PassiveNetworkInventory:
                     "authoritative": False,
                     "external_queries": False,
                     "reverse_lookup": False,
+                    "raw_rows_observed": int(dns_cache.get("raw_rows_observed", 0) or 0),
                     "entries_observed": int(dns_cache.get("entries_observed", 0) or 0),
                     "unique_names": int(dns_cache.get("unique_names", 0) or 0),
                     "unique_ips": int(dns_cache.get("unique_ips", 0) or 0),

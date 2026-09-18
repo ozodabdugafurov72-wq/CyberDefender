@@ -49,7 +49,7 @@ class WindowsDnsCacheReader:
       * output and record counts are bounded before publication.
     """
 
-    VERSION = "0.1.6"
+    VERSION = "0.1.6.1"
     MODE = "PASSIVE_LOCAL_CACHE"
     AUTHORITY = "NONE"
     POWERSHELL_TIMEOUT_SECONDS = 2.0
@@ -66,7 +66,7 @@ class WindowsDnsCacheReader:
             "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"
             "$ErrorActionPreference='Stop';"
             "$rows=@(Get-DnsClientCache | Select-Object "
-            "Entry,RecordName,RecordType,Status,Section,TimeToLive,Data);"
+            "Entry,Name,RecordName,Type,RecordType,Status,Section,TimeToLive,Data);"
             "$rows | ConvertTo-Json -Compress -Depth 3"
         )
         try:
@@ -103,12 +103,12 @@ class WindowsDnsCacheReader:
         for item in payload[: self.MAX_ENTRIES * 2]:
             if not isinstance(item, dict):
                 continue
-            record_type = _bounded_text(item.get("RecordType"), 24).upper()
+            record_type = _bounded_text(item.get("RecordType") or item.get("Type"), 24).upper()
             # PowerShell may serialize record type numerically on some builds.
             if record_type not in {"A", "AAAA", "1", "28"}:
                 continue
             ip = _normalize_ip(item.get("Data"))
-            name = _normalize_domain(item.get("RecordName") or item.get("Entry"))
+            name = _normalize_domain(item.get("RecordName") or item.get("Name") or item.get("Entry"))
             if not ip or not name:
                 continue
             try:
@@ -132,7 +132,7 @@ class WindowsDnsCacheReader:
         unique_names = len({row["name"] for row in entries})
         unique_ips = len({row["ip_address"] for row in entries})
         return {
-            "schema": "cyberdefender.dns-cache-observation.v0.1.6",
+            "schema": "cyberdefender.dns-cache-observation.v0.1.6.1",
             "version": self.VERSION,
             "mode": self.MODE,
             "status": "HEALTHY",
@@ -142,6 +142,7 @@ class WindowsDnsCacheReader:
             "external_queries": False,
             "reverse_lookup": False,
             "entries": entries,
+            "raw_rows_observed": len(payload),
             "entries_observed": len(entries),
             "unique_names": unique_names,
             "unique_ips": unique_ips,
@@ -150,7 +151,7 @@ class WindowsDnsCacheReader:
 
     def _unavailable(self, reason: str) -> dict[str, Any]:
         return {
-            "schema": "cyberdefender.dns-cache-observation.v0.1.6",
+            "schema": "cyberdefender.dns-cache-observation.v0.1.6.1",
             "version": self.VERSION,
             "mode": self.MODE,
             "status": "UNAVAILABLE",
@@ -160,6 +161,7 @@ class WindowsDnsCacheReader:
             "external_queries": False,
             "reverse_lookup": False,
             "entries": [],
+            "raw_rows_observed": 0,
             "entries_observed": 0,
             "unique_names": 0,
             "unique_ips": 0,
