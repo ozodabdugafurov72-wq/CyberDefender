@@ -135,3 +135,21 @@ failures and the last registry error.
 
 Each matched peer exposes bounded trust evidence (`evidence_type`, optional
 `evidence_ref`) with `authoritative=false` and `authorization=NOT_GRANTED`.
+
+
+## v0.1.6 — Passive DNS Cache Correlation Foundation
+
+v0.1.6 adds bounded, local-only DNS cache evidence to connection telemetry.
+
+Security contract:
+
+- reads the existing Windows DNS client cache with `Get-DnsClientCache`;
+- does not issue DNS queries or reverse lookups;
+- does not use DNS names as authorization or trust evidence;
+- correlates cached A/AAAA records to already-observed remote connection IPs;
+- publishes at most four cached names per connection;
+- cache-reader failure degrades only optional DNS telemetry;
+- active scanning, packet injection, firewall mutation, auto-whitelist, and remote enrichment remain disabled;
+- `DNS cache match != trusted destination` and `DNS name != authorization`.
+
+The network inventory schema is `cyberdefender.network-inventory.v0.1.6`.

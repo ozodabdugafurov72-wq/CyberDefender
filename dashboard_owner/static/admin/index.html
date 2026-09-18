@@ -37,6 +37,7 @@
   <div><span>DENIED / REVOKED</span><b id="netDenied">0</b><small>policy evidence only</small></div>
   <div><span>HOTSPOT CLIENTS</span><b id="netHotspotClients">UNAVAILABLE</b><small>requires AP/controller evidence</small></div>
   <div><span>CONNECTIONS</span><b id="netConnections">0</b><small>local socket/flow observations</small></div>
+  <div><span>DNS CACHE</span><b id="netDnsCache">UNAVAILABLE</b><small id="netDnsMeta">passive local cache only</small></div>
   <div><span>ACTIVE SCAN</span><b id="netActiveScan">DISABLED</b><small id="netSampleAge">—</small></div>
   <div><span>COLLECTOR</span><b id="netCollector">ASYNC</b><small id="netCollectorMeta">bounded background worker</small></div>
   <div><span>TRUST REGISTRY</span><b id="netTrustRegistry">0 RULES</b><small id="netTrustRegistryMeta">explicit local evidence only</small></div>
@@ -44,8 +45,8 @@
  </div>
  <div class="device-head"><span>TRUST</span><span>OBSERVED PEER</span><span>IP</span><span>MAC</span><span>ROLE / INTERFACE</span><span>STATE</span><span>USER BINDING</span></div>
  <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry only</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
- <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS EVIDENCE · HASH/SIGNATURE ENRICHMENT IS BOUNDED AND NON-AUTHORITATIVE</small></div>
- <div class="connection-head"><span>PROCESS</span><span>PID</span><span>LOCAL</span><span>REMOTE</span><span>STATE</span><span>SHA-256</span><span>SIGNATURE</span></div>
+ <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS + PASSIVE DNS CACHE EVIDENCE · ENRICHMENT IS BOUNDED AND NON-AUTHORITATIVE</small></div>
+ <div class="connection-head"><span>PROCESS</span><span>PID</span><span>LOCAL</span><span>REMOTE / DNS</span><span>STATE</span><span>SHA-256</span><span>SIGNATURE</span></div>
  <div class="connections" id="networkConnections"><div class="connection-row"><div><b>Waiting for connection attribution</b><small>Local process identity only; no vendor inference from remote IP.</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
 </section>
 <section class="grid two">

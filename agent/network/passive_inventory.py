@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .dns_cache import WindowsDnsCacheReader
 from .process_attribution import ProcessAttributionResolver
 
 try:
@@ -124,8 +125,13 @@ class WindowsPassiveNetworkProvider:
     MAX_WINDOWS_JSON_BYTES = 1024 * 1024
     MAX_RAW_CONNECTIONS = 2048
 
-    def __init__(self, process_resolver: ProcessAttributionResolver | None = None) -> None:
+    def __init__(
+        self,
+        process_resolver: ProcessAttributionResolver | None = None,
+        dns_reader: WindowsDnsCacheReader | None = None,
+    ) -> None:
         self.process_resolver = process_resolver or ProcessAttributionResolver()
+        self.dns_reader = dns_reader or WindowsDnsCacheReader()
 
     def _interfaces(self) -> list[dict[str, Any]]:
         if psutil is None:
@@ -237,12 +243,14 @@ class WindowsPassiveNetworkProvider:
 
     def collect(self) -> dict[str, Any]:
         windows = self._windows_network_snapshot()
+        dns_cache = self.dns_reader.read()
         return {
             "interfaces": self._interfaces(),
             "active_networks": windows["active_networks"],
             "neighbors": windows["neighbors"],
             "connections": self._connections(),
             "process_attribution": self.process_resolver.health_check(),
+            "dns_cache": dns_cache,
         }
 
     def close(self) -> None:
@@ -250,7 +258,7 @@ class WindowsPassiveNetworkProvider:
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.5"
+    VERSION = "0.1.6"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -426,6 +434,25 @@ class PassiveNetworkInventory:
                 return rule
         return DeviceTrustRule("UNKNOWN")
 
+    @staticmethod
+    def _dns_index(raw_dns: dict[str, Any]) -> dict[str, list[str]]:
+        """Build a bounded IP -> DNS-name index from passive cache evidence."""
+        result: dict[str, list[str]] = {}
+        entries = raw_dns.get("entries", []) if isinstance(raw_dns, dict) else []
+        if not isinstance(entries, list):
+            return result
+        for item in entries[:4096]:
+            if not isinstance(item, dict):
+                continue
+            ip = _normalize_ip(item.get("ip_address"))
+            name = _bounded_text(item.get("name"), 253).rstrip(".").lower()
+            if not ip or not name:
+                continue
+            names = result.setdefault(ip, [])
+            if name not in names and len(names) < 4:
+                names.append(name)
+        return result
+
     def collect(self) -> dict[str, Any]:
         started = time.perf_counter()
         now = float(self.clock())
@@ -440,6 +467,8 @@ class PassiveNetworkInventory:
             )
             neighbors = raw.get("neighbors", []) if isinstance(raw.get("neighbors"), list) else []
             connections = raw.get("connections", []) if isinstance(raw.get("connections"), list) else []
+            dns_cache = raw.get("dns_cache", {}) if isinstance(raw.get("dns_cache"), dict) else {}
+            dns_index = self._dns_index(dns_cache)
 
             active_names = self._active_interface_names(active_networks)
             gateway_ips = self._gateway_ips(active_networks)
@@ -535,6 +564,14 @@ class PassiveNetworkInventory:
                         "authority": "NONE",
                         "authorization": "NOT_GRANTED",
                     },
+                    "dns": {
+                        "names": list(dns_index.get(remote_ip, [])),
+                        "source": "WINDOWS_DNS_CACHE" if dns_index.get(remote_ip) else "NO_MATCH",
+                        "passive": True,
+                        "authoritative": False,
+                        "authority": "NONE",
+                        "authorization": "NOT_GRANTED",
+                    },
                     "passive": True,
                 })
 
@@ -548,13 +585,16 @@ class PassiveNetworkInventory:
             gateways_observed = sum(1 for row in online_devices if row.get("role") == "GATEWAY")
             other_peers_observed = sum(1 for row in online_devices if row.get("role") == "PEER")
             local_endpoint_count = 1 if active_networks else 0
+            dns_correlated_connections = sum(
+                1 for row in bounded_connections if (row.get("dns") or {}).get("names")
+            )
 
             self.samples += 1
             self.last_error = None
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.5",
+                "schema": "cyberdefender.network-inventory.v0.1.6",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -563,6 +603,9 @@ class PassiveNetworkInventory:
                 "packet_injection": False,
                 "firewall_mutation": False,
                 "dns_resolution": False,
+                "dns_cache_observation": True,
+                "external_dns_queries": False,
+                "reverse_dns_lookup": False,
                 "user_identity_inference": False,
                 "unknown_is_unauthorized": False,
                 "hotspot_client_count": None,
@@ -577,6 +620,9 @@ class PassiveNetworkInventory:
                     "gateways_observed": gateways_observed,
                     "other_peers_observed": other_peers_observed,
                     "connections_total": len(bounded_connections),
+                    "dns_cache_entries": int(dns_cache.get("entries_observed", 0) or 0),
+                    "dns_unique_names": int(dns_cache.get("unique_names", 0) or 0),
+                    "dns_correlated_connections": dns_correlated_connections,
                     "authorized": counts["AUTHORIZED"],
                     "unknown": counts["UNKNOWN"],
                     "denied": counts["DENIED"],
@@ -595,6 +641,21 @@ class PassiveNetworkInventory:
                 "interfaces": interfaces[:32],
                 "devices": devices[-self.max_devices :],
                 "connections": bounded_connections,
+                "dns_cache": {
+                    "schema": "cyberdefender.dns-cache-runtime.v0.1.6",
+                    "mode": "PASSIVE_LOCAL_CACHE",
+                    "status": _bounded_text(dns_cache.get("status"), 32).upper() or "UNAVAILABLE",
+                    "available": bool(dns_cache.get("available", False)),
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "external_queries": False,
+                    "reverse_lookup": False,
+                    "entries_observed": int(dns_cache.get("entries_observed", 0) or 0),
+                    "unique_names": int(dns_cache.get("unique_names", 0) or 0),
+                    "unique_ips": int(dns_cache.get("unique_ips", 0) or 0),
+                    "correlated_connections": dns_correlated_connections,
+                    "last_error": _bounded_text(dns_cache.get("last_error"), 96) or None,
+                },
                 "process_attribution": raw.get("process_attribution", {}) if isinstance(raw.get("process_attribution"), dict) else {},
                 "trust_registry": {
                     "schema": "cyberdefender.network-trust-runtime.v0.1.5",
@@ -647,6 +708,9 @@ class PassiveNetworkInventory:
             "authority": self.AUTHORITY,
             "authoritative": False,
             "active_scan_enabled": False,
+            "dns_cache_observation": True,
+            "external_dns_queries": False,
+            "reverse_dns_lookup": False,
             "dashboard_direct_os_access": False,
             "packet_injection": False,
             "firewall_mutation": False,
