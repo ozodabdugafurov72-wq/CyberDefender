@@ -49,7 +49,7 @@ def main() -> int:
     inventory = PassiveNetworkInventory(provider=FixtureProvider(), flow_tracker=tracker)
 
     first = inventory.collect()
-    check(first["schema"] == "cyberdefender.network-inventory.v0.1.7", "v0.1.7 outer network schema is explicit")
+    check(first["schema"] == "cyberdefender.network-inventory.v0.1.8", "v0.1.8 outer network schema is explicit")
     check(first["flow_telemetry_observation"] is True, "passive interface flow telemetry is explicit")
     check(first["packet_capture"] is False, "packet capture remains disabled")
     check(first["per_connection_byte_attribution"] is False, "per-connection byte attribution is explicitly unavailable")

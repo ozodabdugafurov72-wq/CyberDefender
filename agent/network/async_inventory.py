@@ -18,7 +18,7 @@ class AsyncPassiveNetworkInventory:
       * close() is bounded and never blocks the security runtime indefinitely.
     """
 
-    VERSION = "0.1.4"
+    VERSION = "0.1.8"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -92,13 +92,43 @@ class AsyncPassiveNetworkInventory:
             return not already_pending
 
     def get_latest_snapshot(self) -> dict[str, Any] | None:
-        """Return a defensive copy of the latest good bounded snapshot."""
+        """Return a defensive copy plus memory-only fresh flow evidence.
+
+        Full neighbor/DNS/connection collection remains bounded in the worker.
+        Between those heavier samples, an optional collector fast path may
+        provide an in-memory flow snapshot. The fast path is non-authoritative
+        and must not perform operating-system or network I/O.
+        """
         with self._lock:
             if self._latest is None:
                 return None
             snapshot = copy.deepcopy(self._latest)
-            snapshot["runtime_integration"] = self._integration_state_locked()
-            return snapshot
+            integration = self._integration_state_locked()
+
+        fast_method = getattr(self.collector, "fast_flow_snapshot", None)
+        merge_method = getattr(self.collector, "merge_fast_flow", None)
+        if callable(fast_method) and callable(merge_method):
+            try:
+                flow = fast_method()
+                if isinstance(flow, dict):
+                    snapshot = merge_method(snapshot, flow)
+                    snapshot["fast_flow_refresh"] = {
+                        "mode": "MEMORY_ONLY",
+                        "authority": "NONE",
+                        "authoritative": False,
+                        "sequence": int(flow.get("sequence", 0) or 0),
+                        "sample_age_seconds": flow.get("sample_age_seconds"),
+                    }
+            except Exception as exc:
+                snapshot["fast_flow_refresh"] = {
+                    "mode": "MEMORY_ONLY",
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "error": type(exc).__name__,
+                }
+
+        snapshot["runtime_integration"] = integration
+        return snapshot
 
     def _deadline_exceeded_locked(self) -> bool:
         if not self._in_flight or self._started_monotonic is None:
@@ -118,7 +148,7 @@ class AsyncPassiveNetworkInventory:
             and last_success_age > self.stale_after_seconds
         )
         return {
-            "schema": "cyberdefender.network-inventory-integration.v0.1.4",
+            "schema": "cyberdefender.network-inventory-integration.v0.1.8",
             "version": self.VERSION,
             "mode": "ASYNC_BOUNDED",
             "authority": self.AUTHORITY,

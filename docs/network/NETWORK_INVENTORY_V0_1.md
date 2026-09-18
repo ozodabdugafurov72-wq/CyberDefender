@@ -180,5 +180,33 @@ Security and semantics contract:
 - `flow rate != anomaly`, `high bandwidth != malicious`, and `traffic evidence != authorization`.
 
 The network inventory outer schema becomes
-`cyberdefender.network-inventory.v0.1.7` while DNS cache evidence remains on the
+`cyberdefender.network-inventory.v0.1.8` while DNS cache evidence remains on the
 v0.1.6.1 compatibility reader.
+
+## v0.1.8 — Flow Continuity & Accuracy Hardening
+
+v0.1.8 decouples lightweight interface-rate sampling from the heavier passive
+network inventory snapshot. A dedicated bounded daemon sampler reads only local
+cumulative interface counters at a default 1 second cadence. The full
+neighbor/DNS/connection inventory remains asynchronous and coalesced.
+
+Accuracy/continuity contract:
+
+- raw instantaneous rates come from the latest valid counter delta;
+- 5 second and 30 second rolling mean/peak windows are published separately;
+- sequence numbers, sample age, cadence, late samples, gap events, estimated
+  missed slots, counter resets and sampling coverage are explicit;
+- stale or post-suspend evidence is never silently presented as fresh;
+- counter rollback starts a new baseline and cannot produce wrapped/negative rates;
+- the runtime may refresh flow telemetry from bounded in-memory sampler state
+  between full inventory collections; this fast path performs no PowerShell,
+  DNS, socket enumeration, packet capture, or remote I/O;
+- packet capture and per-connection byte attribution remain disabled;
+- continuity percentage is a sampling-continuity estimate, not a packet-delivery
+  guarantee and not an authorization signal;
+- `high traffic != malicious`, `flow continuity != trust`, and
+  `flow evidence != authorization`.
+
+The network inventory outer schema is
+`cyberdefender.network-inventory.v0.1.8` and the continuous flow schema is
+`cyberdefender.interface-flow-continuity.v0.1.8`.

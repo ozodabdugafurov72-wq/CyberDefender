@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .dns_cache import WindowsDnsCacheReader
+from .flow_continuity import PassiveInterfaceFlowSampler
 from .flow_telemetry import InterfaceFlowTracker
 from .process_attribution import ProcessAttributionResolver
 
@@ -291,7 +292,7 @@ class WindowsPassiveNetworkProvider:
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.7"
+    VERSION = "0.1.8"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -305,10 +306,15 @@ class PassiveNetworkInventory:
         max_connections: int = 256,
         clock: Callable[[], float] = time.time,
         flow_tracker: InterfaceFlowTracker | None = None,
+        flow_continuity_sampler: PassiveInterfaceFlowSampler | None = None,
     ) -> None:
         self.provider = provider or WindowsPassiveNetworkProvider()
         self.clock = clock
         self.flow_tracker = flow_tracker or InterfaceFlowTracker()
+        self.flow_continuity_sampler = flow_continuity_sampler
+        if self.flow_continuity_sampler is None and isinstance(self.provider, WindowsPassiveNetworkProvider):
+            self.flow_continuity_sampler = PassiveInterfaceFlowSampler()
+        self._last_active_interface_names: set[str] = set()
         self.max_devices = max(16, min(int(max_devices), 2048))
         self.max_connections = max(16, min(int(max_connections), 4096))
         self._devices: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -506,10 +512,16 @@ class PassiveNetworkInventory:
             dns_index = self._dns_index(dns_cache)
 
             active_names = self._active_interface_names(active_networks)
-            flow_telemetry = self.flow_tracker.observe(
-                raw.get("flow_counters", []) if isinstance(raw.get("flow_counters"), list) else [],
-                active_interfaces=active_names,
-            )
+            self._last_active_interface_names = set(active_names)
+            if self.flow_continuity_sampler is not None:
+                flow_telemetry = self.flow_continuity_sampler.snapshot(active_names)
+            else:
+                # Deterministic fixture/backward-compatible path. Production
+                # Windows runtime uses the dedicated 1 Hz continuity sampler.
+                flow_telemetry = self.flow_tracker.observe(
+                    raw.get("flow_counters", []) if isinstance(raw.get("flow_counters"), list) else [],
+                    active_interfaces=active_names,
+                )
             gateway_ips = self._gateway_ips(active_networks)
             broadcast_ips = self._broadcast_ips(active_networks)
 
@@ -633,7 +645,7 @@ class PassiveNetworkInventory:
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.7",
+                "schema": "cyberdefender.network-inventory.v0.1.8",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -669,6 +681,11 @@ class PassiveNetworkInventory:
                     "flow_baseline_ready": bool((flow_telemetry.get("aggregate") or {}).get("baseline_ready", False)),
                     "flow_rx_bytes_per_second": float((flow_telemetry.get("aggregate") or {}).get("rx_bytes_per_second", 0.0) or 0.0),
                     "flow_tx_bytes_per_second": float((flow_telemetry.get("aggregate") or {}).get("tx_bytes_per_second", 0.0) or 0.0),
+                    "flow_rx_5s_avg": float((((flow_telemetry.get("aggregate") or {}).get("window_5s") or {}).get("rx_bytes_per_second_avg", 0.0)) or 0.0),
+                    "flow_tx_5s_avg": float((((flow_telemetry.get("aggregate") or {}).get("window_5s") or {}).get("tx_bytes_per_second_avg", 0.0)) or 0.0),
+                    "flow_continuity_percent": float(((flow_telemetry.get("continuity") or {}).get("coverage_percent", 0.0)) or 0.0),
+                    "flow_gap_events": int(((flow_telemetry.get("continuity") or {}).get("gap_events", 0)) or 0),
+                    "flow_sequence": int(flow_telemetry.get("sequence", 0) or 0),
                     "authorized": counts["AUTHORIZED"],
                     "unknown": counts["UNKNOWN"],
                     "denied": counts["DENIED"],
@@ -731,7 +748,50 @@ class PassiveNetworkInventory:
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             raise
 
+    def fast_flow_snapshot(self) -> dict[str, Any] | None:
+        """Return memory-only fresh flow telemetry without a full inventory scan.
+
+        This method performs no PowerShell, DNS, socket enumeration, packet
+        capture, or remote I/O. It only snapshots the bounded in-memory 1 Hz
+        sampler so the runtime/dashboard can refresh flow telemetry between
+        heavier inventory samples.
+        """
+        sampler = self.flow_continuity_sampler
+        if sampler is None:
+            return None
+        return sampler.snapshot(set(self._last_active_interface_names))
+
+    @staticmethod
+    def merge_fast_flow(snapshot: dict[str, Any], flow: dict[str, Any]) -> dict[str, Any]:
+        """Merge non-authoritative fast-path flow evidence into a copied snapshot."""
+        if not isinstance(snapshot, dict) or not isinstance(flow, dict):
+            return snapshot
+        snapshot["flow_telemetry"] = flow
+        summary = snapshot.get("summary")
+        if not isinstance(summary, dict):
+            summary = {}
+            snapshot["summary"] = summary
+        aggregate = flow.get("aggregate") if isinstance(flow.get("aggregate"), dict) else {}
+        continuity = flow.get("continuity") if isinstance(flow.get("continuity"), dict) else {}
+        window_5 = aggregate.get("window_5s") if isinstance(aggregate.get("window_5s"), dict) else {}
+        summary["flow_active_interfaces"] = int(aggregate.get("active_interfaces", 0) or 0)
+        summary["flow_baseline_ready"] = bool(aggregate.get("baseline_ready", False))
+        summary["flow_rx_bytes_per_second"] = float(aggregate.get("rx_bytes_per_second", 0.0) or 0.0)
+        summary["flow_tx_bytes_per_second"] = float(aggregate.get("tx_bytes_per_second", 0.0) or 0.0)
+        summary["flow_rx_5s_avg"] = float(window_5.get("rx_bytes_per_second_avg", 0.0) or 0.0)
+        summary["flow_tx_5s_avg"] = float(window_5.get("tx_bytes_per_second_avg", 0.0) or 0.0)
+        summary["flow_continuity_percent"] = float(continuity.get("coverage_percent", 0.0) or 0.0)
+        summary["flow_gap_events"] = int(continuity.get("gap_events", 0) or 0)
+        summary["flow_sequence"] = int(flow.get("sequence", 0) or 0)
+        return snapshot
+
     def close(self) -> None:
+        sampler = self.flow_continuity_sampler
+        if sampler is not None:
+            try:
+                sampler.close()
+            except Exception:
+                pass
         method = getattr(self.provider, "close", None)
         if callable(method):
             try:
@@ -760,6 +820,8 @@ class PassiveNetworkInventory:
             "active_scan_enabled": False,
             "dns_cache_observation": True,
             "flow_telemetry_observation": True,
+            "flow_continuity_observation": self.flow_continuity_sampler is not None,
+            "flow_fastpath_memory_only": self.flow_continuity_sampler is not None,
             "packet_capture": False,
             "per_connection_byte_attribution": False,
             "external_dns_queries": False,

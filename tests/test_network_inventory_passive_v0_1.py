@@ -87,7 +87,7 @@ def main() -> int:
     check(first["packet_injection"] is False and first["firewall_mutation"] is False, "no packet injection or firewall mutation is exposed")
     check(first["unknown_is_unauthorized"] is False, "UNKNOWN is not silently treated as unauthorized")
     check(first["user_identity_inference"] is False, "user identity inference from network identity is disabled")
-    check(first["schema"] == "cyberdefender.network-inventory.v0.1.7", "v0.1.7 schema is explicit")
+    check(first["schema"] == "cyberdefender.network-inventory.v0.1.8", "v0.1.8 schema is explicit")
     check(first["summary"]["local_endpoint_count"] == 1, "local endpoint is counted separately from neighbors")
     check(first["summary"]["observed_peers_online"] == 4, "only active-scope unicast neighbor identities are current peers")
     check(first["summary"]["gateways_observed"] == 1, "default gateway is classified separately")
