@@ -153,3 +153,32 @@ Security contract:
 - `DNS cache match != trusted destination` and `DNS name != authorization`.
 
 The network inventory schema is `cyberdefender.network-inventory.v0.1.6`.
+
+## v0.1.6.1 — Windows DNS Cache Schema Compatibility Hotfix
+
+The passive DNS reader accepts both current Windows `Name` / `Type` properties
+and legacy/alternate `RecordName` / `RecordType` properties. Runtime telemetry
+exposes `raw_rows_observed` so a successful PowerShell read cannot silently look
+like an empty parsed cache. The hotfix changes no authority or active-network
+behavior.
+
+## v0.1.7 — Passive Interface Flow Telemetry Foundation
+
+v0.1.7 adds local interface counter telemetry and bounded rate derivation.
+
+Security and semantics contract:
+
+- reads only local OS interface counters (`psutil.net_io_counters(pernic=True)`);
+- performs no packet capture, pcap/sniffing, socket hook, active probe, DNS query,
+  remote enrichment, packet injection, or firewall mutation;
+- cumulative byte/packet counters are converted to deltas/rates only after a
+  second valid sample;
+- counter rollback/reset produces no negative or wrapped rate;
+- aggregate RX/TX rates are scoped to active default-route interfaces;
+- interface rates are NOT per-connection byte attribution;
+- flow telemetry is non-authoritative and cannot grant trust or authorization;
+- `flow rate != anomaly`, `high bandwidth != malicious`, and `traffic evidence != authorization`.
+
+The network inventory outer schema becomes
+`cyberdefender.network-inventory.v0.1.7` while DNS cache evidence remains on the
+v0.1.6.1 compatibility reader.

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .dns_cache import WindowsDnsCacheReader
+from .flow_telemetry import InterfaceFlowTracker
 from .process_attribution import ProcessAttributionResolver
 
 try:
@@ -206,6 +207,37 @@ class WindowsPassiveNetworkProvider:
             "neighbors": [x for x in neighbors[:1024] if isinstance(x, dict)] if isinstance(neighbors, list) else [],
         }
 
+    def _flow_counters(self) -> list[dict[str, Any]]:
+        """Read local interface cumulative counters only.
+
+        These are interface-level OS counters, not per-connection byte counts.
+        No packet capture, socket hook, ETW session, probe, or remote lookup is
+        performed here.
+        """
+        if psutil is None:
+            return []
+        try:
+            counters = psutil.net_io_counters(pernic=True, nowrap=True)
+        except (OSError, RuntimeError, PermissionError, TypeError):
+            return []
+        rows: list[dict[str, Any]] = []
+        for name in sorted(counters)[:128]:
+            item = counters.get(name)
+            if item is None:
+                continue
+            rows.append({
+                "interface": _bounded_text(name, 128),
+                "bytes_sent": int(getattr(item, "bytes_sent", 0) or 0),
+                "bytes_recv": int(getattr(item, "bytes_recv", 0) or 0),
+                "packets_sent": int(getattr(item, "packets_sent", 0) or 0),
+                "packets_recv": int(getattr(item, "packets_recv", 0) or 0),
+                "errin": int(getattr(item, "errin", 0) or 0),
+                "errout": int(getattr(item, "errout", 0) or 0),
+                "dropin": int(getattr(item, "dropin", 0) or 0),
+                "dropout": int(getattr(item, "dropout", 0) or 0),
+            })
+        return rows
+
     def _connections(self) -> list[dict[str, Any]]:
         if psutil is None:
             return []
@@ -249,6 +281,7 @@ class WindowsPassiveNetworkProvider:
             "active_networks": windows["active_networks"],
             "neighbors": windows["neighbors"],
             "connections": self._connections(),
+            "flow_counters": self._flow_counters(),
             "process_attribution": self.process_resolver.health_check(),
             "dns_cache": dns_cache,
         }
@@ -258,7 +291,7 @@ class WindowsPassiveNetworkProvider:
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.6"
+    VERSION = "0.1.7"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -271,9 +304,11 @@ class PassiveNetworkInventory:
         max_devices: int = 256,
         max_connections: int = 256,
         clock: Callable[[], float] = time.time,
+        flow_tracker: InterfaceFlowTracker | None = None,
     ) -> None:
         self.provider = provider or WindowsPassiveNetworkProvider()
         self.clock = clock
+        self.flow_tracker = flow_tracker or InterfaceFlowTracker()
         self.max_devices = max(16, min(int(max_devices), 2048))
         self.max_connections = max(16, min(int(max_connections), 4096))
         self._devices: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -471,6 +506,10 @@ class PassiveNetworkInventory:
             dns_index = self._dns_index(dns_cache)
 
             active_names = self._active_interface_names(active_networks)
+            flow_telemetry = self.flow_tracker.observe(
+                raw.get("flow_counters", []) if isinstance(raw.get("flow_counters"), list) else [],
+                active_interfaces=active_names,
+            )
             gateway_ips = self._gateway_ips(active_networks)
             broadcast_ips = self._broadcast_ips(active_networks)
 
@@ -594,7 +633,7 @@ class PassiveNetworkInventory:
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.6",
+                "schema": "cyberdefender.network-inventory.v0.1.7",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -604,6 +643,9 @@ class PassiveNetworkInventory:
                 "firewall_mutation": False,
                 "dns_resolution": False,
                 "dns_cache_observation": True,
+                "flow_telemetry_observation": True,
+                "packet_capture": False,
+                "per_connection_byte_attribution": False,
                 "external_dns_queries": False,
                 "reverse_dns_lookup": False,
                 "user_identity_inference": False,
@@ -623,6 +665,10 @@ class PassiveNetworkInventory:
                     "dns_cache_entries": int(dns_cache.get("entries_observed", 0) or 0),
                     "dns_unique_names": int(dns_cache.get("unique_names", 0) or 0),
                     "dns_correlated_connections": dns_correlated_connections,
+                    "flow_active_interfaces": int((flow_telemetry.get("aggregate") or {}).get("active_interfaces", 0) or 0),
+                    "flow_baseline_ready": bool((flow_telemetry.get("aggregate") or {}).get("baseline_ready", False)),
+                    "flow_rx_bytes_per_second": float((flow_telemetry.get("aggregate") or {}).get("rx_bytes_per_second", 0.0) or 0.0),
+                    "flow_tx_bytes_per_second": float((flow_telemetry.get("aggregate") or {}).get("tx_bytes_per_second", 0.0) or 0.0),
                     "authorized": counts["AUTHORIZED"],
                     "unknown": counts["UNKNOWN"],
                     "denied": counts["DENIED"],
@@ -635,6 +681,7 @@ class PassiveNetworkInventory:
                     "devices_total": "OBSERVED_NEIGHBOR_IDENTITIES_NOT_CONNECTED_CLIENTS",
                     "online": "CURRENTLY_OBSERVED_NEIGHBOR_IDENTITIES",
                     "connections_total": "LOCAL_SOCKET_FLOW_OBSERVATIONS",
+                    "flow_rates": "ACTIVE_INTERFACE_COUNTER_DELTAS_NOT_PER_CONNECTION_BYTES",
                     "hotspot_client_count": "UNAVAILABLE_WITHOUT_AP_CONTROLLER_EVIDENCE",
                 },
                 "active_networks": active_networks,
@@ -658,6 +705,7 @@ class PassiveNetworkInventory:
                     "correlated_connections": dns_correlated_connections,
                     "last_error": _bounded_text(dns_cache.get("last_error"), 96) or None,
                 },
+                "flow_telemetry": flow_telemetry,
                 "process_attribution": raw.get("process_attribution", {}) if isinstance(raw.get("process_attribution"), dict) else {},
                 "trust_registry": {
                     "schema": "cyberdefender.network-trust-runtime.v0.1.5",
@@ -711,6 +759,9 @@ class PassiveNetworkInventory:
             "authoritative": False,
             "active_scan_enabled": False,
             "dns_cache_observation": True,
+            "flow_telemetry_observation": True,
+            "packet_capture": False,
+            "per_connection_byte_attribution": False,
             "external_dns_queries": False,
             "reverse_dns_lookup": False,
             "dashboard_direct_os_access": False,

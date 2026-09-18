@@ -24,14 +24,17 @@ def main() -> int:
         (root / "logs").mkdir()
 
         network = {
-            "schema": "cyberdefender.network-inventory.v0.1.6",
-            "version": "0.1.6",
+            "schema": "cyberdefender.network-inventory.v0.1.7",
+            "version": "0.1.7",
             "mode": "PASSIVE_ONLY",
             "authority": "NONE",
             "authoritative": False,
             "active_scan_enabled": False,
             "packet_injection": False,
             "firewall_mutation": False,
+            "flow_telemetry_observation": True,
+            "packet_capture": False,
+            "per_connection_byte_attribution": False,
             "user_identity_inference": False,
             "unknown_is_unauthorized": False,
             "hotspot_client_count": None,
@@ -47,6 +50,10 @@ def main() -> int:
                 "devices_total": 2,
                 "online": 1,
                 "connections_total": 5,
+                "flow_active_interfaces": 1,
+                "flow_baseline_ready": True,
+                "flow_rx_bytes_per_second": 2048.0,
+                "flow_tx_bytes_per_second": 1024.0,
                 "authorized": 1,
                 "unknown": 0,
                 "denied": 0,
@@ -62,6 +69,7 @@ def main() -> int:
                 {"device_id":"mac:aa:bb:cc:dd:ee:02","ip_address":"192.168.1.30","mac_address":"AA:BB:CC:DD:EE:02","interface":"Wi-Fi","neighbor_state":"STALE","online":False,"trust":"UNKNOWN","label":None,"user_identity":{"status":"UNKNOWN","user_id":None},"role":"PEER","source":"NEIGHBOR_CACHE","passive":True},
             ],
             "connections": [],
+            "flow_telemetry": {"schema":"cyberdefender.interface-flow-telemetry.v0.1.7","mode":"PASSIVE_INTERFACE_COUNTERS","authority":"NONE","packet_capture":False,"per_connection_byte_attribution":False,"aggregate":{"scope":"ACTIVE_DEFAULT_ROUTE_INTERFACES","active_interfaces":1,"baseline_ready_interfaces":1,"baseline_ready":True,"rx_bytes_per_second":2048.0,"tx_bytes_per_second":1024.0},"interfaces":[]},
         }
 
         snapshot = {
@@ -113,6 +121,8 @@ def main() -> int:
         check("d.network_inventory" in js and "networkDevices" in js, "Admin JS consumes only API network inventory state")
         check("CONNECTION → PROCESS ATTRIBUTION" in html and "networkConnections" in js, "Admin UI exposes bounded connection-to-process attribution")
         check("netDnsCache" in html and "REMOTE / DNS" in html and "netDnsCache" in js, "Admin UI exposes passive DNS cache correlation")
+        check("netFlowRate" in html and "FLOW RATE" in html and "netFlowRate" in js, "Admin UI exposes passive interface flow rate telemetry")
+        check("NO PACKET CAPTURE" in html and "per_connection_byte_attribution" not in js, "Admin UI does not imply per-connection byte attribution")
         check("sha256" in js and "signature" in js, "Admin UI renders local hash/signature evidence without granting trust")
         check("Get-NetNeighbor" not in js and "fetch(\"/admin/api/state\"" in js, "Admin browser code has no direct OS telemetry path")
 

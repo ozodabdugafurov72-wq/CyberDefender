@@ -27,7 +27,7 @@
 </section>
 <section class="panel network-panel" id="network-inventory">
  <div class="head"><div><span class="eyebrow">NETWORK & DEVICES</span><h2>Passive Network Observations</h2></div><span class="badge safe" id="networkMode">PASSIVE ONLY</span></div>
- <div class="network-guard">READ ONLY · NO PING · NO PORT SCAN · NO PACKET INJECTION · UNKNOWN ≠ UNAUTHORIZED · USER IDENTITY IS NEVER INFERRED FROM IP/MAC</div>
+ <div class="network-guard">READ ONLY · NO PING · NO PORT SCAN · NO PACKET CAPTURE · NO PACKET INJECTION · UNKNOWN ≠ UNAUTHORIZED · USER IDENTITY IS NEVER INFERRED FROM IP/MAC</div>
  <div class="network-kpis">
   <div><span>THIS ENDPOINT</span><b id="netLocalEndpoint">0</b><small>local host, not a peer</small></div>
   <div><span>OBSERVED PEERS</span><b id="netPeers">0</b><small id="netPeerMeta">0 current · 0 retained</small></div>
@@ -38,6 +38,7 @@
   <div><span>HOTSPOT CLIENTS</span><b id="netHotspotClients">UNAVAILABLE</b><small>requires AP/controller evidence</small></div>
   <div><span>CONNECTIONS</span><b id="netConnections">0</b><small>local socket/flow observations</small></div>
   <div><span>DNS CACHE</span><b id="netDnsCache">UNAVAILABLE</b><small id="netDnsMeta">passive local cache only</small></div>
+  <div><span>FLOW RATE</span><b id="netFlowRate">WARMING</b><small id="netFlowMeta">interface counters only</small></div>
   <div><span>ACTIVE SCAN</span><b id="netActiveScan">DISABLED</b><small id="netSampleAge">—</small></div>
   <div><span>COLLECTOR</span><b id="netCollector">ASYNC</b><small id="netCollectorMeta">bounded background worker</small></div>
   <div><span>TRUST REGISTRY</span><b id="netTrustRegistry">0 RULES</b><small id="netTrustRegistryMeta">explicit local evidence only</small></div>
@@ -45,7 +46,7 @@
  </div>
  <div class="device-head"><span>TRUST</span><span>OBSERVED PEER</span><span>IP</span><span>MAC</span><span>ROLE / INTERFACE</span><span>STATE</span><span>USER BINDING</span></div>
  <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry only</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
- <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS + PASSIVE DNS CACHE EVIDENCE · ENRICHMENT IS BOUNDED AND NON-AUTHORITATIVE</small></div>
+ <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS + PASSIVE DNS CACHE EVIDENCE · INTERFACE FLOW RATES ARE NOT PER-CONNECTION BYTES · NON-AUTHORITATIVE</small></div>
  <div class="connection-head"><span>PROCESS</span><span>PID</span><span>LOCAL</span><span>REMOTE / DNS</span><span>STATE</span><span>SHA-256</span><span>SIGNATURE</span></div>
  <div class="connections" id="networkConnections"><div class="connection-row"><div><b>Waiting for connection attribution</b><small>Local process identity only; no vendor inference from remote IP.</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
 </section>
