@@ -292,7 +292,7 @@ class WindowsPassiveNetworkProvider:
 
 
 class PassiveNetworkInventory:
-    VERSION = "0.1.8"
+    VERSION = "0.1.9"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -645,7 +645,7 @@ class PassiveNetworkInventory:
             self.last_sample_at = now
             self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
             return {
-                "schema": "cyberdefender.network-inventory.v0.1.8",
+                "schema": "cyberdefender.network-inventory.v0.1.9",
                 "version": self.VERSION,
                 "mode": self.MODE,
                 "authority": self.AUTHORITY,
@@ -686,6 +686,9 @@ class PassiveNetworkInventory:
                     "flow_continuity_percent": float(((flow_telemetry.get("continuity") or {}).get("coverage_percent", 0.0)) or 0.0),
                     "flow_gap_events": int(((flow_telemetry.get("continuity") or {}).get("gap_events", 0)) or 0),
                     "flow_sequence": int(flow_telemetry.get("sequence", 0) or 0),
+                    "flow_baseline_status": _bounded_text(((flow_telemetry.get("baseline_analysis") or {}).get("status")), 24).upper() or "WARMING",
+                    "flow_baseline_confidence_percent": float(((flow_telemetry.get("baseline_analysis") or {}).get("confidence_percent", 0.0)) or 0.0),
+                    "flow_anomaly_candidate": bool(((flow_telemetry.get("baseline_analysis") or {}).get("anomaly_candidate", False))),
                     "authorized": counts["AUTHORIZED"],
                     "unknown": counts["UNKNOWN"],
                     "denied": counts["DENIED"],
@@ -783,6 +786,10 @@ class PassiveNetworkInventory:
         summary["flow_continuity_percent"] = float(continuity.get("coverage_percent", 0.0) or 0.0)
         summary["flow_gap_events"] = int(continuity.get("gap_events", 0) or 0)
         summary["flow_sequence"] = int(flow.get("sequence", 0) or 0)
+        baseline = flow.get("baseline_analysis") if isinstance(flow.get("baseline_analysis"), dict) else {}
+        summary["flow_baseline_status"] = _bounded_text(baseline.get("status"), 24).upper() or "WARMING"
+        summary["flow_baseline_confidence_percent"] = float(baseline.get("confidence_percent", 0.0) or 0.0)
+        summary["flow_anomaly_candidate"] = bool(baseline.get("anomaly_candidate", False))
         return snapshot
 
     def close(self) -> None:
@@ -822,6 +829,7 @@ class PassiveNetworkInventory:
             "flow_telemetry_observation": True,
             "flow_continuity_observation": self.flow_continuity_sampler is not None,
             "flow_fastpath_memory_only": self.flow_continuity_sampler is not None,
+            "flow_baseline_analysis": self.flow_continuity_sampler is not None,
             "packet_capture": False,
             "per_connection_byte_attribution": False,
             "external_dns_queries": False,

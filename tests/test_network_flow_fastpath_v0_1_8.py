@@ -29,7 +29,7 @@ class FastCollector:
     def collect(self):
         self.collects += 1
         return {
-            "schema": "cyberdefender.network-inventory.v0.1.8",
+            "schema": "cyberdefender.network-inventory.v0.1.9",
             "summary": {"flow_sequence": 1},
             "flow_telemetry": {"sequence": 1, "aggregate": {}},
         }
@@ -37,7 +37,7 @@ class FastCollector:
     def fast_flow_snapshot(self):
         self.fast_reads += 1
         return {
-            "schema": "cyberdefender.interface-flow-continuity.v0.1.8",
+            "schema": "cyberdefender.interface-flow-continuity.v0.1.9",
             "sequence": 100 + self.fast_reads,
             "sample_age_seconds": 0.1,
             "aggregate": {

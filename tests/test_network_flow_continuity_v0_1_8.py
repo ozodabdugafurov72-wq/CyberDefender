@@ -67,7 +67,7 @@ def main() -> int:
 
     check(sampler.sample_once(), "first bounded sample succeeds")
     first = sampler.snapshot({"wi-fi"})
-    check(first["schema"] == "cyberdefender.interface-flow-continuity.v0.1.8", "v0.1.8 continuity schema is explicit")
+    check(first["schema"] == "cyberdefender.interface-flow-continuity.v0.1.9", "v0.1.9 continuity schema is explicit")
     check(first["mode"] == "PASSIVE_INTERFACE_CONTINUOUS_COUNTERS", "continuous local-counter mode is explicit")
     check(first["aggregate"]["baseline_ready"] is False, "first sample is warm-up only")
     check(first["packet_capture"] is False, "packet capture remains disabled")

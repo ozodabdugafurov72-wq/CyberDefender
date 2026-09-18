@@ -210,3 +210,27 @@ Accuracy/continuity contract:
 The network inventory outer schema is
 `cyberdefender.network-inventory.v0.1.8` and the continuous flow schema is
 `cyberdefender.interface-flow-continuity.v0.1.8`.
+
+## v0.1.9 — Robust Flow Baseline / Anomaly Confidence Foundation
+
+v0.1.9 adds an observation-only robust rolling baseline on top of the bounded
+1-second passive interface counter sampler. The baseline uses median/MAD based
+statistics, excludes the newest sample from its own training set, and exposes
+an evidence-quality confidence score that is bounded by sample count,
+continuity, and staleness.
+
+The analyzer is deliberately non-authoritative. `anomaly_candidate=true` means
+only that a local aggregate interface-flow deviation is worth downstream
+correlation. It does **not** mean malware, does not create an incident, does not
+change Risk Engine state, and never grants authorization. High traffic is not
+itself treated as malicious.
+
+Schemas:
+
+- outer inventory: `cyberdefender.network-inventory.v0.1.9`
+- continuous flow: `cyberdefender.interface-flow-continuity.v0.1.9`
+- baseline analysis: `cyberdefender.flow-baseline.v0.1.9`
+
+Safety remains unchanged: packet capture, active scan, packet injection,
+firewall mutation, external enrichment, per-connection byte fabrication and
+auto-whitelisting remain disabled.

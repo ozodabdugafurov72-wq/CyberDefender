@@ -94,7 +94,7 @@ def main() -> int:
     inventory = PassiveNetworkInventory(provider=FixtureProvider())
     snap = inventory.collect()
 
-    check(snap["schema"] == "cyberdefender.network-inventory.v0.1.8", "v0.1.8 network schema is explicit")
+    check(snap["schema"] == "cyberdefender.network-inventory.v0.1.9", "v0.1.9 network schema is explicit")
     check(snap["dns_resolution"] is False, "active DNS resolution remains disabled")
     check(snap["dns_cache_observation"] is True, "passive DNS cache observation is explicit")
     check(snap["external_dns_queries"] is False, "DNS correlation performs no external query")

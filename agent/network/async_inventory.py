@@ -18,7 +18,7 @@ class AsyncPassiveNetworkInventory:
       * close() is bounded and never blocks the security runtime indefinitely.
     """
 
-    VERSION = "0.1.8"
+    VERSION = "0.1.9"
     MODE = "PASSIVE_ONLY"
     AUTHORITY = "NONE"
 
@@ -148,7 +148,7 @@ class AsyncPassiveNetworkInventory:
             and last_success_age > self.stale_after_seconds
         )
         return {
-            "schema": "cyberdefender.network-inventory-integration.v0.1.8",
+            "schema": "cyberdefender.network-inventory-integration.v0.1.9",
             "version": self.VERSION,
             "mode": "ASYNC_BOUNDED",
             "authority": self.AUTHORITY,

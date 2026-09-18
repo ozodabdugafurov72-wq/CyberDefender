@@ -24,8 +24,8 @@ def main() -> int:
         (root / "logs").mkdir()
 
         network = {
-            "schema": "cyberdefender.network-inventory.v0.1.8",
-            "version": "0.1.8",
+            "schema": "cyberdefender.network-inventory.v0.1.9",
+            "version": "0.1.9",
             "mode": "PASSIVE_ONLY",
             "authority": "NONE",
             "authoritative": False,
@@ -69,7 +69,7 @@ def main() -> int:
                 {"device_id":"mac:aa:bb:cc:dd:ee:02","ip_address":"192.168.1.30","mac_address":"AA:BB:CC:DD:EE:02","interface":"Wi-Fi","neighbor_state":"STALE","online":False,"trust":"UNKNOWN","label":None,"user_identity":{"status":"UNKNOWN","user_id":None},"role":"PEER","source":"NEIGHBOR_CACHE","passive":True},
             ],
             "connections": [],
-            "flow_telemetry": {"schema":"cyberdefender.interface-flow-continuity.v0.1.8","mode":"PASSIVE_INTERFACE_CONTINUOUS_COUNTERS","authority":"NONE","packet_capture":False,"per_connection_byte_attribution":False,"sequence":42,"cadence_seconds":1.0,"sample_age_seconds":0.2,"aggregate":{"scope":"ACTIVE_DEFAULT_ROUTE_INTERFACES","active_interfaces":1,"baseline_ready":True,"rx_bytes_per_second":2048.0,"tx_bytes_per_second":1024.0,"window_5s":{"samples":5,"rx_bytes_per_second_avg":1900.0,"tx_bytes_per_second_avg":900.0}},"continuity":{"coverage_percent":99.9,"gap_events":1,"missed_slots_estimate":1},"interfaces":[]},
+            "flow_telemetry": {"schema":"cyberdefender.interface-flow-continuity.v0.1.9","mode":"PASSIVE_INTERFACE_CONTINUOUS_COUNTERS","authority":"NONE","packet_capture":False,"per_connection_byte_attribution":False,"sequence":42,"cadence_seconds":1.0,"sample_age_seconds":0.2,"aggregate":{"scope":"ACTIVE_DEFAULT_ROUTE_INTERFACES","active_interfaces":1,"baseline_ready":True,"rx_bytes_per_second":2048.0,"tx_bytes_per_second":1024.0,"window_5s":{"samples":5,"rx_bytes_per_second_avg":1900.0,"tx_bytes_per_second_avg":900.0}},"continuity":{"coverage_percent":99.9,"gap_events":1,"missed_slots_estimate":1},"baseline_analysis":{"schema":"cyberdefender.flow-baseline.v0.1.9","status":"READY","confidence_percent":99.9,"baseline_samples":30,"min_samples":15,"anomaly_candidate":False,"authority":"NONE","authorization":"NOT_GRANTED"},"interfaces":[]},
         }
 
         snapshot = {
@@ -123,6 +123,8 @@ def main() -> int:
         check("netDnsCache" in html and "REMOTE / DNS" in html and "netDnsCache" in js, "Admin UI exposes passive DNS cache correlation")
         check("netFlowRate" in html and "FLOW RATE" in html and "netFlowRate" in js, "Admin UI exposes passive interface flow rate telemetry")
         check("netFlowContinuity" in html and "FLOW CONTINUITY" in html and "coverage_percent" in js, "Admin UI exposes flow continuity and gap evidence")
+        check("netFlowBaseline" in html and "FLOW BASELINE" in html and "baseline_analysis" in js, "Admin UI exposes robust flow baseline evidence")
+        check("candidate evidence" in js and "no authority" in js, "Admin UI keeps anomaly candidate non-authoritative")
         check("NO PACKET CAPTURE" in html and "per_connection_byte_attribution" not in js, "Admin UI does not imply per-connection byte attribution")
         check("sha256" in js and "signature" in js, "Admin UI renders local hash/signature evidence without granting trust")
         check("Get-NetNeighbor" not in js and "fetch(\"/admin/api/state\"" in js, "Admin browser code has no direct OS telemetry path")

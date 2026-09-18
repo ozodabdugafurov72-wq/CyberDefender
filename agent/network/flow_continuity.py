@@ -6,6 +6,8 @@ import time
 from collections import deque
 from typing import Any, Callable
 
+from .flow_baseline import FlowBaselineAnalyzer
+
 try:
     import psutil
 except Exception:  # pragma: no cover
@@ -69,7 +71,7 @@ class PassiveInterfaceFlowSampler:
       * output is non-authoritative and cannot grant authorization.
     """
 
-    VERSION = "0.1.8"
+    VERSION = "0.1.9"
     MODE = "PASSIVE_INTERFACE_CONTINUOUS_COUNTERS"
     AUTHORITY = "NONE"
 
@@ -83,6 +85,7 @@ class PassiveInterfaceFlowSampler:
         wall_clock: Callable[[], float] = time.time,
         monotonic_clock: Callable[[], float] = time.monotonic,
         autostart: bool = True,
+        baseline_analyzer: FlowBaselineAnalyzer | None = None,
     ) -> None:
         self.counter_reader = counter_reader or _default_counter_reader
         self.cadence_seconds = max(0.5, min(float(cadence_seconds), 10.0))
@@ -90,6 +93,7 @@ class PassiveInterfaceFlowSampler:
         self.max_interfaces = max(1, min(int(max_interfaces), 256))
         self.wall_clock = wall_clock
         self.monotonic_clock = monotonic_clock
+        self.baseline_analyzer = baseline_analyzer or FlowBaselineAnalyzer()
 
         max_history = max(10, int(self.history_seconds / self.cadence_seconds) + 8)
         self._history: deque[dict[str, Any]] = deque(maxlen=max_history)
@@ -384,8 +388,16 @@ class PassiveInterfaceFlowSampler:
             "window_30s": window_30,
         }
 
+        aggregate_history = [self._aggregate_sample(sample, active) for sample in history] if active else []
+        baseline_analysis = self.baseline_analyzer.analyze(
+            aggregate_history,
+            coverage_percent=round(coverage_ratio * 100.0, 3),
+            stale=stale,
+            sequence=sequence,
+        )
+
         return {
-            "schema": "cyberdefender.interface-flow-continuity.v0.1.8",
+            "schema": "cyberdefender.interface-flow-continuity.v0.1.9",
             "version": self.VERSION,
             "mode": self.MODE,
             "status": status,
@@ -404,6 +416,7 @@ class PassiveInterfaceFlowSampler:
             "last_interval_seconds": round(last_interval, 4) if last_interval is not None else None,
             "interfaces": latest_interfaces,
             "aggregate": aggregate,
+            "baseline_analysis": baseline_analysis,
             "continuity": {
                 "attempts": attempts,
                 "completed": completed,
@@ -425,6 +438,7 @@ class PassiveInterfaceFlowSampler:
                 "window_5s": "ROLLING_MEAN_AND_PEAK_OF_VALID_SAMPLES",
                 "window_30s": "ROLLING_MEAN_AND_PEAK_OF_VALID_SAMPLES",
                 "coverage_ratio": "SAMPLING_CONTINUITY_ESTIMATE_NOT_PACKET_DELIVERY_GUARANTEE",
+                "baseline_confidence": "EVIDENCE_QUALITY_NOT_ATTACK_PROBABILITY",
                 "gaps": "OBSERVABLE_NOT_FABRICATED_AWAY",
             },
             "bounds": {
