@@ -3,6 +3,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tempfile
+import os
+from agent.crypto.key_manager import KeyManager
+from agent.crypto.replay_guard import ReplayGuard
+from agent.core.crypto_replay_admission_gateway import CryptoReplayAdmissionGateway
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -26,6 +30,8 @@ class ConsumerAckTests(unittest.TestCase):
         self.adapter = CorrelationAdapter(self.engine, self.bus)
         self.pipeline = Mock()
         self.pipeline.ack.return_value = True
+        # ACK-only unit fixtures model an already claimed delivery.
+        self.pipeline.claim_trusted_delivery.side_effect = lambda event: event
         self.runtime = SimpleNamespace(pipeline=self.pipeline, event_bridge=SecurityEventBridge(),
             correlation_adapter=self.adapter, events_acked=0, component_failures=0, last_error=None)
 
@@ -155,17 +161,23 @@ class ConsumerAckTests(unittest.TestCase):
     def test_durable_restart_after_rejected_publication(self):
         with tempfile.TemporaryDirectory(prefix='cd_ack_fixture_') as directory:
             bus = EventBus()
-            spool = DurableEventSpool(Path(directory))
-            pipeline = DurableEventPipeline(spool, bus)
+            spool = DurableEventSpool(Path(directory) / "spool")
+            keys = KeyManager(Path(directory) / "keys", os.urandom(32))
+            self.assertTrue(keys.generate_key())
+            pipeline = DurableEventPipeline(spool, bus, require_admission=True)
+            gateway = CryptoReplayAdmissionGateway(keys, ReplayGuard(), pipeline, use_detailed_transport=True)
+            pipeline.bind_admission_verifier(gateway.verify_admission_receipt)
             self.runtime.pipeline = pipeline
             bus.subscribe(lambda event: CyberDefenderRuntime._handle_trusted_event(self.runtime, event))
             self.bus.publish.return_value = False
-            self.assertTrue(pipeline.ingest(self.event))
+            self.assertTrue(gateway.sign_and_admit(self.event))
             bus.dispatch_all()
             self.assertEqual(self.runtime.events_acked, 0)
             # Reopen persisted spool; no process/service action is involved.
             bus2 = EventBus()
-            pipeline2 = DurableEventPipeline(DurableEventSpool(Path(directory)), bus2)
+            pipeline2 = DurableEventPipeline(DurableEventSpool(Path(directory) / "spool"), bus2, require_admission=True)
+            gateway2 = CryptoReplayAdmissionGateway(keys, ReplayGuard(), pipeline2, use_detailed_transport=True)
+            pipeline2.bind_admission_verifier(gateway2.verify_admission_receipt)
             self.runtime.pipeline = pipeline2
             self.runtime.correlation_adapter = CorrelationAdapter(CorrelationEngine(), self.bus)
             self.bus.publish.return_value = True

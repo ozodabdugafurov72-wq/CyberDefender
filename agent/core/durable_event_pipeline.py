@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 from threading import RLock
 from typing import Any, Callable, Optional
 
@@ -109,6 +110,7 @@ class DurableEventPipeline:
         spool: DurableEventSpool,
         event_bus: EventBus,
         delivery_gateway: Any | None = None,
+        *, require_admission: bool = False,
     ):
         if spool is None:
             raise ValueError(
@@ -128,6 +130,12 @@ class DurableEventPipeline:
         self.delivery_gateway = delivery_gateway
 
         self._lock = RLock()
+        self.require_admission = require_admission
+        self._admission_verifier = None
+        self._deliveries = WeakKeyDictionary()
+        self._admission_rejected = 0
+        self._delivery_binding_rejected = 0
+        self._max_delivery_bindings = 8192
 
         # -----------------------------------------------------
         # INGEST
@@ -296,10 +304,70 @@ class DurableEventPipeline:
             event_id=event_id,
         )
 
+    def bind_admission_verifier(self, verifier: Callable) -> None:
+        if not self.require_admission or not callable(verifier) or self._admission_verifier is not None:
+            raise ValueError("admission verifier must be bound exactly once")
+        self._admission_verifier = verifier
+
+    def _admission_valid(self, event, receipt) -> bool:
+        try:
+            # Full schema reconstruction, not merely a mutable integrity field.
+            canonical = SecurityEvent.from_dict(event.to_dict())
+            return (self._admission_verifier is not None
+                    and self._admission_verifier(canonical, receipt) is True)
+        except Exception:
+            return False
+
+    def claim_trusted_delivery(self, event: SecurityEvent) -> SecurityEvent | None:
+        """One-use object identity plus persisted admission proof, never payload flags.
+
+        Only the canonical producer registers bindings. Weak references and a
+        hard cap bound memory; queue pressure defers already-durable work.
+        """
+        try:
+            with self._lock:
+                receipt = self._deliveries.pop(event, None)
+            if self.require_admission and receipt is not None and self._admission_valid(event, receipt):
+                return SecurityEvent.from_dict(event.to_dict())
+        except Exception:
+            pass
+        with self._lock:
+            self._delivery_binding_rejected += 1
+        return None
+
+    def admission_health(self) -> dict:
+        with self._lock:
+            return {"required": self.require_admission,
+                    "verifier_bound": self._admission_verifier is not None,
+                    "rejected": self._admission_rejected,
+                    "delivery_rejected": self._delivery_binding_rejected,
+                    "live_bindings": len(self._deliveries)}
+
     def _delivery_target(self) -> Any:
         return self.delivery_gateway if self.delivery_gateway is not None else self.event_bus
 
-    def _publish_detailed(self, event: SecurityEvent) -> tuple[bool, str, bool]:
+    def _publish_detailed(self, event: SecurityEvent, admission=None) -> tuple[bool, str, bool]:
+        if not self.require_admission:
+            return self._publish_unbound(event)
+        if not self._admission_valid(event, admission):
+            with self._lock:
+                self._admission_rejected += 1
+            return False, "ADMISSION_UNVERIFIED", False
+        # Detach from producer-owned mutable objects and unsigned attributes.
+        event = SecurityEvent.from_dict(event.to_dict())
+        with self._lock:
+            if len(self._deliveries) >= self._max_delivery_bindings:
+                return False, "DELIVERY_BINDING_CAPACITY", True
+            self._deliveries[event] = dict(admission)
+        try:
+            result = self._publish_unbound(event)
+            return result
+        finally:
+            if 'result' not in locals() or result[0] is not True:
+                with self._lock:
+                    self._deliveries.pop(event, None)
+
+    def _publish_unbound(self, event: SecurityEvent) -> tuple[bool, str, bool]:
         """Return (published, reason, retryable) for immediate delivery.
 
         Delivery failure after durable persistence is always retryable from the
@@ -325,12 +393,22 @@ class DurableEventPipeline:
     def ingest_detailed(
         self,
         event: SecurityEvent,
+        *, admission: dict | None = None,
     ) -> DurableTransportResult:
         """P0.3B tri-state durable admission contract.
 
         A post-persistence delivery deferral is represented as
         PERSISTED_DEFERRED, never as a durable/security rejection.
         """
+
+        if self.require_admission and not self._admission_valid(event, admission):
+            with self._lock:
+                self._admission_rejected += 1
+            return self._transport_result(
+                disposition=self.DISPOSITION_REJECTED, accepted=False,
+                durable=False, published=False, retryable=False,
+                reason="ADMISSION_UNVERIFIED", event_id=self._event_id(event),
+            )
 
         if not self._valid_event(event):
             with self._lock:
@@ -378,11 +456,14 @@ class DurableEventPipeline:
         try:
             append_detailed = getattr(self.spool, "append_with_result", None)
             if callable(append_detailed):
-                stored_result = append_detailed(event)
+                stored_result = (append_detailed(event, admission=admission)
+                                 if self.require_admission else append_detailed(event))
                 stored = bool(getattr(stored_result, "accepted", False))
                 durable = bool(getattr(stored_result, "durable", stored))
                 storage_reason = str(getattr(stored_result, "reason", "SPOOL_REJECTED"))
             else:
+                if self.require_admission:
+                    raise SpoolError("admission metadata storage unsupported")
                 stored = self.spool.append(event) is True
                 durable = stored
                 storage_reason = "ADMITTED" if stored else "SPOOL_REJECTED"
@@ -458,7 +539,10 @@ class DurableEventPipeline:
             self._spooled += 1
 
         try:
-            published, delivery_reason, retryable = self._publish_detailed(event)
+            published, delivery_reason, retryable = (
+                self._publish_detailed(event, admission) if self.require_admission
+                else self._publish_detailed(event)
+            )
         except Exception as exc:
             self._record_error("delivery", exc)
             published = False
@@ -527,6 +611,10 @@ class DurableEventPipeline:
         # -----------------------------------------------------
         # INPUT TYPE
         # -----------------------------------------------------
+
+        if self.require_admission:
+            # Legacy direct ingress cannot mint a canonical admission receipt.
+            return self.ingest_detailed(event).accepted
 
         if not self._valid_event(event):
             with self._lock:
@@ -750,6 +838,14 @@ class DurableEventPipeline:
         Compatibility spools used by older tests may only expose
         pending_records(); those remain supported.
         """
+        # Admission-enforced recovery must be able to scan past legacy or
+        # unverified records. pending_records() is still hard-bounded by the
+        # spool policy, so this avoids starvation without creating an
+        # unbounded scan.
+        if self.require_admission:
+            records = self.spool.pending_records()
+            return records if isinstance(records, list) else []
+
         batch_method = getattr(self.spool, "pending_batch", None)
         if callable(batch_method):
             try:
@@ -803,6 +899,15 @@ class DurableEventPipeline:
         published_count = 0
 
         for record in records:
+
+            # max_events limits successful publications, not the number of
+            # records inspected. This lets recovery scan past preserved
+            # unverified legacy records without starving later valid work.
+            if (
+                max_events is not None
+                and published_count >= max(0, int(max_events))
+            ):
+                break
 
             # -------------------------------------------------
             # STRUCTURE
@@ -915,7 +1020,10 @@ class DurableEventPipeline:
             # -------------------------------------------------
 
             try:
-                delivered, _reason, _retryable = self._publish_detailed(event)
+                delivered, _reason, _retryable = (
+                    self._publish_detailed(event, record.get("admission"))
+                    if self.require_admission else self._publish_detailed(event)
+                )
 
             except Exception as exc:
                 self._record_error(
@@ -925,10 +1033,14 @@ class DurableEventPipeline:
                 delivered = False
 
             if not delivered:
-                # Already-durable recovery work remains pending.  Delivery
-                # pressure is not counted as a corrupted replay failure.
                 with self._lock:
-                    self._delivery_deferred += 1
+                    if _retryable:
+                        # Transient queue/resource pressure.
+                        self._delivery_deferred += 1
+                    else:
+                        # Invalid/missing admission proof is a security
+                        # recovery failure, not ordinary delivery pressure.
+                        self._replay_failed += 1
 
                 continue
 
@@ -1120,6 +1232,16 @@ class DurableEventPipeline:
         else:
             status = self.STATUS_DEGRADED
 
+        # Historical security rejections are observable counters, not proof
+        # that the pipeline is currently unhealthy. Missing enforcement
+        # machinery, however, is an operational degradation.
+        if (
+            self.require_admission
+            and self._admission_verifier is None
+            and status == self.STATUS_HEALTHY
+        ):
+            status = self.STATUS_DEGRADED
+
         if status != self.STATUS_HEALTHY:
             with self._lock:
                 self._health_failures += 1
@@ -1129,6 +1251,7 @@ class DurableEventPipeline:
             "component": "DurableEventPipeline",
             "version": self.VERSION,
             "status": status,
+            "admission_binding": self.admission_health(),
 
             "dependencies": {
                 "spool": spool_health,

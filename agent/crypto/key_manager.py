@@ -662,6 +662,115 @@ class KeyManager:
                 hashlib.sha256,
             ).hexdigest()
 
+
+    def sign_with_active_key_id(
+        self,
+        payload: bytes,
+    ) -> Optional[tuple[str, str]]:
+        """
+        Atomically return (ACTIVE key_id, HMAC).
+
+        Security purpose:
+        prevents a key-rotation race between reading active_key_id
+        and signing the payload.
+
+        This method does not change trust/authorization semantics.
+        """
+        if not isinstance(payload, bytes):
+            return None
+
+        with self._lock:
+            if (
+                self._status != self.STATUS_READY
+                or self._active_key_id is None
+            ):
+                self._authentication_rejected += 1
+                return None
+
+            key_id = self._active_key_id
+            metadata = self._keys.get(key_id)
+
+            if (
+                metadata is None
+                or metadata.get("status") != self.ACTIVE
+            ):
+                self._authentication_rejected += 1
+                return None
+
+            try:
+                material = base64.b64decode(
+                    metadata["material"].encode("ascii"),
+                    validate=True,
+                )
+            except Exception:
+                self._authentication_rejected += 1
+                return None
+
+            signature = hmac.new(
+                material,
+                payload,
+                hashlib.sha256,
+            ).hexdigest()
+
+            return key_id, signature
+
+    def verify_for_recovery(
+        self,
+        payload: bytes,
+        mac: str,
+        key_id: str,
+    ) -> bool:
+        """
+        Verify durable recovery proof.
+
+        ACTIVE and RETIRED keys may verify historical durable proof.
+        REVOKED keys never verify.
+
+        IMPORTANT:
+        this API is recovery-only. It does NOT authorize new admission,
+        privileged actions, policy decisions, or response execution.
+        """
+        if not isinstance(payload, bytes):
+            return False
+        if not isinstance(mac, str):
+            return False
+        if not isinstance(key_id, str):
+            return False
+
+        with self._lock:
+            if self._status != self.STATUS_READY:
+                self._authentication_rejected += 1
+                return False
+
+            metadata = self._keys.get(key_id)
+
+            if metadata is None:
+                self._authentication_rejected += 1
+                return False
+
+            status = metadata.get("status")
+
+            if status not in {self.ACTIVE, self.RETIRED}:
+                self._authentication_rejected += 1
+                return False
+
+            try:
+                material = base64.b64decode(
+                    metadata["material"].encode("ascii"),
+                    validate=True,
+                )
+            except Exception:
+                self._authentication_rejected += 1
+                return False
+
+            expected = hmac.new(
+                material,
+                payload,
+                hashlib.sha256,
+            ).hexdigest()
+
+            return hmac.compare_digest(expected, mac)
+
     def verify(
         self,
         payload: bytes,

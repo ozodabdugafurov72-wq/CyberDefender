@@ -1350,6 +1350,7 @@ class CyberDefenderRuntime:
             self.spool,
             self.event_bus,
             delivery_gateway=self.resource_delivery_gate,
+            require_admission=True,
         )
 
         # ----------------------------------------------------
@@ -1374,6 +1375,8 @@ class CyberDefenderRuntime:
                 use_detailed_transport=True,
             )
         )
+
+        self.pipeline.bind_admission_verifier(self.admission_gateway.verify_admission_receipt)
 
         # ----------------------------------------------------
         # RUNTIME SECURITY PIPELINE
@@ -1589,6 +1592,12 @@ class CyberDefenderRuntime:
             return
 
         try:
+
+            # Only pipeline-issued, one-use delivery bindings reach the bridge.
+            # A fresh canonical copy removes unsigned extra Python attributes.
+            event = pipeline.claim_trusted_delivery(event)
+            if not isinstance(event, SecurityEvent):
+                raise RuntimeBootstrapError("trusted admission binding missing or invalid")
 
             # ------------------------------------------------
             # Detection bridge

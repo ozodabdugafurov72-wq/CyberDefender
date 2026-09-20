@@ -234,6 +234,38 @@ class CryptoReplayAdmissionGateway:
         self.invalid_events = 0
         self.exceptions = 0
 
+    ADMISSION_DOMAIN = b"CyberDefender/admitted-security-event/v1\x00"
+
+    def verify_admission_receipt(self, event, receipt) -> bool:
+        """Verify persisted admission proof; confers no response authority."""
+        try:
+            if not isinstance(receipt, dict) or set(receipt) != {"key_id", "signature"}:
+                return False
+
+            if not all(
+                isinstance(value, str) and 0 < len(value) <= 256
+                for value in receipt.values()
+            ):
+                return False
+
+            verify_recovery = getattr(
+                self.key_manager,
+                "verify_for_recovery",
+                None,
+            )
+
+            if not callable(verify_recovery):
+                return False
+
+            return verify_recovery(
+                self.ADMISSION_DOMAIN + self.canonicalize_event(event),
+                receipt["signature"],
+                receipt["key_id"],
+            ) is True
+
+        except Exception:
+            return False
+
     # =========================================================
     # CANONICAL EVENT REPRESENTATION
     # =========================================================
@@ -359,61 +391,32 @@ class CryptoReplayAdmissionGateway:
     ) -> dict:
 
         if not self.key_manager.is_ready():
-
             self.degraded += 1
+            raise RuntimeError("KeyManager DEGRADED")
 
-            raise RuntimeError(
-                "KeyManager DEGRADED"
-            )
+        payload = self.canonicalize_event(event)
 
-        key_id = (
-            self.key_manager.active_key_id()
-        )
+        signed = self.key_manager.sign_with_active_key_id(payload)
 
-        if not key_id:
-
+        if (
+            not isinstance(signed, tuple)
+            or len(signed) != 2
+            or not isinstance(signed[0], str)
+            or not signed[0]
+            or not isinstance(signed[1], str)
+            or not signed[1]
+        ):
             self.degraded += 1
+            raise RuntimeError("Event signing failed")
 
-            raise RuntimeError(
-                "ACTIVE key mavjud emas"
-            )
-
-        payload = (
-            self.canonicalize_event(
-                event
-            )
-        )
-
-        signature = (
-            self.key_manager.sign(
-                payload
-            )
-        )
-
-        if not isinstance(
-            signature,
-            str,
-        ) or not signature:
-
-            raise RuntimeError(
-                "Event signing failed"
-            )
+        key_id, signature = signed
 
         return {
-            "event_id":
-                event.event_id,
-
-            "key_id":
-                key_id,
-
-            "signature":
-                signature,
-
-            "algorithm":
-                "HMAC-SHA256",
-
-            "payload":
-                payload,
+            "event_id": event.event_id,
+            "key_id": key_id,
+            "signature": signature,
+            "algorithm": "HMAC-SHA256",
+            "payload": payload,
         }
 
     # =========================================================
@@ -582,7 +585,44 @@ class CryptoReplayAdmissionGateway:
             )
 
             if self.use_detailed_transport and callable(detailed_ingest):
-                transport = detailed_ingest(event)
+                if getattr(self.pipeline, "require_admission", False) is True:
+                    # Mint only after crypto/trust and replay acceptance. Domain
+                    # separation prevents an ordinary event signature being used
+                    # as proof of completed admission.
+                    receipt_payload = (
+                        self.ADMISSION_DOMAIN
+                        + self.canonicalize_event(event)
+                    )
+
+                    receipt_signed = (
+                        self.key_manager.sign_with_active_key_id(
+                            receipt_payload
+                        )
+                    )
+
+                    if (
+                        not isinstance(receipt_signed, tuple)
+                        or len(receipt_signed) != 2
+                        or not isinstance(receipt_signed[0], str)
+                        or not receipt_signed[0]
+                        or not isinstance(receipt_signed[1], str)
+                        or not receipt_signed[1]
+                    ):
+                        raise RuntimeError(
+                            "Admission receipt signing failed"
+                        )
+
+                    receipt = {
+                        "key_id": receipt_signed[0],
+                        "signature": receipt_signed[1],
+                    }
+
+                    transport = detailed_ingest(
+                        event,
+                        admission=receipt,
+                    )
+                else:
+                    transport = detailed_ingest(event)
 
                 disposition = str(
                     getattr(transport, "disposition", "REJECTED")

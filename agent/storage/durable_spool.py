@@ -482,11 +482,13 @@ class DurableEventSpool:
         except OSError:
             return 0
 
-    def _record_payload(self, event: SecurityEvent) -> tuple[dict[str, Any], bytes]:
+    def _record_payload(self, event: SecurityEvent, admission: dict | None = None) -> tuple[dict[str, Any], bytes]:
         record = {
             "event_id": event.event_id,
             "event": event.to_dict(),
         }
+        if admission is not None:
+            record["admission"] = dict(admission)
         payload = self._canonical_json(record) + b"\n"
         return record, payload
 
@@ -1467,6 +1469,7 @@ class DurableEventSpool:
     def append_with_result(
         self,
         event: SecurityEvent,
+        *, admission: dict | None = None,
     ) -> DurableSpoolAdmissionResult:
         """Bounded durable admission with protected HIGH/CRITICAL reserve."""
         with self._lock:
@@ -1533,7 +1536,7 @@ class DurableEventSpool:
                     self._capacity_status(pending_events, pending_bytes),
                 )
 
-            record, payload = self._record_payload(event)
+            record, payload = self._record_payload(event, admission)
             priority = self._normalize_priority(event)
             protected = self._is_protected_priority(priority)
 
