@@ -1,0 +1,1226 @@
+[
+  {
+    "test": "tests/test_runtime_consumer_admission_ack.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_runtime_consumer_admission_ack.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.39
+  },
+  {
+    "test": "test_p08_bridge_correlation.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p08_bridge_correlation.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p08_bridge_correlation-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.11
+  },
+  {
+    "test": "test_p11_17_a_crash_ack_atomicity.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_17_a_crash_ack_atomicity.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p11_17_a_crash_ack_atomicity-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.18
+  },
+  {
+    "test": "test_p11_17_failure_resilience.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_17_failure_resilience.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p11_17_failure_resilience-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.23
+  },
+  {
+    "test": "test_p11_19_failure_recovery.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_19_failure_recovery.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p11_19_failure_recovery-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.2
+  },
+  {
+    "test": "test_p11_19_adversarial.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_19_adversarial.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p11_19_adversarial-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.22
+  },
+  {
+    "test": "test_p10_duplicate_replay.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p10_duplicate_replay.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_p10_duplicate_replay-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "test_main_full_runtime_traversal_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_full_runtime_traversal_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_main_full_runtime_traversal_v1-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 7.77
+  },
+  {
+    "test": "test_main_risk_engine_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_risk_engine_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_main_risk_engine_integration_v1-workspace",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 2.2
+  },
+  {
+    "test": "tests/test_correlation_evidence_compaction_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_correlation_evidence_compaction_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.09
+  },
+  {
+    "test": "tests/test_demo_operations_read_model_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_demo_operations_read_model_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.27
+  },
+  {
+    "test": "tests/test_demo_scenario_safety_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_demo_scenario_safety_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_direct_service_host_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_direct_service_host_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_distribution_http_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_distribution_http_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.75
+  },
+  {
+    "test": "tests/test_distribution_repository_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_distribution_repository_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_durable_resource_contract_v2_3.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_durable_resource_contract_v2_3.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.37
+  },
+  {
+    "test": "tests/test_event_logger_rotation_retention_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_event_logger_rotation_retention_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.12
+  },
+  {
+    "test": "tests/test_eventbus_extended_adversarial_v1_1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_eventbus_extended_adversarial_v1_1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_eventbus_queue_full_adversarial_v1_2.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_eventbus_queue_full_adversarial_v1_2.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_eventbus_resource_safety_gate_v1_0.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_eventbus_resource_safety_gate_v1_0.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_eventbus_v2_4_priority_fairness_v1_0.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_eventbus_v2_4_priority_fairness_v1_0.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_eventbus_v2_4_shutdown_race_v1_1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_eventbus_v2_4_shutdown_race_v1_1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.18
+  },
+  {
+    "test": "tests/test_h1d_child_containment.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_h1d_child_containment.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_h1d_child_containment"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 5.9
+  },
+  {
+    "test": "tests/test_h1d_child_environment.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_h1d_child_environment.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_h1d_child_environment"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.47
+  },
+  {
+    "test": "tests/test_h1d_crash_guard.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_crash_guard.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_h1d_crash_store.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_crash_store.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 4.18
+  },
+  {
+    "test": "tests/test_h1d_http_progress.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_http_progress.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.12
+  },
+  {
+    "test": "tests/test_h1d_installer.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_installer.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.48
+  },
+  {
+    "test": "tests/test_h1d_launch_admission.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_h1d_launch_admission.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_h1d_launch_admission"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 2.24
+  },
+  {
+    "test": "tests/test_h1d_native_live.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_h1d_native_live.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_h1d_native_live"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.68
+  },
+  {
+    "test": "tests/test_h1d_privacy.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_privacy.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.4
+  },
+  {
+    "test": "tests/test_h1d_service_integration.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_service_integration.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.41
+  },
+  {
+    "test": "tests/test_h1d_watchdog.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d_watchdog.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.15
+  },
+  {
+    "test": "tests/test_machine_installer_fail_closed_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_machine_installer_fail_closed_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_native_process_supervisor_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_native_process_supervisor_contract_v1.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_native_process_supervisor_contract_v1"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 2.04
+  },
+  {
+    "test": "tests/test_owner_admin_sensor_plane_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_admin_sensor_plane_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.73
+  },
+  {
+    "test": "tests/test_owner_control_semantics_v3_5.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_control_semantics_v3_5.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.18
+  },
+  {
+    "test": "tests/test_owner_dashboard_bounded_log_tail_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_dashboard_bounded_log_tail_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.2
+  },
+  {
+    "test": "tests/test_owner_dashboard_rotated_log_tail_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_dashboard_rotated_log_tail_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_owner_dashboard_runtime_contract_v3_5.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_dashboard_runtime_contract_v3_5.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_owner_demo_operations_api_v3_5.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_demo_operations_api_v3_5.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.78
+  },
+  {
+    "test": "tests/test_owner_demo_ui_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_demo_ui_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_owner_fleet_contract_v3_5.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_fleet_contract_v3_5.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.2
+  },
+  {
+    "test": "tests/test_owner_fleet_ui_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owner_fleet_ui_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_p0_3b_transport_snapshot_contract.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_p0_3b_transport_snapshot_contract.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.23
+  },
+  {
+    "test": "tests/test_p0_4_runtime_resource_adversarial.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_p0_4_runtime_resource_adversarial.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.37
+  },
+  {
+    "test": "tests/test_p0_4_runtime_resource_integration.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_p0_4_runtime_resource_integration.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.38
+  },
+  {
+    "test": "tests/test_p0_5_response_safety_adversarial.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_p0_5_response_safety_adversarial.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.28
+  },
+  {
+    "test": "tests/test_p0_5_response_safety_foundation.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_p0_5_response_safety_foundation.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.3
+  },
+  {
+    "test": "tests/test_presentation_dashboard_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_presentation_dashboard_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.09
+  },
+  {
+    "test": "tests/test_process_display_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_display_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.09
+  },
+  {
+    "test": "tests/test_process_display_v2_2.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_display_v2_2.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.18
+  },
+  {
+    "test": "tests/test_process_graph_coverage_aware_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_graph_coverage_aware_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.08
+  },
+  {
+    "test": "tests/test_process_sensor_authority_foundation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_sensor_authority_foundation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_process_sensor_authority_runtime_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_sensor_authority_runtime_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.33
+  },
+  {
+    "test": "tests/test_process_sensor_canary_runtime_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_sensor_canary_runtime_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.38
+  },
+  {
+    "test": "tests/test_process_sensor_runtime_config_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_process_sensor_runtime_config_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_recovery_full_traversal_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_recovery_full_traversal_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.35
+  },
+  {
+    "test": "tests/test_recovery_rejection_rollback_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_recovery_rejection_rollback_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.32
+  },
+  {
+    "test": "tests/test_resource_incident_coalescing_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_resource_incident_coalescing_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_resource_safety_plane_v1_0_1_failure_injection.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_resource_safety_plane_v1_0_1_failure_injection.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "tests/test_resource_safety_plane_v1_0_2_recovery.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_resource_safety_plane_v1_0_2_recovery.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.15
+  },
+  {
+    "test": "tests/test_resource_stress_lab_v1_0.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_resource_stress_lab_v1_0.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 2.13
+  },
+  {
+    "test": "tests/test_rust_process_canary_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_rust_process_canary_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.21
+  },
+  {
+    "test": "tests/test_rust_process_enrichment_parity_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_rust_process_enrichment_parity_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.21
+  },
+  {
+    "test": "tests/test_rust_process_v05_wire_contract_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_rust_process_v05_wire_contract_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.14
+  },
+  {
+    "test": "tests/test_service_managed_runtime_integration_v1_1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_service_managed_runtime_integration_v1_1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 4.89
+  },
+  {
+    "test": "tests/test_service_runner_lifecycle_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_service_runner_lifecycle_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.29
+  },
+  {
+    "test": "tests/test_service_runner_resilience_v1_1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_service_runner_resilience_v1_1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.19
+  },
+  {
+    "test": "tests/test_sqlite_bootstrap_cleanup_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_sqlite_bootstrap_cleanup_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.35
+  },
+  {
+    "test": "tests/test_sqlite_data_foundation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_sqlite_data_foundation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_sqlite_failure_isolation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_sqlite_failure_isolation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.31
+  },
+  {
+    "test": "tests/test_sqlite_runtime_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_sqlite_runtime_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.32
+  },
+  {
+    "test": "tests/test_state_failure_health_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_state_failure_health_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.36
+  },
+  {
+    "test": "tests/test_state_root_isolation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_state_root_isolation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.32
+  },
+  {
+    "test": "tests/test_v6_architecture_foundation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_v6_architecture_foundation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_v6_identity_adversarial_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_v6_identity_adversarial_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.11
+  },
+  {
+    "test": "tests/test_v6_identity_foundation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_v6_identity_foundation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.11
+  },
+  {
+    "test": "tests/test_v6_identity_runtime_noninterference_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_v6_identity_runtime_noninterference_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.13
+  },
+  {
+    "test": "tests/test_windows_service_foundation_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_windows_service_foundation_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.12
+  },
+  {
+    "test": "test_main_safety_authorization_action_gateway_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_safety_authorization_action_gateway_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.29
+  },
+  {
+    "test": "test_main_safety_authorization_action_gateway_adversarial_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_safety_authorization_action_gateway_adversarial_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.37
+  },
+  {
+    "test": "test_main_independent_verifier_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_independent_verifier_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.29
+  },
+  {
+    "test": "test_main_independent_verifier_adversarial_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_independent_verifier_adversarial_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.29
+  },
+  {
+    "test": "test_main_policy_engine_integration_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_policy_engine_integration_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.28
+  },
+  {
+    "test": "test_main_correlation_ownership_v1_5.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_main_correlation_ownership_v1_5.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.12
+  },
+  {
+    "test": "test_p11_crypto_admission.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_crypto_admission.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.25
+  },
+  {
+    "test": "test_p11_crypto_replay.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_crypto_replay.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.24
+  },
+  {
+    "test": "test_p11_authenticated_replay.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_p11_authenticated_replay.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.19
+  },
+  {
+    "test": "tests/test_h1d9_prelab.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d9_prelab.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.22
+  },
+  {
+    "test": "tests/test_h1d9_preparation.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d9_preparation.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.33
+  },
+  {
+    "test": "tests/test_h1d9_release_native.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\run_owned_lifecycle.py",
+      "tests/test_h1d9_release_native.py",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\evidence\\ack-integrity-20260920\\verification-1789877076450000600\\test_h1d9_release_native"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.61
+  },
+  {
+    "test": "tests/test_h1d9_recovery.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_h1d9_recovery.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 1.21
+  },
+  {
+    "test": "tests/test_response_control_simulation.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_response_control_simulation.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 4.95
+  },
+  {
+    "test": "tests/test_owned_lifecycle_identity.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_owned_lifecycle_identity.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.16
+  },
+  {
+    "test": "tests/test_ndr_synthetic.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\tests\\test_ndr_synthetic.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 4.28
+  },
+  {
+    "test": "test_attack_graph_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_attack_graph_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.12
+  },
+  {
+    "test": "test_attack_graph_v1_verified.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_attack_graph_v1_verified.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.11
+  },
+  {
+    "test": "test_risk_engine_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_risk_engine_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  },
+  {
+    "test": "test_policy_engine_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_policy_engine_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.07
+  },
+  {
+    "test": "test_independent_verifier_v1.py",
+    "command": [
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\.venv\\Scripts\\python.exe",
+      "-B",
+      "C:\\Users\\HP\\Desktop\\CyberDefender\\test_independent_verifier_v1.py"
+    ],
+    "cwd": "C:\\Users\\HP\\Desktop\\CyberDefender",
+    "exit": 0,
+    "status": "PASS",
+    "seconds": 0.1
+  }
+]

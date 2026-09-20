@@ -4,7 +4,7 @@ import time
 import uuid
 from collections import deque
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 
 class CorrelationEngine:
@@ -148,6 +148,9 @@ class CorrelationEngine:
     def ingest(
         self,
         event: Any,
+        *,
+        strict: bool = False,
+        publish: Callable[[dict], bool] | None = None,
     ) -> dict | None:
         """
         Accept only DETECTION events.
@@ -163,6 +166,8 @@ class CorrelationEngine:
                 self._ignored += 1
                 self._validation_failed += 1
 
+            if strict:
+                raise ValueError("invalid detection input")
             return None
 
         if event.get("event_type") != "DETECTION":
@@ -170,6 +175,8 @@ class CorrelationEngine:
                 self._ignored += 1
                 self._validation_failed += 1
 
+            if strict:
+                raise ValueError("invalid detection type")
             return None
 
         with self._lock:
@@ -192,6 +199,8 @@ class CorrelationEngine:
             with self._lock:
                 self._ignored += 1
 
+            if strict:
+                raise
             return None
 
         except Exception as exc:
@@ -199,6 +208,8 @@ class CorrelationEngine:
                 exc
             )
 
+            if strict:
+                raise
             return None
 
         # -----------------------------------------------------
@@ -275,6 +286,13 @@ class CorrelationEngine:
                 # COMMIT
                 # ---------------------------------------------
 
+                # Delivery callers require publication before committing
+                # duplicate suppression. A rejected publication can retry
+                # through the existing durable pending-event path.
+                incident_event = self._incident_event(candidate)
+                if publish is not None and publish(incident_event) is not True:
+                    raise RuntimeError("incident publication rejected")
+
                 self._recent_events.append(
                     detection
                 )
@@ -292,15 +310,15 @@ class CorrelationEngine:
                 else:
                     self._incidents_updated += 1
 
-                return self._incident_event(
-                    candidate
-                )
+                return incident_event
 
         except Exception as exc:
             self._record_processing_error(
                 exc
             )
 
+            if strict:
+                raise
             return None
 
     # =========================================================

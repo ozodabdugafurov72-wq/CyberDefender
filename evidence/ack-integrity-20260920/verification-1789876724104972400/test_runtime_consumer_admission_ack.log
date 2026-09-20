@@ -1,0 +1,23 @@
+test_ack_exception (__main__.ConsumerAckTests.test_ack_exception) ... ok
+test_ack_rejection_and_retry (__main__.ConsumerAckTests.test_ack_rejection_and_retry) ... ok
+test_adapter_invalid_input (__main__.ConsumerAckTests.test_adapter_invalid_input) ... ok
+test_duplicate_does_not_republish (__main__.ConsumerAckTests.test_duplicate_does_not_republish) ... ok
+test_durable_restart_after_rejected_publication (__main__.ConsumerAckTests.test_durable_restart_after_rejected_publication) ... ok
+test_engine_internal_error (__main__.ConsumerAckTests.test_engine_internal_error) ... ok
+test_engine_throws (__main__.ConsumerAckTests.test_engine_throws) ... ok
+test_incident_serialization_failure_is_not_committed (__main__.ConsumerAckTests.test_incident_serialization_failure_is_not_committed) ... ok
+test_legacy_ingest_compatibility (__main__.ConsumerAckTests.test_legacy_ingest_compatibility) ... ok
+test_malformed_detection (__main__.ConsumerAckTests.test_malformed_detection) ... ok
+test_publication_rejected_then_retry (__main__.ConsumerAckTests.test_publication_rejected_then_retry) ... ok
+test_publication_throws (__main__.ConsumerAckTests.test_publication_throws) ... ok
+test_real_queue_rejection_then_recovery (__main__.ConsumerAckTests.test_real_queue_rejection_then_recovery) ... ok
+test_repeated_rejection_keeps_memory_bounded (__main__.ConsumerAckTests.test_repeated_rejection_keeps_memory_bounded) ... ok
+test_standalone_callback_failure (__main__.ConsumerAckTests.test_standalone_callback_failure) ... ok
+test_success (__main__.ConsumerAckTests.test_success) ... ok
+test_unknown_adapter_result (__main__.ConsumerAckTests.test_unknown_adapter_result) ... ok
+test_unknown_engine_result (__main__.ConsumerAckTests.test_unknown_engine_result) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.048s
+
+OK

@@ -1,0 +1,30 @@
+[
+  {
+    "path": "agent/main.py",
+    "backup": "main.py",
+    "backup_sha256": "b5a1383d2f7044c10f1f1679c3ae009f9b64ccd29cfa376e78f23ba9a45b0522",
+    "current_sha256": "d62a5531ea0c57c394530b5f362bad1a084a8b5fef2ea6368e56b900fee250f7",
+    "backup_matches_starting_HEAD_normalized": true
+  },
+  {
+    "path": "agent/correlation/adapter.py",
+    "backup": "adapter.py",
+    "backup_sha256": "819147079f760629b4920846d04b6bb7b86489d18849738e0672677e41f0ecc2",
+    "current_sha256": "949484e4431564c3253c303c09ca0a98211a3be72e9b1ba23ca29e4931687333",
+    "backup_matches_starting_HEAD_normalized": true
+  },
+  {
+    "path": "agent/correlation/engine.py",
+    "backup": "engine.py",
+    "backup_sha256": "8018b40a5e8fdc3825e3aed327ae027a785bb274ee0e28ae86ccc61aa5cdeaad",
+    "current_sha256": "aa4a9f2ed00a1ef064668793d1973530d3c61414cdea574a4cc1c5df762026ad",
+    "backup_matches_starting_HEAD_normalized": true
+  },
+  {
+    "path": "test_main_correlation_ownership_v1_5.py",
+    "backup": "test_main_correlation_ownership_v1_5.py",
+    "backup_sha256": "562c08662cbdcd5bb989dae9d3be504f0d4577e86a0a22558921017a9c22ce1a",
+    "current_sha256": "ccd180910a7d8276536dfc173c073d7e3f6ca21fc3a123061a73024434314a7c",
+    "backup_matches_starting_HEAD_normalized": true
+  }
+]

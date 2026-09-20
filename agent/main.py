@@ -1610,18 +1610,16 @@ class CyberDefenderRuntime:
                     "SecurityEventBridge returned invalid detection."
                 )
 
-            correlation_adapter.handle_event(
-                detection
-            )
+            if correlation_adapter.handle_event(detection) is not True:
+                raise RuntimeBootstrapError("correlation consumption failed")
 
             # ------------------------------------------------
             # ACK ONLY AFTER SUCCESS
             # ------------------------------------------------
 
-            if pipeline.ack(
-                event.event_id
-            ):
-                self.events_acked += 1
+            if pipeline.ack(event.event_id) is not True:
+                raise RuntimeBootstrapError("durable ACK failed")
+            self.events_acked += 1
 
         except Exception as exc:
 

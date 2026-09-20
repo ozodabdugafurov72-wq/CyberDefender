@@ -93,92 +93,40 @@ class CorrelationAdapter:
     # EVENT HANDLER
     # =========================================================
 
-    def handle_event(
-        self,
-        event: Any,
-    ) -> None:
+    def handle_event(self, event: Any) -> bool:
+        """Return explicit consumption success; contain all downstream errors.
+
+        Publication runs before the engine commits duplicate suppression.
+        No callback means the caller owns durable ACK (the canonical runtime).
         """
-        EventBus'dan DETECTION eventlarini qabul qiladi.
-
-        INCIDENT eventlari ignore qilinadi.
-
-        ACK faqat:
-            1. event valid consumer input bo'lsa
-            2. engine processing muvaffaqiyatli tugasa
-            3. kerakli INCIDENT publish muvaffaqiyatli bo'lsa
-
-        Engine exception yoki INCIDENT publish failure
-        bo'lsa ACK qilinmaydi.
-        """
-
-        if not isinstance(event, dict):
+        if not isinstance(event, dict) or event.get("event_type") != "DETECTION":
             self._ignored += 1
-            return
-
-        if event.get("event_type") != "DETECTION":
+            return False
+        event_id = event.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
             self._ignored += 1
-            return
-
+            return False
         self._received += 1
-
-        event_id = event.get(
-            "event_id"
-        )
-
         try:
-            incident = self.engine.ingest(
-                event
-            )
-
-            # -------------------------------------------------
-            # Duplicate / rejected event
-            # -------------------------------------------------
-            #
-            # Engine exception bermadi.
-            # Demak consumer eventni xavfsiz tarzda
-            # qayta ishladi yoki reject qildi.
-            #
-            # Bunday poison/duplicate eventni abadiy
-            # replay qilish kerak emas.
-            #
-            if incident is None:
-                self._ack_event(
-                    event_id
-                )
-                return
-
-            # -------------------------------------------------
-            # Publish INCIDENT
-            # -------------------------------------------------
-
-            published = self.event_bus.publish(
-                incident
-            )
-
-            if not published:
-                self._failed += 1
-                return
-
-            self._published += 1
-
-            # -------------------------------------------------
-            # ACK faqat INCIDENT publish muvaffaqiyatli
-            # bo'lgandan keyin.
-            # -------------------------------------------------
-
-            self._ack_event(
-                event_id
-            )
-
+            published_before = self._published
+            incident = self.engine.ingest(event, strict=True, publish=self._publish_incident)
+            if incident is not None and (
+                not isinstance(incident, dict)
+                or incident.get("event_type") != "INCIDENT"
+                or self._published != published_before + 1
+            ):
+                raise RuntimeError("unknown correlation result")
+            # In strict mode None means an existing duplicate, never an error.
+            return self._ack_event(event_id)
         except Exception:
-            # Engine yoki boshqa processing xatosi.
-            #
-            # Eng muhim invariant:
-            #
-            #     EXCEPTION -> NO ACK
-            #
-            # Event durable spool'da qoladi.
             self._failed += 1
+            return False
+
+    def _publish_incident(self, incident: dict) -> bool:
+        if self.event_bus.publish(incident) is not True:
+            return False
+        self._published += 1
+        return True
 
     # =========================================================
     # ACK
@@ -210,7 +158,7 @@ class CorrelationAdapter:
                 str(event_id)
             )
 
-            if result:
+            if result is True:
                 self._acked += 1
                 return True
 
