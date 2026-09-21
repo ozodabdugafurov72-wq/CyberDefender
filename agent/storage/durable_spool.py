@@ -171,6 +171,12 @@ class DurableEventSpool:
         self.policy = policy or DurableSpoolPolicy()
         self._validate_policy(self.policy)
         self._lock = RLock()
+        # Scheduling hint only: never persisted and never admission evidence.
+        # Restart begins a new sweep; every recovered record is reverified.
+        self._recovery_offset = 0
+        self._recovery_identity = None
+        self._recovery_discard_line = False
+        self.recovery_scan = {"scanned": 0, "bytes": 0, "wrapped": False}
 
         # Resource-safety telemetry.  These counters are deliberately
         # bounded scalar state; no per-event telemetry list is retained.
@@ -1386,6 +1392,80 @@ class DurableEventSpool:
             else max(1, min(int(limit), int(self.policy.max_recovery_batch)))
         )
         return self.pending_records(limit=batch_limit)
+
+    def iter_recovery_records(self, *, max_scan: int, max_bytes: int):
+        """Incrementally read one bounded sweep, including invalid physical rows.
+
+        The caller must close this iterator when it stops early. The cursor
+        advances only over bytes actually inspected, so a publication limit
+        cannot repeatedly skip the unused tail of a page. No evidence is
+        rewritten. Oversized lines are drained in bounded chunks, never parsed
+        as independent JSON suffixes. File replacement restarts the sweep.
+        """
+        scan_limit = max(0, min(int(max_scan), self.policy.max_recovery_batch))
+        byte_limit = max(0, min(int(max_bytes), 1024 * 1024,
+                                self.policy.max_recovery_scan_bytes))
+        stats = {"scanned": 0, "bytes": 0, "wrapped": False}
+        self.recovery_scan = stats
+        if not scan_limit or not byte_limit:
+            return
+        with self._lock:
+            if not self._terminal_state_safe:
+                raise SpoolError("terminal state unavailable")
+            if not self.pending_path.exists():
+                stats["wrapped"] = True
+                return
+            handle = self.pending_path.open("rb")
+            physical = os.fstat(handle.fileno())
+            identity = (physical.st_dev, physical.st_ino)
+            if identity != self._recovery_identity or physical.st_size < self._recovery_offset:
+                self._recovery_offset = 0
+                self._recovery_discard_line = False
+            self._recovery_identity = identity
+            handle.seek(self._recovery_offset)
+        try:
+            while stats["scanned"] < scan_limit and stats["bytes"] < byte_limit:
+                with self._lock:
+                    remaining = byte_limit - stats["bytes"]
+                    raw = handle.readline(min(self.policy.max_event_bytes + 1, remaining))
+                    stats["bytes"] += len(raw)
+                    if not raw:
+                        self._recovery_offset = 0
+                        self._recovery_discard_line = False
+                        stats["wrapped"] = True
+                        break
+                    # A partial read caused only by this call's byte budget
+                    # is retried on the next call; do not reject a valid row.
+                    if (not raw.endswith(b"\n") and len(raw) == remaining
+                            and remaining <= self.policy.max_event_bytes
+                            and not self._recovery_discard_line):
+                        break
+                    stats["scanned"] += 1
+                    self._recovery_offset = handle.tell()
+                    discard = self._recovery_discard_line
+                    self._recovery_discard_line = not raw.endswith(b"\n")
+                    record, reason = None, "INVALID_RECORD"
+                    if not discard and len(raw) <= self.policy.max_event_bytes and raw.endswith(b"\n"):
+                        try:
+                            candidate = json.loads(raw)
+                            event_id = candidate.get("event_id") if isinstance(candidate, dict) else None
+                            if isinstance(event_id, str) and event_id.strip():
+                                event_id = event_id.strip()
+                                if event_id in self._acked or event_id in self._quarantined:
+                                    reason = "TERMINAL"
+                                elif self.quarantine_vault is not None and self._find_vault_record(event_id) is not None:
+                                    reason = "TERMINAL"
+                                else:
+                                    if not self._terminal_state_safe:
+                                        raise SpoolError("terminal state unavailable")
+                                    record, reason = candidate, "PENDING"
+                        except (ValueError, UnicodeError, RecursionError):
+                            pass
+                    if reason == "INVALID_RECORD":
+                        self._corrupted += 1
+                yield record, reason
+        finally:
+            handle.close()
 
     # =========================================================
     # PENDING IDS

@@ -377,8 +377,15 @@ class CorrelationEngine:
         if not source:
             source = "unknown"
 
+        source_event_id = event.get("event_id")
+        if not isinstance(source_event_id, str) or not source_event_id.strip():
+            source_event_id = None
+        else:
+            source_event_id = source_event_id.strip()
+
         return {
             "timestamp": time.time(),
+            "source_event_id": source_event_id,
             "type": detection_type,
             "severity": severity,
             "source": source,
@@ -649,9 +656,19 @@ class CorrelationEngine:
         detection: dict,
     ) -> dict:
 
-        incident_id = (
-            f"INC-{uuid.uuid4().hex.upper()}"
-        )
+        source_event_id = detection.get("source_event_id")
+        if isinstance(source_event_id, str) and source_event_id.strip():
+            # Stable semantic identity makes at-least-once replay
+            # duplicate-addressable across crash/restart. It does not claim
+            # transport exactly-once semantics.
+            incident_uuid = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"CyberDefender/incident/v1/{source_event_id.strip()}",
+            )
+            incident_id = f"INC-{incident_uuid.hex.upper()}"
+        else:
+            # Legacy direct engine callers may not carry a source event id.
+            incident_id = f"INC-{uuid.uuid4().hex.upper()}"
 
         incident = {
             "incident_id": incident_id,
@@ -973,8 +990,26 @@ class CorrelationEngine:
         incident: dict,
     ) -> dict:
 
+        detections = incident.get("detections", [])
+        trigger_event_id = None
+        if isinstance(detections, list) and detections:
+            candidate = detections[-1]
+            if isinstance(candidate, dict):
+                value = candidate.get("source_event_id")
+                if isinstance(value, str) and value.strip():
+                    trigger_event_id = value.strip()
+
+        incident_id = incident["incident_id"]
+        idempotency_key = (
+            f"INCIDENT:{incident_id}:{trigger_event_id}"
+            if trigger_event_id is not None
+            else None
+        )
+
         return {
             "event_type": "INCIDENT",
+            "source_event_id": trigger_event_id,
+            "idempotency_key": idempotency_key,
             "source": "CorrelationEngine",
             "incident_id":
                 incident["incident_id"],

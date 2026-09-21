@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 from threading import RLock
@@ -136,6 +137,12 @@ class DurableEventPipeline:
         self._admission_rejected = 0
         self._delivery_binding_rejected = 0
         self._max_delivery_bindings = 8192
+        self._recovery_blocked = False
+        self._recovery_sweep_failed = False
+        self._consumer_failures = 0
+        self._recovery_last = {"scanned": 0, "bytes": 0, "published": 0,
+                               "reason": "NOT_RUN"}
+        self._recovery_running = False
 
         # -----------------------------------------------------
         # INGEST
@@ -829,228 +836,138 @@ class DurableEventPipeline:
     # BOUNDED RECOVERY SNAPSHOT
     # =========================================================
 
-    def _pending_recovery_records(
-        self,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
-        """Get a bounded replay batch when the spool exposes that contract.
+    def consumer_failed(self, event_id: str) -> None:
+        """Record a historical consumer failure without creating a health latch.
 
-        Compatibility spools used by older tests may only expose
-        pending_records(); those remain supported.
+        Current recovery health is derived from bounded recovery sweeps. A
+        per-event failure set is intentionally not retained here: unsigned or
+        already-terminal deliveries must not be able to pin the pipeline in a
+        permanent DEGRADED state.
         """
-        # Admission-enforced recovery must be able to scan past legacy or
-        # unverified records. pending_records() is still hard-bounded by the
-        # spool policy, so this avoids starvation without creating an
-        # unbounded scan.
+        if not isinstance(event_id, str) or not event_id.strip():
+            return
+        with self._lock:
+            self._consumer_failures += 1
+
+    def _recovery_records(self, scan_limit: int):
+        iterator = getattr(self.spool, "iter_recovery_records", None)
+        if callable(iterator):
+            with closing(iterator(max_scan=scan_limit, max_bytes=1024 * 1024)) as rows:
+                yield from rows
+            return
+        # Legacy fixture compatibility is not a production trust boundary.
         if self.require_admission:
-            records = self.spool.pending_records()
-            return records if isinstance(records, list) else []
+            raise SpoolError("bounded recovery unavailable")
+        batch = getattr(self.spool, "pending_batch", None)
+        rows = batch(scan_limit) if callable(batch) else self.spool.pending_records()
+        for record in rows[:scan_limit]:
+            yield record, "PENDING"
 
-        batch_method = getattr(self.spool, "pending_batch", None)
-        if callable(batch_method):
-            try:
-                return batch_method(limit) if limit is not None else batch_method()
-            except TypeError:
-                return batch_method()
+    def publish_pending(self, max_events: int | None = None, *,
+                        max_scan: int | None = None) -> int:
+        """Bounded, paced, fair recovery. Publication is never an ACK.
 
-        records = self.spool.pending_records()
-        if not isinstance(records, list):
-            return []
-        if limit is None:
-            return records
-        return records[: max(0, int(limit))]
-
-    # =========================================================
-    # PUBLISH PENDING
-    # =========================================================
-
-    def publish_pending(
-        self,
-        max_events: int | None = None,
-    ) -> int:
+        At most 256 physical rows/chunks and 1 MiB are read per call,
+        further restricted by spool policy and caller limits. Five seconds
+        separate sweeps/calls, including failed calls. Cursor hints are
+        memory-only; restart revalidates from byte zero. The consumer must
+        separately confirm successful processing and durable ACK.
         """
-        Republish pending events.
-
-        IMPORTANT:
-
-            publish != ACK
-
-        Therefore this method NEVER ACKs events.
-
-        Invalid/corrupted records are isolated.
-        One bad event must not terminate the entire
-        recovery loop.
-        """
-
+        policy = getattr(self.spool, "policy", None)
+        configured = getattr(policy, "max_recovery_batch", 256)
+        hard_limit = min(256, configured) if isinstance(configured, int) else 256
+        publish_limit = hard_limit if max_events is None else max(0, min(int(max_events), hard_limit))
+        scan_limit = hard_limit if max_scan is None else max(0, min(int(max_scan), hard_limit))
+        if scan_limit < publish_limit:
+            raise ValueError("max_scan must be >= max_events")
+        if not publish_limit or not scan_limit:
+            return 0
+        with self._lock:
+            if self._recovery_running:
+                return 0
+            self._recovery_running = True
+        published = scanned = 0
+        reason = "SCANNING"
         try:
-            records = self._pending_recovery_records(max_events)
+            with closing(self._recovery_records(scan_limit)) as records:
+                for record, record_reason in records:
+                    scanned += 1
+                    if record_reason == "TERMINAL":
+                        continue
+                    delivered, retryable = False, False
+                    reason = "INVALID_RECORD"
+                    try:
+                        if not isinstance(record, dict) or not isinstance(record.get("event"), dict):
+                            raise ValueError("invalid durable record")
+                        event = SecurityEvent.from_dict(record["event"])
+                        if event.event_id != record.get("event_id") or not event.verify_integrity():
+                            raise ValueError("invalid durable event")
+                    except (ValueError, TypeError, KeyError) as exc:
+                        # Invalid/corrupt evidence is rejected and remains
+                        # observable, but it is not an operational outage.
+                        self._record_error("recovery_record_validation", exc)
+                        with self._lock:
+                            self._integrity_rejected += 1
+                            self._replay_failed += 1
+                        continue
+                    except Exception as exc:
+                        # Unknown validation outcomes are operational failures.
+                        self._record_error("recovery_record_validation", exc)
+                        with self._lock:
+                            self._replay_failed += 1
+                            self._recovery_sweep_failed = True
+                            self._recovery_blocked = True
+                        reason = "RECOVERY_EXCEPTION"
+                        continue
 
+                    try:
+                        delivered, reason, retryable = (
+                            self._publish_detailed(event, record.get("admission"))
+                            if self.require_admission else self._publish_detailed(event)
+                        )
+                    except Exception as exc:
+                        self._record_error("delivery_replay", exc)
+                        delivered, retryable, reason = False, True, "RECOVERY_EXCEPTION"
+
+                    with self._lock:
+                        if delivered is not True:
+                            if retryable is True:
+                                # Current transport/resource pressure blocks
+                                # useful recovery and therefore degrades health.
+                                self._delivery_deferred += 1
+                                self._recovery_sweep_failed = True
+                                self._recovery_blocked = True
+                            else:
+                                # Security-policy rejection (for example a
+                                # preserved legacy unsigned row) is historical
+                                # evidence, not proof that recovery machinery is
+                                # currently unavailable.
+                                self._replay_failed += 1
+                            continue
+                        self._published += 1
+                        self._replayed += 1
+                    published += 1
+                    if published >= publish_limit:
+                        break
         except Exception as exc:
-            self._record_error(
-                "spool_pending_records",
-                exc,
-            )
-
+            self._record_error("spool_recovery", exc)
             with self._lock:
                 self._replay_failed += 1
-
-            return 0
-
-        published_count = 0
-
-        for record in records:
-
-            # max_events limits successful publications, not the number of
-            # records inspected. This lets recovery scan past preserved
-            # unverified legacy records without starving later valid work.
-            if (
-                max_events is not None
-                and published_count >= max(0, int(max_events))
-            ):
-                break
-
-            # -------------------------------------------------
-            # STRUCTURE
-            # -------------------------------------------------
-
-            if not isinstance(
-                record,
-                dict,
-            ):
-                with self._lock:
-                    self._replay_failed += 1
-
-                continue
-
-            event_id = record.get(
-                "event_id"
-            )
-
-            event_data = record.get(
-                "event"
-            )
-
-            if not isinstance(
-                event_id,
-                str,
-            ):
-                with self._lock:
-                    self._replay_failed += 1
-                    self._integrity_rejected += 1
-
-                continue
-
-            event_id = event_id.strip()
-
-            if not event_id:
-                with self._lock:
-                    self._replay_failed += 1
-                    self._integrity_rejected += 1
-
-                continue
-
-            if not isinstance(
-                event_data,
-                dict,
-            ):
-                with self._lock:
-                    self._replay_failed += 1
-                    self._integrity_rejected += 1
-
-                continue
-
-            # -------------------------------------------------
-            # DESERIALIZATION
-            # -------------------------------------------------
-
-            try:
-                event = SecurityEvent.from_dict(
-                    event_data
-                )
-
-            except Exception as exc:
-                self._record_error(
-                    "event_deserialization",
-                    exc,
-                )
-
-                with self._lock:
-                    self._integrity_rejected += 1
-                    self._replay_failed += 1
-
-                continue
-
-            # -------------------------------------------------
-            # ID BINDING
-            # -------------------------------------------------
-
-            if event.event_id != event_id:
-                with self._lock:
-                    self._integrity_rejected += 1
-                    self._replay_failed += 1
-
-                continue
-
-            # -------------------------------------------------
-            # INTEGRITY
-            # -------------------------------------------------
-
-            try:
-                valid = bool(
-                    event.verify_integrity()
-                )
-
-            except Exception as exc:
-                self._record_error(
-                    "replay_integrity",
-                    exc,
-                )
-
-                valid = False
-
-            if not valid:
-                with self._lock:
-                    self._integrity_rejected += 1
-                    self._replay_failed += 1
-
-                continue
-
-            # -------------------------------------------------
-            # DELIVERY BOUNDARY
-            # -------------------------------------------------
-
-            try:
-                delivered, _reason, _retryable = (
-                    self._publish_detailed(event, record.get("admission"))
-                    if self.require_admission else self._publish_detailed(event)
-                )
-
-            except Exception as exc:
-                self._record_error(
-                    "delivery_replay",
-                    exc,
-                )
-                delivered = False
-
-            if not delivered:
-                with self._lock:
-                    if _retryable:
-                        # Transient queue/resource pressure.
-                        self._delivery_deferred += 1
-                    else:
-                        # Invalid/missing admission proof is a security
-                        # recovery failure, not ordinary delivery pressure.
-                        self._replay_failed += 1
-
-                continue
-
+                self._recovery_sweep_failed = True
+                self._recovery_blocked = True
+            reason = "RECOVERY_UNAVAILABLE"
+        finally:
+            stats = getattr(self.spool, "recovery_scan", {})
+            if not isinstance(stats, dict):
+                stats = {}
             with self._lock:
-                self._published += 1
-                self._replayed += 1
-
-            published_count += 1
-
-        return published_count
+                if stats.get("wrapped"):
+                    self._recovery_blocked = self._recovery_sweep_failed
+                    self._recovery_sweep_failed = False
+                self._recovery_last = {"scanned": scanned, "bytes": stats.get("bytes", 0),
+                                       "published": published, "reason": reason}
+                self._recovery_running = False
+        return published
 
     # =========================================================
     # REPLAY ALIAS
@@ -1242,6 +1159,13 @@ class DurableEventPipeline:
         ):
             status = self.STATUS_DEGRADED
 
+        with self._lock:
+            recovery = dict(self._recovery_last)
+            recovery["blocked"] = self._recovery_blocked
+            recovery["consumer_failures"] = self._consumer_failures
+            if self._recovery_blocked and status == self.STATUS_HEALTHY:
+                status = self.STATUS_DEGRADED
+
         if status != self.STATUS_HEALTHY:
             with self._lock:
                 self._health_failures += 1
@@ -1252,6 +1176,7 @@ class DurableEventPipeline:
             "version": self.VERSION,
             "status": status,
             "admission_binding": self.admission_health(),
+            "recovery": recovery,
 
             "dependencies": {
                 "spool": spool_health,

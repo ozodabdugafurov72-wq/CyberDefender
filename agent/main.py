@@ -1639,6 +1639,11 @@ class CyberDefenderRuntime:
                 f"{type(exc).__name__}"
             )
 
+            if isinstance(event, SecurityEvent):
+                report_failure = getattr(pipeline, "consumer_failed", None)
+                if callable(report_failure):
+                    report_failure(event.event_id)
+
             # ------------------------------------------------
             # IMPORTANT:
             #
@@ -4241,7 +4246,20 @@ class CyberDefenderRuntime:
         ).upper()
         safety_failure = safety_status not in {"SAFE", "HEALTHY"}
 
-        if critical_failure or persistence_failure or safety_failure:
+        # Recovery is current health, not a permanent latch derived from a
+        # historical failure counter. Preserve all other degradation latches.
+        pipeline_health = health.get("pipeline", {})
+        recovery_health = pipeline_health.get("recovery", {})
+        recovery_active = bool(recovery_health.get("blocked"))
+        recovery_only = (
+            recovery_active
+            and all(health.get(name, {}).get("status") == "HEALTHY"
+                    for name in critical_components if name != "pipeline")
+            and all(value is None or value.get("status") == "HEALTHY"
+                    for value in pipeline_health.get("dependencies", {}).values())
+            and pipeline_health.get("admission_binding", {}).get("verifier_bound") is True
+        )
+        if (critical_failure and not recovery_only) or persistence_failure or safety_failure:
             self.degraded = True
 
         health["runtime"]["status"] = (

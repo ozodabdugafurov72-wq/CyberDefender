@@ -1,21 +1,9 @@
-"""
-CyberDefender - Correlation Ownership Diagnostic v1.1
+"""CyberDefender — Correlation ownership compatibility diagnostic.
 
-Run from the CyberDefender project root:
-
-    .venv/Scripts/python.exe test_main_correlation_ownership_v1_fixed.py
-
-Purpose:
-- Verify that a real SecurityEvent published to EventBus is not consumed
-  directly by CorrelationAdapter.
-- Verify that the explicit SecurityEvent -> DETECTION bridge path reaches
-  CorrelationAdapter exactly once.
-- Verify event_id preservation.
-- Verify INCIDENT events do not recursively create another DETECTION.
-- Verify CorrelationAdapter ACK is disabled in this wiring, so main/runtime
-  remains the ACK owner.
-
-This is a diagnostic test only. It does not modify CyberDefender source files.
+Aligned with the current explicit runtime ownership contract:
+SecurityEvent -> SecurityEventBridge -> DETECTION -> CorrelationAdapter.handle_event().
+The adapter is not an implicit EventBus subscriber and ACK ownership remains with
+its caller when no ack_callback is configured.
 """
 
 from __future__ import annotations
@@ -24,26 +12,27 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Make imports reliable when the script is launched from the project root.
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.bus.event_bus import EventBus
 from agent.correlation.adapter import CorrelationAdapter
+from agent.correlation.engine import CorrelationEngine
 from agent.core.event_bridge import SecurityEventBridge
 from agent.event import SecurityEvent
 
 
-class ProbeCorrelationEngine:
-    """Minimal probe replacing the real correlation engine for this test."""
+class ProbeCorrelationEngine(CorrelationEngine):
+    """Real contract plus deterministic observation of ingest calls."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.received: list[Any] = []
 
-    def ingest(self, event: Any) -> Any:
+    def ingest(self, event: Any, **kwargs) -> Any:
         self.received.append(event)
-        return None
+        return super().ingest(event, **kwargs)
 
 
 def main() -> int:
@@ -60,116 +49,84 @@ def main() -> int:
             suffix = f" :: {detail}" if detail else ""
             print(f"[FAIL] {name}{suffix}")
 
-    bus = EventBus(32)
+    bus = EventBus(max_size=32, security_reserve=8)
     engine = ProbeCorrelationEngine()
+    adapter = CorrelationAdapter(engine=engine, event_bus=bus, ack_callback=None)
 
-    # CorrelationAdapter subscribes itself to EventBus.
-    adapter = CorrelationAdapter(
-        event_bus=bus,
-        correlation_engine=engine,
-    )
-
-    # 1. Publish a canonical SecurityEvent.
-    security_event = SecurityEvent(
-        event_type="RESOURCE_STATUS",
-        source="diagnostic",
-        severity="LOW",
-        payload={"cpu": 10.0, "memory": 20.0},
-    )
-
-    published = bus.publish(security_event)
-
-    check("SecurityEvent publish accepted", published is True)
-
-    # CorrelationAdapter currently handles dict events whose event_type is
-    # DETECTION. A canonical SecurityEvent must therefore not be processed
-    # directly by that subscriber.
+    subscribers = getattr(bus, "_subscribers", None)
     check(
-        "Direct SecurityEvent does not reach CorrelationAdapter",
-        len(engine.received) == 0,
-        f"engine_received={len(engine.received)}",
+        "CorrelationAdapter is not an implicit EventBus subscriber",
+        isinstance(subscribers, list) and adapter.handle_event not in subscribers,
+        f"subscribers={subscribers!r}",
     )
 
-    # 2. Explicit bridge conversion: SecurityEvent -> DETECTION.
-    detection = SecurityEventBridge.to_detection(security_event)
+    event = SecurityEvent(
+        event_type="RESOURCE_STATUS",
+        severity="LOW",
+        value={"cpu": 10.0, "memory": 20.0},
+        source="diagnostic",
+        message="correlation ownership compatibility diagnostic",
+        host_id="diagnostic-host",
+    )
 
+    check("SecurityEvent publish accepted", bus.publish(event) is True)
+    bus.dispatch_once()
+    check(
+        "SecurityEvent does not directly enter correlation",
+        len(engine.received) == 0,
+        f"received={len(engine.received)}",
+    )
+
+    detection = SecurityEventBridge.to_detection(event)
     check(
         "Bridge produced DETECTION",
         isinstance(detection, dict) and detection.get("event_type") == "DETECTION",
         f"detection={detection!r}",
     )
 
-    adapter.handle_event(detection)
-
+    before = len(engine.received)
+    result = adapter.handle_event(detection)
+    check("Explicit adapter consumption succeeds", result is True, f"result={result!r}")
     check(
-        "Bridged DETECTION reaches CorrelationAdapter exactly once",
-        len(engine.received) == 1,
-        f"engine_received={len(engine.received)}",
+        "Bridged DETECTION reaches correlation exactly once",
+        len(engine.received) == before + 1,
+        f"before={before}, after={len(engine.received)}",
     )
 
-    # 3. event_id must survive the bridge.
-    received = engine.received[0] if engine.received else None
-    received_event_id = (
-        received.get("event_id") if isinstance(received, dict) else None
-    )
-
+    received = engine.received[-1] if engine.received else None
     check(
         "event_id preserved through bridge",
-        received_event_id == security_event.event_id,
-        f"original={security_event.event_id!r}, received={received_event_id!r}",
+        isinstance(received, dict) and received.get("event_id") == event.event_id,
+        f"received={received!r}",
     )
 
-    # 4. INCIDENT must not be turned into another DETECTION by this adapter.
-    before_incident = len(engine.received)
-
-    incident = {
-        "event_type": "INCIDENT",
-        "event_id": "diagnostic-incident-001",
-        "severity": "HIGH",
-        "payload": {"reason": "ownership-test"},
-    }
-    adapter.handle_event(incident)
-
+    before = len(engine.received)
+    incident_result = adapter.handle_event(
+        {
+            "event_type": "INCIDENT",
+            "event_id": "diagnostic-incident-001",
+            "severity": "HIGH",
+            "data": {"reason": "ownership-test"},
+        }
+    )
+    check("INCIDENT is rejected by correlation adapter", incident_result is False)
     check(
-        "INCIDENT does not recursively create DETECTION",
-        len(engine.received) == before_incident,
-        f"before={before_incident}, after={len(engine.received)}",
+        "INCIDENT does not recurse into correlation",
+        len(engine.received) == before,
+        f"before={before}, after={len(engine.received)}",
     )
 
-    # 5. ACK ownership.
-    ack_enabled = bool(getattr(adapter, "ack_enabled", False))
+    stats = adapter.get_stats()
+    check("ACK ownership remains external", stats.get("ack_enabled") is False, f"stats={stats!r}")
 
-    check(
-        "CorrelationAdapter ACK is disabled",
-        ack_enabled is False,
-        f"ack_enabled={ack_enabled!r}",
-    )
-
-    # Cleanup.
-    try:
-        bus.request_shutdown("diagnostic-test-complete")
-    except Exception as exc:
-        print(f"[WARN] EventBus shutdown raised: {exc!r}")
+    bus.request_shutdown()
+    check("EventBus entered shutdown state", bus.is_shutdown_requested() is True)
 
     print()
-    print("=" * 64)
+    print("=" * 72)
     print(f"RESULT: PASS={passed} FAIL={failed}")
-    print("=" * 64)
-
-    if failed == 0:
-        print(
-            "CONCLUSION: No current duplicate-processing bug was demonstrated. "
-            "The CorrelationAdapter EventBus subscription is redundant/ambiguous "
-            "for canonical SecurityEvent traffic, while the explicit bridge path "
-            "is the active DETECTION path. ACK ownership remains outside the adapter."
-        )
-        return 0
-
-    print(
-        "CONCLUSION: Diagnostic failure detected. Do not change the architecture "
-        "until the failing check is inspected."
-    )
-    return 1
+    print("=" * 72)
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":

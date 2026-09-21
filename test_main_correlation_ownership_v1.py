@@ -28,19 +28,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from agent.bus.event_bus import EventBus
 from agent.correlation.adapter import CorrelationAdapter
+from agent.correlation.engine import CorrelationEngine
 from agent.core.event_bridge import SecurityEventBridge
 from agent.event import SecurityEvent
 
 
-class ProbeCorrelationEngine:
-    """Deterministic probe for the CorrelationEngine ingest contract."""
+class ProbeCorrelationEngine(CorrelationEngine):
+    """Deterministic probe aligned with the current strict ingest contract."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.received: list[Any] = []
 
-    def ingest(self, event: Any) -> Any:
+    def ingest(self, event: Any, **kwargs) -> Any:
         self.received.append(event)
-        return None
+        return super().ingest(event, **kwargs)
 
 
 def main() -> int:
