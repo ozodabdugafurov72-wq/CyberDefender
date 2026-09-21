@@ -1810,8 +1810,14 @@ class CyberDefenderRuntime:
 
         try:
 
+            # Recovery replay must leave protected HIGH/CRITICAL
+            # admission capacity for fresh security telemetry in the same cycle.
+            # Scan can stay broad, but replay publication is deliberately bounded.
             published = (
-                pipeline.publish_pending()
+                pipeline.publish_pending(
+                    max_events=32,
+                    max_scan=256,
+                )
             )
 
             if not isinstance(
