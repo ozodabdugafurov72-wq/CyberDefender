@@ -39,6 +39,9 @@
   };
 
   let lastState = null;
+  let selectedEndpointId = null;
+  let lastFleet = null;
+  // ENDPOINT_FLEET_SELECTOR_PATCH_v1
   let incidentTimer = null;
   let historyMode = false;
 
@@ -62,7 +65,7 @@
     text("securityIncidentCount",securityCount); text("resourceIncidentCount",resourceCount); text("criticalIncidentCount",sum.critical_security_incidents||0); text("incidentBadge",`${total} ACTIVE`);
     text("threatBig",d.threat_status||"UNKNOWN"); text("resourceBig",d.resource_posture||"UNKNOWN");
     setBar("cpu","cpuBar",obs.cpu_percent); setBar("memory","memoryBar",obs.memory_percent); setBar("disk","diskBar",obs.disk_percent);
-    text("endpointState",res.status||"UNKNOWN"); text("processes",obs.process_count??"—"); text("availableMemory",res.available_memory_mb!=null?`${n(res.available_memory_mb)} MB`:"—"); text("cycles",rt.cycle_count??"—"); text("host",d.endpoint?.hostname||"LOCAL ENDPOINT"); text("footerHost",d.endpoint?.hostname||"LOCAL ENDPOINT"); text("sequence",d.publisher?.sequence??"—"); text("updated",`UPDATED ${ts(d.publisher?.generated_at)}`);
+    renderEndpointSurface(d,obs,res,rt); text("footerHost",d.endpoint?.hostname||"LOCAL ENDPOINT"); text("sequence",d.publisher?.sequence??"—"); text("updated",`UPDATED ${ts(d.publisher?.generated_at)}`);
     renderPipeline(d.security_chain||[]); if(!historyMode) renderLiveIncidents(d.incidents||[]); renderComponents(d.components||[]); renderApplications(d.process_inventory||[]); renderEvents(d.event_groups||[]); renderFleet(d.fleet||{}); renderSensorPlane(d.sensor_plane||{});
     const components=d.components||[], totalComponents=components.length;
     const nominalComponents=components.filter(x=>["HEALTHY","SAFE"].includes(String(x.status).toUpperCase())).length;
@@ -111,7 +114,157 @@
     text("rustSidCoverage",cov("sid")); text("rustSessionCoverage",cov("session_id")); text("rustIntegrityCoverage",cov("integrity_level"));
   }
 
+
+  function fleetEndpointCandidates(d){
+    const fleet=d?.fleet||{};
+    const endpoints=Array.isArray(fleet?.endpoints)?fleet.endpoints:[];
+    const localId=String(d?.endpoint?.endpoint_id||"");
+    const localHost=String(d?.endpoint?.hostname||"").toUpperCase();
+
+    return endpoints.filter(x=>{
+      const id=String(x?.endpoint_id||"");
+      const host=String(x?.hostname||"").toUpperCase();
+
+      return id &&
+             id!==localId &&
+             host!==localHost;
+    });
+  }
+
+  function endpointLiveStatus(endpoint,fleet){
+    const threshold=Number(fleet?.online_after_seconds??90);
+    const lastSeen=Number(endpoint?.last_seen||0);
+    const age=lastSeen>0 ? (Date.now()/1000-lastSeen) : Infinity;
+
+    if(!Number.isFinite(age) || age>threshold){
+      return "OFFLINE";
+    }
+
+    return String(endpoint?.health_state||"UNKNOWN").toUpperCase();
+  }
+
+  function setEndpointLabels(labels){
+    const cells=document.querySelectorAll(".endpoint-top > div");
+
+    labels.forEach((label,index)=>{
+      const element=cells[index]?.querySelector("span");
+      if(element) element.textContent=label;
+    });
+  }
+
+  function ensureEndpointSelector(){
+    let selector=$("endpointSelector");
+
+    if(selector) return selector;
+
+    const top=document.querySelector(".endpoint-panel .endpoint-top");
+
+    if(!top) return null;
+
+    selector=document.createElement("div");
+    selector.id="endpointSelector";
+    selector.className="endpoint-controls";
+    selector.style.marginBottom="14px";
+
+    top.parentNode.insertBefore(selector,top);
+
+    return selector;
+  }
+
+  function renderEndpointSurface(d,obs,res,rt){
+    const fleet=d?.fleet||{};
+    const endpoints=fleetEndpointCandidates(d);
+    const selector=ensureEndpointSelector();
+
+    if(endpoints.length){
+      const stillExists=endpoints.some(
+        x=>String(x.endpoint_id)===String(selectedEndpointId)
+      );
+
+      if(!stillExists){
+        selectedEndpointId=String(endpoints[0].endpoint_id);
+      }
+
+      const selected=endpoints.find(
+        x=>String(x.endpoint_id)===String(selectedEndpointId)
+      ) || endpoints[0];
+
+      const selectedStatus=endpointLiveStatus(selected,fleet);
+
+      if(selector){
+        selector.innerHTML=endpoints.map(endpoint=>{
+          const id=String(endpoint.endpoint_id||"");
+          const status=endpointLiveStatus(endpoint,fleet);
+          const active=id===String(selectedEndpointId);
+
+          const activeStyle=active
+            ? ' style="border-color:#35d6c2;box-shadow:0 0 0 1px #35d6c2 inset"'
+            : "";
+
+          return `<button type="button"${activeStyle} data-fleet-endpoint="${esc(id)}">${esc(endpoint.hostname||id)} · ${esc(status)}</button>`;
+        }).join("");
+
+        selector.querySelectorAll("[data-fleet-endpoint]").forEach(button=>{
+          button.addEventListener("click",()=>{
+            selectedEndpointId=button.dataset.fleetEndpoint||null;
+            renderEndpointSurface(d,obs,res,rt);
+          });
+        });
+      }
+
+      setEndpointLabels([
+        "HOST",
+        "SERVICE",
+        "VERSION",
+        "LAST SEEN"
+      ]);
+
+      text("endpointState",selectedStatus);
+      text("host",selected.hostname||selected.endpoint_id||"ENDPOINT");
+      text("processes",selected.service_state||"UNKNOWN");
+      text("availableMemory",selected.runtime_version||"—");
+      text("cycles",ts(selected.last_seen));
+
+      return;
+    }
+
+    if(selector){
+      selector.innerHTML='<button type="button" disabled>NO REMOTE ENDPOINTS</button>';
+    }
+
+    selectedEndpointId=null;
+
+    setEndpointLabels([
+      "HOST",
+      "PROCESSES",
+      "AVAILABLE MEMORY",
+      "CYCLES"
+    ]);
+
+    text("endpointState",res.status||"UNKNOWN");
+    text("processes",obs.process_count??"—");
+    text(
+      "availableMemory",
+      res.available_memory_mb!=null
+        ? `${n(res.available_memory_mb)} MB`
+        : "—"
+    );
+    text("cycles",rt.cycle_count??"—");
+    text("host",d.endpoint?.hostname||"LOCAL ENDPOINT");
+  }
+
+  function selectedRemoteEndpoint(){
+    const endpoints=Array.isArray(lastFleet?.endpoints)
+      ? lastFleet.endpoints
+      : [];
+
+    return endpoints.find(
+      x=>String(x.endpoint_id)===String(selectedEndpointId)
+    ) || null;
+  }
+
   function renderFleet(fleet){
+    lastFleet=fleet||{};
     const summary=fleet?.summary||{}, endpoints=Array.isArray(fleet?.endpoints)?fleet.endpoints:[];
     text("fleetStatus",String(fleet?.status||"UNAVAILABLE").toUpperCase());
     text("fleetDownloads",summary.downloads_completed??0); text("fleetInstalled",summary.installed??0);
@@ -148,6 +301,43 @@
   }
 
   async function openEndpoint(){
+    const remote=selectedRemoteEndpoint();
+
+    if(remote){
+      const fleet=lastFleet||{};
+      const status=endpointLiveStatus(remote,fleet);
+
+      const html=`
+        <div class="detail-grid">
+          <div><span>HOST</span><b>${esc(remote.hostname||"—")}</b></div>
+          <div><span>HEALTH</span><b>${esc(status)}</b></div>
+          <div><span>INSTALL</span><b>${esc(remote.install_state||"UNKNOWN")}</b></div>
+          <div><span>SERVICE</span><b>${esc(remote.service_state||"UNKNOWN")}</b></div>
+          <div><span>RUNTIME</span><b>${esc(remote.runtime_version||"—")}</b></div>
+          <div><span>RESOURCE</span><b>${esc(remote.resource_state||"—")}</b></div>
+          <div><span>FIRST SEEN</span><b>${esc(dt(remote.first_seen))}</b></div>
+          <div><span>LAST SEEN</span><b>${esc(dt(remote.last_seen))}</b></div>
+        </div>
+
+        <div class="detail-block">
+          <span>ENDPOINT ID</span>
+          <b>${esc(remote.endpoint_id||"—")}</b>
+          <small>${remote.last_error ? esc(remote.last_error) : "No reported endpoint error"}</small>
+        </div>
+
+        <div class="safety-banner">
+          Remote endpoint telemetry is read-only.
+          Endpoint selection does not grant privileged execution authority.
+        </div>`;
+
+      openDrawer(
+        remote.hostname||"Endpoint",
+        "FLEET ENDPOINT DETAILS",
+        html
+      );
+
+      return;
+    }
     openDrawer("Loading endpoint…","ENDPOINT DETAILS",`<div class="drawer-empty">Reading local structured endpoint state…</div>`);
     try{
       const r=await fetch('/owner/api/endpoint',{cache:'no-store'}); if(!r.ok) throw new Error(); const d=await r.json(), e=d.endpoint||{}, decisions=e.recent_decisions||[];
