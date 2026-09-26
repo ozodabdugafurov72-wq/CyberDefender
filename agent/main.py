@@ -122,6 +122,10 @@ from agent.independent_verifier import (
     IndependentVerifier,
 )
 
+from agent.disconnected.continuity_controller import (
+    ContinuityController,
+)
+
 from agent.safety_authorization_gate import (
     SafetyAuthorizationGate,
 )
@@ -325,6 +329,14 @@ class CyberDefenderRuntime:
         self.safety = safety
         self.config = config
         self.allow_optional_sensors = bool(allow_optional_sensors)
+
+        # ACP v0.1 continuity state machine.
+        # OBSERVE-ONLY in this phase:
+        # - no OS actions
+        # - no authorization
+        # - no Policy/Safety bypass
+        # - no runtime control
+        self.continuity_controller = ContinuityController()
         self.child_cleanup_verified = True
 
         # ----------------------------------------------------
@@ -3726,6 +3738,41 @@ class CyberDefenderRuntime:
             print("Recovery Event:")
             recovered_event.print_event()
 
+    @staticmethod
+    def _resolve_degraded_state(
+        *,
+        current_degraded,
+        active_degradation,
+        cycle_failures,
+        component_failures,
+        last_error,
+    ):
+        """
+        Resolve CURRENT runtime health without losing fail-closed semantics.
+
+        A historical transient degradation may clear only when:
+        - no active critical/persistence/safety degradation exists;
+        - current cycle failure count is zero;
+        - current component failure count is zero;
+        - there is no current runtime error.
+
+        Active safety/security degradation always wins.
+        """
+
+        if active_degradation:
+            return True
+
+        if (
+            current_degraded
+            and int(cycle_failures) == 0
+            and int(component_failures) == 0
+            and not last_error
+        ):
+            return False
+
+        return bool(current_degraded)
+
+
     # ========================================================
     # HEALTH SNAPSHOT
     # ========================================================
@@ -4015,6 +4062,49 @@ class CyberDefenderRuntime:
                 self.last_rust_process_canary_result
             )
 
+        # ACP ContinuityController v0.1 is exposed as an OBSERVE-ONLY
+        # first-class health surface. It contributes no execution
+        # authority and is intentionally outside the critical component
+        # bootstrap gate in this phase.
+        try:
+            continuity_health = (
+                self.continuity_controller.health_snapshot()
+            )
+
+            if isinstance(continuity_health, dict):
+                continuity_health = dict(continuity_health)
+
+                continuity_health["runtime_wired"] = "OBSERVE_ONLY"
+                continuity_health["authoritative"] = False
+
+                health["continuity_controller"] = (
+                    continuity_health
+                )
+            else:
+                health["continuity_controller"] = {
+                    "component": "ContinuityController",
+                    "version": "0.1",
+                    "status": "INVALID_HEALTH_RESPONSE",
+                    "runtime_wired": "OBSERVE_ONLY",
+                    "authoritative": False,
+                    "authority": "NONE",
+                    "authorization": "NOT_GRANTED",
+                    "fail_closed": True,
+                }
+
+        except Exception as exc:
+            health["continuity_controller"] = {
+                "component": "ContinuityController",
+                "version": "0.1",
+                "status": "DEGRADED",
+                "runtime_wired": "OBSERVE_ONLY",
+                "authoritative": False,
+                "authority": "NONE",
+                "authorization": "NOT_GRANTED",
+                "fail_closed": True,
+                "error": type(exc).__name__,
+            }
+
         # Safety Core is a first-class health surface. It is the local
         # trust boundary and must never appear as UNKNOWN merely because
         # it is not part of the generic component object registry below.
@@ -4265,8 +4355,19 @@ class CyberDefenderRuntime:
                     for value in pipeline_health.get("dependencies", {}).values())
             and pipeline_health.get("admission_binding", {}).get("verifier_bound") is True
         )
-        if (critical_failure and not recovery_only) or persistence_failure or safety_failure:
-            self.degraded = True
+        active_degradation = (
+            (critical_failure and not recovery_only)
+            or persistence_failure
+            or safety_failure
+        )
+
+        self.degraded = self._resolve_degraded_state(
+            current_degraded=self.degraded,
+            active_degradation=active_degradation,
+            cycle_failures=self.cycle_failures,
+            component_failures=self.component_failures,
+            last_error=self.last_error,
+        )
 
         health["runtime"]["status"] = (
             "DEGRADED"

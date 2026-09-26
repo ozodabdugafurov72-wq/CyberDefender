@@ -10,7 +10,8 @@ class ServiceRunner:
 
     def __init__(self, runtime_factory: Callable[[], Any], *, interval_seconds: float = 5.0,
                  telemetry_client: Any | None = None, lifecycle: Any | None = None,
-                 stop_event: threading.Event | None = None):
+                 stop_event: threading.Event | None = None,
+                 primary_reachability_tracker: Any | None = None):
         self.runtime_factory = runtime_factory
         self.interval_seconds = max(0.1, float(interval_seconds))
         self.telemetry_client = telemetry_client
@@ -23,6 +24,41 @@ class ServiceRunner:
         self.last_error: str | None = None
         self.telemetry_failures = 0
         self.last_telemetry_error: str | None = None
+
+        # ACP primary reachability observer.
+        # Evidence only; cannot affect authorization or local protection.
+        self.primary_reachability_tracker = (
+            primary_reachability_tracker
+        )
+
+    def _record_primary_reachability(
+        self,
+        reachable: bool | None,
+        *,
+        source: str,
+    ) -> None:
+        tracker = self.primary_reachability_tracker
+
+        if tracker is None:
+            return
+
+        record = getattr(
+            tracker,
+            "record",
+            None,
+        )
+
+        if not callable(record):
+            return
+
+        try:
+            record(
+                reachable,
+                source=source,
+            )
+        except Exception:
+            # Observability must never stop the protection loop.
+            pass
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -49,11 +85,36 @@ class ServiceRunner:
                         runtime_version=str(getattr(runtime, "VERSION", "")),
                         service_state="RUNNING",
                     )
-                    if accepted is False:
-                        raise RuntimeError("fleet registration rejected")
+                    if accepted is True:
+                        self._record_primary_reachability(
+                            True,
+                            source="register",
+                        )
+
+                    elif accepted is False:
+                        self._record_primary_reachability(
+                            False,
+                            source="register",
+                        )
+
+                        raise RuntimeError(
+                            "fleet registration rejected"
+                        )
+
+                    else:
+                        self._record_primary_reachability(
+                            None,
+                            source="register",
+                        )
+
                 except Exception as exc:
                     self.telemetry_failures += 1
                     self.last_telemetry_error = f"register:{type(exc).__name__}"
+
+                    self._record_primary_reachability(
+                        False,
+                        source="register",
+                    )
 
             while not self.stop_event.is_set():
                 try:
@@ -80,6 +141,8 @@ class ServiceRunner:
                         pass
 
                 if client is not None:
+                    heartbeat_attempted = False
+
                     try:
                         if hasattr(runtime, "health_snapshot"):
                             health = runtime.health_snapshot()
@@ -95,6 +158,8 @@ class ServiceRunner:
                         runtime_health = health.get("runtime", {})
                         if not isinstance(runtime_health, dict):
                             runtime_health = {}
+                        heartbeat_attempted = True
+
                         accepted = client.heartbeat(
                             runtime_version=str(getattr(runtime, "VERSION", "")),
                             health_state=str(runtime_health.get("status", "UNKNOWN")),
@@ -102,11 +167,37 @@ class ServiceRunner:
                             resource_state=str(resource.get("state", "")),
                             last_error="SERVICE_RUNTIME_ERROR" if getattr(runtime, "last_error", None) else None,
                         )
-                        if accepted is False:
-                            raise RuntimeError("fleet heartbeat rejected")
+                        if accepted is True:
+                            self._record_primary_reachability(
+                                True,
+                                source="heartbeat",
+                            )
+
+                        elif accepted is False:
+                            self._record_primary_reachability(
+                                False,
+                                source="heartbeat",
+                            )
+
+                            raise RuntimeError(
+                                "fleet heartbeat rejected"
+                            )
+
+                        else:
+                            self._record_primary_reachability(
+                                None,
+                                source="heartbeat",
+                            )
+
                     except Exception as exc:
                         self.telemetry_failures += 1
                         self.last_telemetry_error = f"heartbeat:{type(exc).__name__}"
+
+                        if heartbeat_attempted:
+                            self._record_primary_reachability(
+                                False,
+                                source="heartbeat",
+                            )
 
                 if max_cycles is not None and self.cycles >= max_cycles:
                     break
