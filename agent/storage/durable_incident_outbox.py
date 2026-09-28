@@ -237,7 +237,14 @@ class DurableIncidentOutbox:
         except (TypeError, ValueError) as exc:
             raise ValueError("incident payload must be JSON serializable") from exc
         with self._lock:
+            prior_corrupt = self._corrupt_records
+            prior_integrity_rejected = self._integrity_rejected
             records = self._scan()
+            if (
+                self._corrupt_records > prior_corrupt
+                or self._integrity_rejected > prior_integrity_rejected
+            ):
+                raise IncidentOutboxIntegrityError("CORRUPT_RECORD_PRESENT")
             latest = self._latest(records)
             matching = [r for r in records if r.get("idempotency_key") == idempotency_key]
             for existing in matching:

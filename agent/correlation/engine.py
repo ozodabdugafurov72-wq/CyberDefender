@@ -383,8 +383,16 @@ class CorrelationEngine:
         else:
             source_event_id = source_event_id.strip()
 
+        raw_timestamp = event.get("timestamp")
+        try:
+            event_timestamp = float(raw_timestamp)
+            if event_timestamp != event_timestamp or event_timestamp in (float("inf"), float("-inf")):
+                raise ValueError
+        except (TypeError, ValueError):
+            event_timestamp = time.time()
+
         return {
-            "timestamp": time.time(),
+            "timestamp": event_timestamp,
             "source_event_id": source_event_id,
             "type": detection_type,
             "severity": severity,
@@ -1008,6 +1016,13 @@ class CorrelationEngine:
 
         return {
             "event_type": "INCIDENT",
+            "tenant_id": (
+                detections[-1].get("tenant_id")
+                if isinstance(detections, list)
+                and detections
+                and isinstance(detections[-1], dict)
+                else None
+            ),
             "source_event_id": trigger_event_id,
             "idempotency_key": idempotency_key,
             "source": "CorrelationEngine",

@@ -198,6 +198,10 @@ from agent.storage.durable_spool import (
     DurableEventSpool,
 )
 
+from agent.storage.durable_incident_outbox import (
+    DurableIncidentOutbox,
+)
+
 from agent.core.runtime_security_pipeline import (
     RuntimeSecurityPipeline,
     RuntimePipelineResult,
@@ -488,6 +492,8 @@ class CyberDefenderRuntime:
         self.data_repository: SQLiteDataRepository | None = None
 
         self.spool: DurableEventSpool | None = None
+
+        self.incident_outbox: DurableIncidentOutbox | None = None
 
         self.pipeline: DurableEventPipeline | None = None
 
@@ -1245,6 +1251,8 @@ class CyberDefenderRuntime:
             state_root / "spool"
         )
 
+        incident_outbox_root = state_root / "incident_outbox"
+
         self.key_manager = KeyManager(
             key_root,
             storage_key,
@@ -1291,6 +1299,18 @@ class CyberDefenderRuntime:
                 raise RuntimeBootstrapError(
                     "KeyManager READY emas."
                 )
+
+        outbox_integrity_key = self.key_manager.sign(
+            b"CyberDefender/incident-outbox/v1"
+        )
+        if not isinstance(outbox_integrity_key, str):
+            raise RuntimeBootstrapError(
+                "Incident outbox integrity key derivation failed."
+            )
+        self.incident_outbox = DurableIncidentOutbox(
+            incident_outbox_root,
+            outbox_integrity_key.encode("ascii"),
+        )
 
         # ----------------------------------------------------
         # EVENT BUS
@@ -1412,6 +1432,7 @@ class CyberDefenderRuntime:
             CorrelationAdapter(
                 engine=self.correlation_engine,
                 event_bus=self.event_bus,
+                incident_outbox=self.incident_outbox,
             )
         )
 
