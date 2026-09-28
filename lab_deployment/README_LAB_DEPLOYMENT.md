@@ -1,6 +1,8 @@
 # CyberDefender Agent-only university lab kit
 
-This kit prepares sequential enrollment for `PC-JDU3` through `PC-JDU9`. It is source-only and does not deploy, start services, change the current machine, or provide a central service package.
+This kit prepares sequential enrollment for lab labels `PC-JDU3` through `PC-JDU9`. A lab label is separate from the Windows hostname and endpoint identity. It is source-only and does not deploy, start services, change the current machine, or provide a central service package.
+
+Do not rename university PCs unless separately authorized by university IT.
 
 The package builder includes only the `agent/` source tree, `requirements.txt`, and the pinned release native process sensor. It rejects control-plane and Owner UI paths, credentials, key material, identities, databases, logs, runtime state, caches, and sensitive file extensions. The package contains no enrollment credential. The builder emits a versioned ZIP, a JSON manifest, and a SHA-256 sidecar.
 
@@ -31,7 +33,7 @@ For `PC-JDU3`, verify or set the hostname first, then run the installer locally 
 
 ```powershell
 .\lab_deployment\INSTALL_LAB_ENDPOINT.ps1 `
-  -EndpointName PC-JDU3 `
+  -LabLabel PC-JDU3 `
   -ControlPlaneUrl http://<central-lab-ip>:8785 `
   -PackagePath .\artifacts\lab-agent\<package>.zip `
   -PackageSha256 <64-hex-sha256> `
@@ -42,11 +44,32 @@ Run the verifier and require every local gate to pass. Leave `-SkipCentral` abse
 
 ```powershell
 .\lab_deployment\VERIFY_LAB_ENDPOINT.ps1 `
-  -EndpointName PC-JDU3 `
+  -LabLabel PC-JDU3 `
   -ControlPlaneUrl http://<central-lab-ip>:8785
 ```
 
 If any endpoint fails a security, integrity, service, health, or heartbeat gate, stop fleet expansion and investigate that endpoint. The scripts do not perform uncontrolled parallel enrollment.
+
+Use `lab_endpoint_map.csv` for operator-side label, hostname, endpoint ID, and status tracking. It contains no credentials. The current fleet schema stores `endpoint_id` and `hostname`; it has no supported lab-label/display-name field, so the label is recorded locally in the Agent state and in this operator mapping until a future schema/UI change is approved.
+
+For baseline proof, run the read-only capture on the existing successful endpoints:
+
+```powershell
+.\lab_deployment\CAPTURE_AGENT_BASELINE.ps1 -LabLabel PC-JDU -OutputPath .\PC-JDU_baseline_evidence.json
+.\lab_deployment\CAPTURE_AGENT_BASELINE.ps1 -LabLabel PC-JDU2 -OutputPath .\PC-JDU2_baseline_evidence.json
+```
+
+Compare the two records, optionally against an explicit candidate checkout:
+
+```powershell
+.\lab_deployment\COMPARE_AGENT_BASELINE.ps1 `
+  -EvidenceA .\PC-JDU_baseline_evidence.json `
+  -EvidenceB .\PC-JDU2_baseline_evidence.json `
+  -CandidateSourceRoot C:\path\to\candidate-checkout `
+  -OutputPath .\agent_baseline_comparison.json
+```
+
+`PROVEN` requires complete matching evidence and an explicit candidate checkout. Any missing, conflicting, or uncertain evidence remains `NOT_PROVEN` or `MISMATCH`.
 
 ## Endpoint boundary
 

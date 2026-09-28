@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidatePattern('^PC-JDU[3-9]$')][string]$EndpointName,
+    [Parameter(Mandatory=$true)][ValidatePattern('^PC-JDU[3-9]$')][string]$LabLabel,
     [Parameter(Mandatory=$true)][ValidatePattern('^https?://[^/]+(?::\d+)?$')][string]$ControlPlaneUrl,
     [switch]$SkipCentral
 )
@@ -16,14 +16,19 @@ function Wait-Heartbeat {
     return $true
 }
 
-Require ((hostname).Trim() -eq $EndpointName) 'hostname matches expected endpoint'
+$actualHostname = [Environment]::GetEnvironmentVariable('COMPUTERNAME')
+Require (-not [string]::IsNullOrWhiteSpace($actualHostname)) 'actual Windows hostname is available'
 $base = Join-Path $env:ProgramData 'CyberDefender'
 $app = Join-Path $env:ProgramFiles 'CyberDefender\app'
 $state = Join-Path $base 'state'
 $identity = Join-Path $base 'identity\endpoint_id.txt'
 $tokenFile = Join-Path $base 'secrets\fleet_token.txt'
 $runtimeFile = Join-Path $state 'dashboard_runtime.json'
+$labLabelFile = Join-Path $state 'lab_label.txt'
 Require (Test-Path -LiteralPath $identity -PathType Leaf) 'endpoint identity exists'
+Require (Test-Path -LiteralPath $labLabelFile -PathType Leaf) 'LabLabel record exists'
+$recordedLabLabel = (Get-Content -Raw -LiteralPath $labLabelFile).Trim()
+Require ($recordedLabLabel -eq $LabLabel) 'LabLabel matches installation record'
 Require (Test-Path -LiteralPath $app -PathType Container) 'Agent application exists'
 $service = Get-Service -Name 'CyberDefenderAgent' -ErrorAction SilentlyContinue
 Require ($null -ne $service) 'CyberDefenderAgent service exists'
@@ -53,4 +58,10 @@ if (-not $SkipCentral) {
     Write-Host 'PASS: central registration/heartbeat progression'
 } else { Write-Host 'WAIT: central registration and heartbeat checks were skipped' -ForegroundColor Yellow }
 
+Write-Host "LabLabel      : $LabLabel"
+Write-Host "ActualHostname: $actualHostname"
+Write-Host "EndpointId    : $((Get-Content -Raw -LiteralPath $identity).Trim())"
+Write-Host "AgentState    : $($service.Status)"
+Write-Host "Health        : $($runtime.runtime.status)"
+Write-Host "Heartbeat     : $(if ($SkipCentral) { 'SKIPPED' } else { 'PASS' })"
 Write-Host 'PASS: Agent-only endpoint verification complete'

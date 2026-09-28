@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidatePattern('^PC-JDU[3-9]$')][string]$EndpointName,
+    [Parameter(Mandatory=$true)][ValidatePattern('^PC-JDU[3-9]$')][string]$LabLabel,
     [Parameter(Mandatory=$true)][ValidatePattern('^https?://[^/]+(?::\d+)?$')][string]$ControlPlaneUrl,
     [Parameter(Mandatory=$true)][ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })][string]$PackagePath,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$PackageSha256,
@@ -38,7 +38,8 @@ Require ($packageHash -ieq $PackageSha256) "Package SHA-256 mismatch"
 Require ((Get-Item -LiteralPath $PackagePath).Length -gt 0) "Package is empty"
 Require (-not (Test-ServicePresent 'CyberDefenderControlPlane')) "ControlPlane already exists on Agent-only endpoint"
 Require (-not (Test-ServicePresent 'CyberDefenderOwnerUI')) "OwnerUI already exists on Agent-only endpoint"
-Require ((hostname).Trim() -eq $EndpointName) "Hostname does not match EndpointName"
+$actualHostname = [Environment]::GetEnvironmentVariable('COMPUTERNAME')
+Require (-not [string]::IsNullOrWhiteSpace($actualHostname)) "Actual Windows hostname is available"
 
 $base = Join-Path $env:ProgramData 'CyberDefender'
 $appParent = Join-Path $env:ProgramFiles 'CyberDefender'
@@ -49,6 +50,7 @@ $identityDir = Join-Path $base 'identity'
 $keyFile = Join-Path $secretDir 'storage_key.b64'
 $tokenFile = Join-Path $secretDir 'fleet_token.txt'
 $endpointIdFile = Join-Path $identityDir 'endpoint_id.txt'
+$labLabelFile = Join-Path $stateDir 'lab_label.txt'
 $stage = Join-Path $env:TEMP ('CyberDefender-AgentOnly-' + [guid]::NewGuid().ToString('N'))
 $previousRoot = Join-Path $appParent 'app.previous'
 $created = @()
@@ -83,9 +85,10 @@ try {
         [Convert]::ToBase64String($bytes) | Set-Content -LiteralPath $keyFile -Encoding ASCII -NoNewline
     }
     if (-not (Test-Path -LiteralPath $endpointIdFile)) { [guid]::NewGuid().ToString() | Set-Content -LiteralPath $endpointIdFile -Encoding ASCII -NoNewline }
+    Set-Content -LiteralPath $labLabelFile -Value $LabLabel -Encoding ASCII -NoNewline
     Copy-Item -LiteralPath $EnrollmentCredentialPath -Destination $tokenFile -Force
     Set-RestrictedAcl $keyFile; Set-RestrictedAcl $tokenFile; Set-RestrictedAcl $identityDir
-    Write-Host 'PASS: endpoint identity preservation and protected local secrets'
+    Write-Host "PASS: identity preserved; LabLabel=$LabLabel; ActualHostname=$actualHostname"
 
     if (Test-Path -LiteralPath $previousRoot) { Remove-Item -LiteralPath $previousRoot -Recurse -Force }
     if (Test-Path -LiteralPath $installRoot) { Move-Item -LiteralPath $installRoot -Destination $previousRoot }
