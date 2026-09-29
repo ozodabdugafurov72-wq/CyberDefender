@@ -1,5 +1,10 @@
-"""CyberDefender passive network observability package."""
+"""CyberDefender network observability and bounded verification package."""
 
+from .active_verification import (
+    BoundedNetworkVerifier,
+    NetworkVerificationPolicy,
+    NetworkVerificationPolicyError,
+)
 from .async_inventory import AsyncPassiveNetworkInventory
 from .dns_cache import WindowsDnsCacheReader
 from .flow_baseline import FlowBaselineAnalyzer
@@ -11,6 +16,7 @@ from .process_attribution import AsyncExecutableEnricher, ProcessAttributionReso
 __all__ = [
     "AsyncExecutableEnricher",
     "AsyncPassiveNetworkInventory",
+    "BoundedNetworkVerifier",
     "FlowBaselineAnalyzer",
     "InterfaceFlowTracker",
     "PassiveInterfaceFlowSampler",
@@ -18,5 +24,7 @@ __all__ = [
     "ProcessAttributionResolver",
     "WindowsDnsCacheReader",
     "WindowsPassiveNetworkProvider",
+    "NetworkVerificationPolicy",
+    "NetworkVerificationPolicyError",
     "load_trust_registry",
 ]

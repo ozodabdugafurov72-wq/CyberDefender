@@ -410,6 +410,8 @@ class ProcessAttributionResolver:
                 },
                 "authority": self.AUTHORITY,
                 "authorization": "NOT_GRANTED",
+                "attribution_confidence": "UNVERIFIED",
+                "evidence_provenance": ["PID_UNAVAILABLE"],
             }
 
         try:
@@ -435,6 +437,8 @@ class ProcessAttributionResolver:
                 "file_identity": file_identity,
                 "authority": self.AUTHORITY,
                 "authorization": "NOT_GRANTED",
+                "attribution_confidence": "HIGH",
+                "evidence_provenance": ["LIVE_SOCKET_PID", "LIVE_PROCESS_SNAPSHOT"],
             }
         except Exception as exc:
             self.unresolved += 1
@@ -461,6 +465,8 @@ class ProcessAttributionResolver:
                 },
                 "authority": self.AUTHORITY,
                 "authorization": "NOT_GRANTED",
+                "attribution_confidence": "UNVERIFIED",
+                "evidence_provenance": [error_type],
             }
 
     def resolve_many(self, pids: list[int]) -> dict[int, dict[str, Any]]:

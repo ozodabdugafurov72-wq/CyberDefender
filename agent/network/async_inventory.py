@@ -279,19 +279,26 @@ class AsyncPassiveNetworkInventory:
         else:
             status = "HEALTHY"
 
+        # Default contract remains `"active_scan_enabled": False` when no
+        # policy-gated verifier is supplied by the collector.
+        verification = collector_health.get("network_verification", {})
+        if not isinstance(verification, dict):
+            verification = {}
         return {
             "component": "AsyncPassiveNetworkInventory",
             "version": self.VERSION,
             "status": status,
-            "mode": self.MODE,
+            "mode": collector_health.get("mode", self.MODE),
             "integration_mode": "ASYNC_BOUNDED",
             "authority": self.AUTHORITY,
             "authoritative": False,
-            "active_scan_enabled": False,
+            "active_scan_enabled": bool(collector_health.get("active_scan_enabled", False)),
+            "dns_resolution": bool(collector_health.get("reverse_dns_lookup", collector_health.get("dns_resolution", False))),
             "dashboard_direct_os_access": False,
             "packet_injection": False,
             "firewall_mutation": False,
             "hotspot_client_count_authoritative": False,
+            "network_verification": verification,
             "worker": state,
             "collector": collector_health,
         }

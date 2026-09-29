@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .active_verification import BoundedNetworkVerifier
 from .dns_cache import WindowsDnsCacheReader
 from .flow_continuity import PassiveInterfaceFlowSampler
 from .flow_telemetry import InterfaceFlowTracker
@@ -74,11 +75,13 @@ def _normalize_ip(value: Any) -> str | None:
     return str(ip)
 
 
-def _device_key(ip: str, mac: str | None, interface: str) -> str:
+def _device_key(ip: str, mac: str | None, interface: str, endpoint_id: str | None = None) -> str:
     # MAC is preferred for L2 identity; IP+interface is the bounded fallback.
+    endpoint = _bounded_text(endpoint_id, 160).lower()
+    prefix = f"endpoint:{endpoint}:" if endpoint else ""
     if mac:
-        return f"mac:{mac.lower()}"
-    return f"ip:{interface.lower()}:{ip.lower()}"
+        return f"{prefix}mac:{mac.lower()}"
+    return f"{prefix}ip:{interface.lower()}:{ip.lower()}"
 
 
 def load_trust_registry(path: str | os.PathLike[str]) -> dict[str, dict[str, Any] | str]:
@@ -123,7 +126,11 @@ class WindowsPassiveNetworkProvider:
     psutil reads local adapter/connection state.
     """
 
-    POWERSHELL_TIMEOUT_SECONDS = 3.0
+    # Host profiling showed the read-only NetTCP/IP snapshot can take about
+    # 3.2 seconds on Windows 11.  Keep a finite 5-second budget so a slow CIM
+    # provider cannot stall the Agent indefinitely; AsyncPassiveNetworkInventory
+    # isolates this optional collector from the core protection loop.
+    POWERSHELL_TIMEOUT_SECONDS = 5.0
     MAX_WINDOWS_JSON_BYTES = 1024 * 1024
     MAX_RAW_CONNECTIONS = 2048
 
@@ -134,6 +141,10 @@ class WindowsPassiveNetworkProvider:
     ) -> None:
         self.process_resolver = process_resolver or ProcessAttributionResolver()
         self.dns_reader = dns_reader or WindowsDnsCacheReader()
+        self.samples = 0
+        self.failures = 0
+        self.last_error: str | None = None
+        self.last_duration_ms: float | None = None
 
     def _interfaces(self) -> list[dict[str, Any]]:
         if psutil is None:
@@ -275,16 +286,46 @@ class WindowsPassiveNetworkProvider:
         return rows
 
     def collect(self) -> dict[str, Any]:
-        windows = self._windows_network_snapshot()
-        dns_cache = self.dns_reader.read()
+        started = time.perf_counter()
+        try:
+            windows = self._windows_network_snapshot()
+            dns_cache = self.dns_reader.read()
+            result = {
+                "interfaces": self._interfaces(),
+                "active_networks": windows["active_networks"],
+                "neighbors": windows["neighbors"],
+                "connections": self._connections(),
+                "flow_counters": self._flow_counters(),
+                "process_attribution": self.process_resolver.health_check(),
+                "dns_cache": dns_cache,
+                "network_provider": self.health_check(),
+            }
+            self.samples += 1
+            self.last_error = None
+            self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            return result
+        except Exception as exc:
+            self.failures += 1
+            self.last_error = type(exc).__name__
+            self.last_duration_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            raise
+
+    def health_check(self) -> dict[str, Any]:
         return {
-            "interfaces": self._interfaces(),
-            "active_networks": windows["active_networks"],
-            "neighbors": windows["neighbors"],
-            "connections": self._connections(),
-            "flow_counters": self._flow_counters(),
-            "process_attribution": self.process_resolver.health_check(),
-            "dns_cache": dns_cache,
+            "component": "WindowsPassiveNetworkProvider",
+            "status": "DEGRADED" if self.last_error else "HEALTHY",
+            "mode": "PASSIVE_WINDOWS_NEIGHBOR_CACHE",
+            "authority": "NONE",
+            "authoritative": False,
+            "active_scan_enabled": False,
+            "dns_resolution": False,
+            "packet_capture": False,
+            "firewall_mutation": False,
+            "samples": self.samples,
+            "failures": self.failures,
+            "timeout_seconds": self.POWERSHELL_TIMEOUT_SECONDS,
+            "last_duration_ms": self.last_duration_ms,
+            "last_error": self.last_error,
         }
 
     def close(self) -> None:
@@ -307,17 +348,23 @@ class PassiveNetworkInventory:
         clock: Callable[[], float] = time.time,
         flow_tracker: InterfaceFlowTracker | None = None,
         flow_continuity_sampler: PassiveInterfaceFlowSampler | None = None,
+        verifier: BoundedNetworkVerifier | None = None,
     ) -> None:
         self.provider = provider or WindowsPassiveNetworkProvider()
         self.clock = clock
         self.flow_tracker = flow_tracker or InterfaceFlowTracker()
         self.flow_continuity_sampler = flow_continuity_sampler
+        # Optional verification is an explicitly supplied policy-gated
+        # enrichment plane.  The default remains passive-only.
+        self.verifier = verifier
         if self.flow_continuity_sampler is None and isinstance(self.provider, WindowsPassiveNetworkProvider):
             self.flow_continuity_sampler = PassiveInterfaceFlowSampler()
         self._last_active_interface_names: set[str] = set()
         self.max_devices = max(16, min(int(max_devices), 2048))
         self.max_connections = max(16, min(int(max_connections), 4096))
         self._devices: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._gateway_baselines: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._endpoint_observations: dict[str, dict[str, Any]] = {}
         self._trust = self._compile_registry(trust_registry or {})
         self._trust_registry_path = os.fspath(trust_registry_path) if trust_registry_path is not None else None
         self._trust_registry_fingerprint: tuple[int, int] | None = None
@@ -449,6 +496,23 @@ class PassiveNetworkInventory:
         return {str(row["gateway"]) for row in active_networks if row.get("gateway")}
 
     @staticmethod
+    def _segment_for(interface: str, ip: str, active_networks: list[dict[str, Any]]) -> str | None:
+        for network in active_networks:
+            if str(network.get("interface", "")).lower() != interface.lower():
+                continue
+            local = network.get("local_ipv4")
+            prefix = network.get("prefix_length")
+            if not local or not isinstance(prefix, int) or prefix <= 0:
+                continue
+            try:
+                candidate = ipaddress.ip_network(f"{local}/{prefix}", strict=False)
+                if ipaddress.ip_address(ip) in candidate:
+                    return str(candidate)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
     def _broadcast_ips(active_networks: list[dict[str, Any]]) -> set[str]:
         result: set[str] = {"255.255.255.255"}
         for row in active_networks:
@@ -524,6 +588,24 @@ class PassiveNetworkInventory:
                 )
             gateway_ips = self._gateway_ips(active_networks)
             broadcast_ips = self._broadcast_ips(active_networks)
+            anomaly_evidence: list[dict[str, Any]] = []
+            ip_mac_seen: dict[tuple[str, str], str | None] = {}
+            endpoint_seen: dict[str, dict[str, Any]] = {}
+
+            def add_anomaly(kind: str, *, classification: str = "REVIEW_REQUIRED", **evidence: Any) -> None:
+                row = {
+                    "type": _bounded_text(kind, 64).upper(),
+                    "classification": classification,
+                    "evidence": {
+                        key: value for key, value in evidence.items()
+                        if value is not None
+                    },
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "authorization": "NOT_GRANTED",
+                    "provenance": "NEIGHBOR_CACHE",
+                }
+                anomaly_evidence.append(row)
 
             seen_keys: set[str] = set()
             for item in neighbors[:4096]:
@@ -548,21 +630,159 @@ class PassiveNetworkInventory:
                 if state not in _ALLOWED_DEVICE_STATES:
                     state = "UNKNOWN"
 
-                identity = _device_key(ip, mac, interface)
+                endpoint_id = _bounded_text(
+                    item.get("endpoint_id", item.get("enrollment_id")), 160
+                ) or None
+                hostname = _bounded_text(
+                    item.get("hostname", item.get("host_name")), 253
+                ).rstrip(".").lower() or None
+                segment = self._segment_for(interface, ip, active_networks)
+                identity = _device_key(ip, mac, interface, endpoint_id)
                 seen_keys.add(identity)
                 trust = self._trust_for(ip, mac)
                 previous = self._devices.get(identity, {})
                 role = "GATEWAY" if ip in gateway_ips else "PEER"
+                if previous == {} and mac:
+                    add_anomaly(
+                        "NEW_MAC_FIRST_SEEN",
+                        classification=(
+                            "SUSPICIOUS_UNAUTHORIZED"
+                            if trust.status in {"DENIED", "REVOKED"}
+                            else "OBSERVED_UNVERIFIED"
+                        ),
+                        ip_address=ip,
+                        mac_address=mac,
+                        interface=interface,
+                    )
+                for prior_row in self._devices.values():
+                    if (
+                        prior_row.get("interface", "").lower() == interface.lower()
+                        and prior_row.get("ip_address") == ip
+                        and prior_row.get("mac_address")
+                        and mac
+                        and prior_row.get("mac_address") != mac
+                    ):
+                        add_anomaly(
+                            "IP_MAC_CONFLICT",
+                            ip_address=ip,
+                            interface=interface,
+                            previous_mac=prior_row.get("mac_address"),
+                            current_mac=mac,
+                        )
+                        break
+                if trust.status == "UNKNOWN" and role == "PEER":
+                    add_anomaly(
+                        "UNENROLLED_ACTIVE_DEVICE",
+                        ip_address=ip,
+                        mac_address=mac,
+                        interface=interface,
+                    )
+                ip_mac_key = (interface.lower(), ip)
+                prior_mac = ip_mac_seen.get(ip_mac_key)
+                if prior_mac is not None and mac is not None and prior_mac != mac:
+                    add_anomaly(
+                        "IP_MAC_CONFLICT",
+                        ip_address=ip,
+                        interface=interface,
+                        previous_mac=prior_mac,
+                        current_mac=mac,
+                    )
+                elif ip_mac_key not in ip_mac_seen:
+                    ip_mac_seen[ip_mac_key] = mac
+                if endpoint_id:
+                    prior_endpoint = self._endpoint_observations.get(endpoint_id)
+                    if prior_endpoint and prior_endpoint.get("ip_address") != ip:
+                        add_anomaly(
+                            "RAPID_IP_CHURN",
+                            endpoint_id=endpoint_id,
+                            previous_ip=prior_endpoint.get("ip_address"),
+                            current_ip=ip,
+                            interface=interface,
+                        )
+                    if prior_endpoint and prior_endpoint.get("mac_address") != mac:
+                        add_anomaly(
+                            "RAPID_MAC_CHURN",
+                            endpoint_id=endpoint_id,
+                            previous_mac=prior_endpoint.get("mac_address"),
+                            current_mac=mac,
+                            interface=interface,
+                        )
+                    endpoint_seen[endpoint_id] = {
+                        "ip_address": ip,
+                        "mac_address": mac,
+                        "hostname": hostname,
+                    }
+                gateway_key = (interface.lower(), segment or "UNKNOWN", ip)
+                if role == "GATEWAY" and mac:
+                    previous_gateway = self._gateway_baselines.get(gateway_key) or {}
+                    previous_gateway_mac = previous_gateway.get("mac_address")
+                    if previous_gateway_mac and previous_gateway_mac != mac:
+                        add_anomaly(
+                            "GATEWAY_IDENTITY_CHANGED",
+                            classification="SUSPICIOUS",
+                            interface=interface,
+                            segment=segment,
+                            gateway_ip=ip,
+                            previous_mac=previous_gateway_mac,
+                            current_mac=mac,
+                            first_seen=previous_gateway.get("first_seen", now),
+                            last_seen=now,
+                        )
+                    if not previous_gateway_mac or previous_gateway_mac != mac:
+                        self._gateway_baselines[gateway_key] = {
+                            "mac_address": mac,
+                            "first_seen": now,
+                            "last_seen": now,
+                        }
+                    else:
+                        previous_gateway["last_seen"] = now
+                observed_name = (dns_index.get(ip) or [None])[0]
+                if hostname and observed_name and hostname != observed_name:
+                    add_anomaly(
+                        "DNS_IDENTITY_MISMATCH",
+                        endpoint_id=endpoint_id,
+                        ip_address=ip,
+                        hostname=hostname,
+                        observed_name=observed_name,
+                    )
+                if bool(item.get("expected_agent_heartbeat")) and not bool(item.get("heartbeat_alive")):
+                    add_anomaly(
+                        "ACTIVE_PEER_WITHOUT_EXPECTED_AGENT_HEARTBEAT",
+                        endpoint_id=endpoint_id,
+                        ip_address=ip,
+                        interface=interface,
+                    )
+                identity_state = "IDENTIFIED" if endpoint_id else ("PARTIAL" if (hostname or mac) else "UNKNOWN")
+                trust_state = {
+                    "AUTHORIZED": "AUTHORIZED",
+                    "DENIED": "SUSPICIOUS",
+                    "REVOKED": "SUSPICIOUS",
+                }.get(trust.status, "UNVERIFIED")
                 row = {
                     "device_id": identity,
+                    "endpoint_id": endpoint_id,
+                    "hostname": hostname,
+                    "lab_label": _bounded_text(item.get("lab_label"), 128) or None,
+                    "identity_state": identity_state,
+                    "identity_evidence": [
+                        source for source, present in (
+                            ("AGENT_ENROLLMENT", bool(endpoint_id)),
+                            ("NEIGHBOR_CACHE", True),
+                            ("REVERSE_DNS", bool(observed_name)),
+                        ) if present
+                    ],
+                    "observed_name": observed_name,
                     "ip_address": ip,
                     "mac_address": mac,
                     "interface": interface,
+                    "segment": segment,
                     "neighbor_state": state,
                     "online": True,
+                    "presence_state": "ACTIVE",
                     "first_seen": float(previous.get("first_seen", now)),
                     "last_seen": now,
                     "trust": trust.status,
+                    "trust_state": trust_state,
                     "label": trust.label,
                     "trust_evidence": {
                         "source": "LOCAL_REGISTRY" if trust.status != "UNKNOWN" else "NO_MATCH",
@@ -572,6 +792,10 @@ class PassiveNetworkInventory:
                         "authorization": "NOT_GRANTED",
                     },
                     "user_identity": {
+                        "status": "VERIFIED" if trust.user_verified and trust.user_id else "UNKNOWN",
+                        "user_id": trust.user_id if trust.user_verified else None,
+                    },
+                    "user_binding": {
                         "status": "VERIFIED" if trust.user_verified and trust.user_id else "UNKNOWN",
                         "user_id": trust.user_id if trust.user_verified else None,
                     },
@@ -588,6 +812,7 @@ class PassiveNetworkInventory:
                 if identity not in seen_keys:
                     row = dict(row)
                     row["online"] = False
+                    row["presence_state"] = "STALE"
                     row["neighbor_state"] = "STALE"
                     self._devices[identity] = row
 
@@ -602,6 +827,14 @@ class PassiveNetworkInventory:
                 remote_ip = _normalize_ip(item.get("remote_ip"))
                 if not remote_ip:
                     continue
+                process_evidence = item.get("process") if isinstance(item.get("process"), dict) else {
+                    "attribution_status": "UNAVAILABLE",
+                    "pid": int(item.get("pid", 0) or 0),
+                    "attribution_confidence": "UNVERIFIED",
+                    "evidence_provenance": ["PID_UNAVAILABLE"],
+                    "authority": "NONE",
+                    "authorization": "NOT_GRANTED",
+                }
                 bounded_connections.append({
                     "local_ip": _normalize_ip(item.get("local_ip")),
                     "local_port": int(item.get("local_port", 0) or 0),
@@ -609,12 +842,15 @@ class PassiveNetworkInventory:
                     "remote_port": int(item.get("remote_port", 0) or 0),
                     "status": _bounded_text(item.get("status"), 32).upper() or "UNKNOWN",
                     "pid": int(item.get("pid", 0) or 0),
-                    "process": item.get("process") if isinstance(item.get("process"), dict) else {
-                        "attribution_status": "UNAVAILABLE",
+                    "process": process_evidence,
+                    "risk_evidence": [{
+                        "type": "NETWORK_PROCESS_CORRELATION",
+                        "remote_ip": remote_ip,
                         "pid": int(item.get("pid", 0) or 0),
+                        "attribution_confidence": _bounded_text(process_evidence.get("attribution_confidence"), 24).upper() or "UNVERIFIED",
                         "authority": "NONE",
                         "authorization": "NOT_GRANTED",
-                    },
+                    }],
                     "dns": {
                         "names": list(dns_index.get(remote_ip, [])),
                         "source": "WINDOWS_DNS_CACHE" if dns_index.get(remote_ip) else "NO_MATCH",
@@ -627,7 +863,54 @@ class PassiveNetworkInventory:
                 })
 
             devices = list(self._devices.values())
+            self._endpoint_observations.update(endpoint_seen)
             online_devices = [row for row in devices if row.get("online")]
+            if self.verifier is not None:
+                try:
+                    verification = self.verifier.verify(online_devices)
+                except Exception as exc:
+                    verification = {
+                        "schema": "cyberdefender.network-verification.v0.1.0",
+                        "version": "0.1.0",
+                        "mode": "BOUNDED_ACTIVE_VERIFICATION",
+                        "status": "DEGRADED",
+                        "enabled": False,
+                        "dns_resolution": False,
+                        "active_scan_enabled": False,
+                        "authority": "NONE",
+                        "authoritative": False,
+                        "authorization": "NOT_GRANTED",
+                        "results": [],
+                        "failures": 1,
+                        "last_error": type(exc).__name__,
+                    }
+                result_by_ip = {
+                    str(item.get("ip_address")): item
+                    for item in verification.get("results", [])
+                    if isinstance(item, dict) and item.get("ip_address")
+                }
+                for row in online_devices:
+                    evidence = result_by_ip.get(str(row.get("ip_address")))
+                    if not evidence:
+                        continue
+                    row["network_verification"] = evidence
+                    observed_name = evidence.get("observed_name")
+                    if observed_name:
+                        row["observed_name"] = observed_name
+            else:
+                verification = {
+                    "schema": "cyberdefender.network-verification.v0.1.0",
+                    "version": "0.1.0",
+                    "mode": "DISABLED",
+                    "status": "DISABLED",
+                    "enabled": False,
+                    "dns_resolution": False,
+                    "active_scan_enabled": False,
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "authorization": "NOT_GRANTED",
+                    "results": [],
+                }
             counts = {name: 0 for name in ("AUTHORIZED", "UNKNOWN", "DENIED", "REVOKED")}
             for row in online_devices:
                 status = str(row.get("trust", "UNKNOWN")).upper()
@@ -647,21 +930,28 @@ class PassiveNetworkInventory:
             return {
                 "schema": "cyberdefender.network-inventory.v0.1.9",
                 "version": self.VERSION,
-                "mode": self.MODE,
+                "mode": (
+                    "PASSIVE_PLUS_BOUNDED_VERIFICATION"
+                    if verification.get("enabled")
+                    else self.MODE
+                ),
                 "authority": self.AUTHORITY,
                 "authoritative": False,
-                "active_scan_enabled": False,
+                "active_scan_enabled": bool(verification.get("active_scan_enabled", False)),
                 "packet_injection": False,
                 "firewall_mutation": False,
-                "dns_resolution": False,
+                "dns_resolution": bool(verification.get("dns_resolution", False)),
                 "dns_cache_observation": True,
                 "flow_telemetry_observation": True,
                 "packet_capture": False,
                 "per_connection_byte_attribution": False,
                 "external_dns_queries": False,
-                "reverse_dns_lookup": False,
+                "reverse_dns_lookup": bool(verification.get("dns_resolution", False)),
                 "user_identity_inference": False,
                 "unknown_is_unauthorized": False,
+                "network_verification": verification,
+                "anomaly_evidence": anomaly_evidence[: self.max_devices * 4],
+                "anomaly_count": len(anomaly_evidence),
                 "hotspot_client_count": None,
                 "hotspot_client_count_authoritative": False,
                 "hotspot_client_count_reason": "AP_CONTROLLER_EVIDENCE_UNAVAILABLE",
@@ -807,7 +1097,27 @@ class PassiveNetworkInventory:
                 pass
 
     def health_check(self) -> dict[str, Any]:
+        try:
+            health_now = float(self.clock())
+        except Exception:
+            # Health inspection must remain read-only even when a deterministic
+            # fixture clock is exhausted; preserve the last known sample time.
+            health_now = float(self.last_sample_at or 0.0)
+        sample_age = (
+            max(0.0, health_now - self.last_sample_at)
+            if self.last_sample_at is not None
+            else None
+        )
         process_health: dict[str, Any] = {}
+        provider_health: dict[str, Any] = {}
+        provider_method = getattr(self.provider, "health_check", None)
+        if callable(provider_method):
+            try:
+                candidate = provider_method()
+                if isinstance(candidate, dict):
+                    provider_health = candidate
+            except Exception as exc:
+                provider_health = {"status": "DEGRADED", "error": type(exc).__name__, "authority": "NONE"}
         resolver = getattr(self.provider, "process_resolver", None)
         method = getattr(resolver, "health_check", None)
         if callable(method):
@@ -820,11 +1130,24 @@ class PassiveNetworkInventory:
         return {
             "component": "PassiveNetworkInventory",
             "version": self.VERSION,
-            "status": "HEALTHY" if self.last_error is None else "DEGRADED",
-            "mode": self.MODE,
+            "status": (
+                "DEGRADED"
+                if self.last_error is not None
+                or (sample_age is not None and sample_age > 120.0)
+                else "HEALTHY"
+            ),
+            "mode": (
+                "PASSIVE_PLUS_BOUNDED_VERIFICATION"
+                if self.verifier is not None and getattr(self.verifier.policy, "enabled", False)
+                else self.MODE
+            ),
             "authority": self.AUTHORITY,
             "authoritative": False,
-            "active_scan_enabled": False,
+            "active_scan_enabled": bool(
+                self.verifier is not None
+                and getattr(self.verifier.policy, "enabled", False)
+                and getattr(self.verifier.policy, "active_probe", False)
+            ),
             "dns_cache_observation": True,
             "flow_telemetry_observation": True,
             "flow_continuity_observation": self.flow_continuity_sampler is not None,
@@ -833,7 +1156,11 @@ class PassiveNetworkInventory:
             "packet_capture": False,
             "per_connection_byte_attribution": False,
             "external_dns_queries": False,
-            "reverse_dns_lookup": False,
+            "reverse_dns_lookup": bool(
+                self.verifier is not None
+                and getattr(self.verifier.policy, "enabled", False)
+                and getattr(self.verifier.policy, "dns_resolution", False)
+            ),
             "dashboard_direct_os_access": False,
             "packet_injection": False,
             "firewall_mutation": False,
@@ -844,7 +1171,11 @@ class PassiveNetworkInventory:
             "last_sample_at": self.last_sample_at,
             "last_duration_ms": self.last_duration_ms,
             "last_error": self.last_error,
+            "last_sample_age_seconds": sample_age,
+            "stale_after_seconds": 120.0,
+            "fresh": bool(sample_age is not None and sample_age <= 120.0),
             "process_attribution": process_health,
+            "provider": provider_health,
             "trust_registry": {
                 "authority": "NONE",
                 "rules_loaded": len(self._trust),
@@ -853,4 +1184,17 @@ class PassiveNetworkInventory:
                 "last_error": self.trust_registry_last_error,
                 "auto_whitelist": False,
             },
+            "network_verification": (
+                self.verifier.health_check()
+                if self.verifier is not None
+                else {
+                    "status": "DISABLED",
+                    "enabled": False,
+                    "active_scan_enabled": False,
+                    "dns_resolution": False,
+                    "authority": "NONE",
+                    "authoritative": False,
+                    "authorization": "NOT_GRANTED",
+                }
+            ),
         }

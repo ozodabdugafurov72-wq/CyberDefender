@@ -234,3 +234,65 @@ Schemas:
 Safety remains unchanged: packet capture, active scan, packet injection,
 firewall mutation, external enrichment, per-connection byte fabrication and
 auto-whitelisting remain disabled.
+
+## v0.2 — Policy-Gated Identity Verification Foundation
+
+`agent/network/active_verification.py` provides an optional enrichment plane for
+already observed peers. It is not enabled by the default runtime bootstrap.
+Activation requires an explicit `cyberdefender.network-verification-policy.v0.1`
+policy with a private allowlisted CIDR, bounded target/probe limits, internal
+resolver addresses, and an operator approval reference.
+
+The safest discovery order is passive observation first, followed by bounded
+reverse-DNS and ICMP verification only for peers already present in the local
+observation set. Broad subnet sweeps, arbitrary TCP port scans, external DNS,
+mDNS/LLMNR, firewall changes, quarantine and response actions are outside this
+foundation.
+
+Verification results are evidence only. A DNS name or reachable ICMP response
+does not change trust, enrollment, user identity or authorization. Explicit
+`DENIED`/`REVOKED` registry evidence is surfaced as
+`SUSPICIOUS_UNAUTHORIZED`; an unregistered peer remains
+`OBSERVED_UNVERIFIED`/`UNKNOWN`. Out-of-scope or ambiguous targets fail closed
+to `REVIEW_REQUIRED`. Cooldown, target, query, probe, timeout and resolver
+limits are enforced before any optional network I/O.
+
+## v0.3 — Identity, Segment and Attribution Semantics
+
+Network rows keep separate `identity_state`, `trust_state`, `presence_state`,
+and `user_binding` values. `endpoint_id` is the canonical enrollment identity;
+hostnames, IP addresses, MAC addresses, and observed DNS names are provenance
+evidence only. Duplicate hostnames therefore remain separate endpoint rows.
+
+The passive collector may emit bounded evidence candidates such as
+`NEW_MAC_FIRST_SEEN`, `UNENROLLED_ACTIVE_DEVICE`, `IP_MAC_CONFLICT`,
+`GATEWAY_IDENTITY_CHANGED`, `RAPID_IP_CHURN`, `RAPID_MAC_CHURN`, and
+`DNS_IDENTITY_MISMATCH`. These remain `OBSERVED_UNVERIFIED`, `SUSPICIOUS`, or
+`REVIEW_REQUIRED`; they never authorize or execute a response. Gateway baselines
+are keyed by interface, network segment, and gateway IP, so Ethernet and Wi-Fi
+identities cannot be conflated.
+
+The optional verifier role is `CENTRAL_ONLY`, with a finite operation budget and
+single-worker concurrency. Passive refreshes are isolated behind the bounded
+async worker; timeout and stale evidence are explicit and do not weaken local
+protection. Process attribution exposes confidence and provenance while keeping
+`VALID` separate from trust and authorization.
+
+## Cross-plane freshness semantics
+
+Fleet heartbeat liveness uses a 90-second `last_seen` threshold. Passive network
+inventory uses a separate 120-second sample freshness threshold because it is a
+local observation plane with a bounded collector timeout, not proof of Agent
+heartbeat liveness. An endpoint may therefore be Fleet `OFFLINE` while a recent
+passive network sample remains `fresh` during the 90-to-120-second interval.
+The Owner UI keeps these planes separate: fleet rows show `OFFLINE`/`STALE`,
+while the network panel labels observations as `ACTIVE`/`STALE` and remains
+explicitly non-authoritative. No plane fabricates the other plane's liveness.
+
+## Event family and lifecycle state
+
+Owner event grouping uses endpoint-scoped family identity (normalized event
+family code and explicit subject). Human-readable wording, source, severity,
+and lifecycle state remain evidence attributes. An active warning and its
+`_RECOVERED` observation therefore share one family with a historical count,
+while `current_state` and `active_now` expose the current lifecycle state.

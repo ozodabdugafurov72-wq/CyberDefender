@@ -27,7 +27,7 @@
 </section>
 <section class="panel network-panel" id="network-inventory">
  <div class="head"><div><span class="eyebrow">NETWORK & DEVICES</span><h2>Passive Network Observations</h2></div><span class="badge safe" id="networkMode">PASSIVE ONLY</span></div>
- <div class="network-guard">READ ONLY · NO PING · NO PORT SCAN · NO PACKET CAPTURE · NO PACKET INJECTION · UNKNOWN ≠ UNAUTHORIZED · USER IDENTITY IS NEVER INFERRED FROM IP/MAC</div>
+ <div class="network-guard">READ ONLY · NO PING WITHOUT APPROVED POLICY · NO PORT SCAN WITHOUT APPROVED POLICY · NO PACKET CAPTURE · NO PACKET INJECTION · UNKNOWN ≠ UNAUTHORIZED · USER IDENTITY IS NEVER INFERRED FROM IP/MAC</div>
  <div class="network-kpis">
   <div><span>THIS ENDPOINT</span><b id="netLocalEndpoint">0</b><small>local host, not a peer</small></div>
   <div><span>OBSERVED PEERS</span><b id="netPeers">0</b><small id="netPeerMeta">0 current · 0 retained</small></div>
@@ -47,7 +47,7 @@
   <div><span>AUTO-WHITELIST</span><b id="netAutoWhitelist">DISABLED</b><small>no implicit trust promotion</small></div>
  </div>
  <div class="device-head"><span>TRUST</span><span>OBSERVED PEER</span><span>IP</span><span>MAC</span><span>ROLE / INTERFACE</span><span>STATE</span><span>USER BINDING</span></div>
- <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry only</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
+ <div class="devices" id="networkDevices"><div class="device-row"><span>—</span><div><b>Waiting for passive inventory</b><small>Runtime-owned telemetry; bounded verification requires approved policy</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>UNKNOWN</span></div></div>
  <div class="connection-title"><span class="eyebrow">CONNECTION → PROCESS ATTRIBUTION</span><small>LOCAL PROCESS + PASSIVE DNS CACHE EVIDENCE · CONTINUOUS INTERFACE FLOW RATES ARE NOT PER-CONNECTION BYTES · BASELINE CANDIDATES ARE EVIDENCE ONLY · GAPS ARE OBSERVABLE · NON-AUTHORITATIVE</small></div>
  <div class="connection-head"><span>PROCESS</span><span>PID</span><span>LOCAL</span><span>REMOTE / DNS</span><span>STATE</span><span>SHA-256</span><span>SIGNATURE</span></div>
  <div class="connections" id="networkConnections"><div class="connection-row"><div><b>Waiting for connection attribution</b><small>Local process identity only; no vendor inference from remote IP.</small></div><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span></div></div>
