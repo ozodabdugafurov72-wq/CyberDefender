@@ -5,6 +5,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 function Require([bool]$Condition,[string]$Message) { if(-not $Condition){ throw $Message } }
+function Get-SafeRelativePath([string]$Root,[string]$Child) {
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $childFull = [IO.Path]::GetFullPath($Child)
+    Require ($childFull.StartsWith($rootFull,[StringComparison]::OrdinalIgnoreCase)) "Path escapes evidence root: $Child"
+    return $childFull.Substring($rootFull.Length).Replace('\','/')
+}
 $hostName = [Environment]::GetEnvironmentVariable('COMPUTERNAME')
 $base = Join-Path $env:ProgramData 'CyberDefender'
 $app = Join-Path $env:ProgramFiles 'CyberDefender\app'
@@ -20,7 +26,7 @@ $files = @()
 Get-ChildItem -LiteralPath $app -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
     $_.FullName -notmatch '\\(\.venv|state|logs|secrets|identity|evidence|__pycache__)\\' -and $_.Extension -notin @('.log','.db','.b64','.key','.pem','.pfx')
 } | ForEach-Object {
-    $rel = [IO.Path]::GetRelativePath($app,$_.FullName).Replace('\','/')
+    $rel = Get-SafeRelativePath $app $_.FullName
     $files += [ordered]@{ path=$rel; bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
 $nativeRel='native/process_sensor_v0_5_1/target/release/cyberdefender-process-sensor.exe'

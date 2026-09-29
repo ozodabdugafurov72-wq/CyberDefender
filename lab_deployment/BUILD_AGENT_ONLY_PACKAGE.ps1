@@ -16,6 +16,12 @@ function Fail([string]$Message) {
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { Fail $Message }
 }
+function Get-SafeRelativePath([string]$Root, [string]$Child) {
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $childFull = [IO.Path]::GetFullPath($Child)
+    Require ($childFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) "Path escapes source root: $Child"
+    return $childFull.Substring($rootFull.Length).Replace('\','/')
+}
 
 $SourceRoot = (Resolve-Path $SourceRoot).Path
 Require (Test-Path -LiteralPath (Join-Path $SourceRoot ".git")) "SourceRoot must be a Git checkout"
@@ -61,7 +67,7 @@ $forbidden = @(
     '(^|/)(__pycache__|\.git|\.venv)(/|$)'
 )
 foreach ($file in $files) {
-    $relative = [IO.Path]::GetRelativePath($SourceRoot, $file.FullName).Replace('\','/')
+    $relative = Get-SafeRelativePath $SourceRoot $file.FullName
     foreach ($pattern in $forbidden) {
         Require (-not ($relative -match $pattern)) "Forbidden package path: $relative"
     }
