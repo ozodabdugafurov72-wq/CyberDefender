@@ -25,6 +25,7 @@ class FleetTelemetryClient:
         self.timeout = max(0.2, float(timeout))
         self.sent = 0
         self.failed = 0
+        self.consecutive_failures = 0
         self.last_error: str | None = None
 
     def _token(self) -> str:
@@ -45,10 +46,19 @@ class FleetTelemetryClient:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 ok = 200 <= int(response.status) < 300
             if ok:
-                self.sent += 1; self.last_error = None; return True
-            self.failed += 1; self.last_error = f"HTTP_{response.status}"; return False
+                self.sent += 1
+                self.consecutive_failures = 0
+                self.last_error = None
+                return True
+            self.failed += 1
+            self.consecutive_failures += 1
+            self.last_error = f"HTTP_{response.status}"
+            return False
         except (OSError, ValueError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-            self.failed += 1; self.last_error = type(exc).__name__; return False
+            self.failed += 1
+            self.consecutive_failures += 1
+            self.last_error = type(exc).__name__
+            return False
 
     def register(self, *, runtime_version: str, health_state: str = "UNKNOWN", service_state: str = "REGISTERED") -> bool:
         return self._post("/api/v1/enrollment/register", {
@@ -68,5 +78,7 @@ class FleetTelemetryClient:
 
     def health_check(self) -> dict[str, Any]:
         return {"component":"FleetTelemetryClient","version":self.VERSION,
-                "status":"HEALTHY" if self.failed == 0 else "DEGRADED",
-                "authoritative":False,"sent":self.sent,"failed":self.failed,"last_error":self.last_error}
+                "status":"HEALTHY" if self.last_error is None else "DEGRADED",
+                "authoritative":False,"sent":self.sent,"failed":self.failed,
+                "failures_total":self.failed,"consecutive_failures":self.consecutive_failures,
+                "last_error":self.last_error}

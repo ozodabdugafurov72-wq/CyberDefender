@@ -697,6 +697,9 @@ class CorrelationEngine:
             "evidence_count": 1,
             "risk_score": 0,
             "severity": "INFO",
+            "current_state": "RECOVERED" if str(detection.get("type", "")).upper().endswith("_RECOVERED") else "ACTIVE",
+            "active_now": not str(detection.get("type", "")).upper().endswith("_RECOVERED"),
+            "recovered_at": detection["timestamp"] if str(detection.get("type", "")).upper().endswith("_RECOVERED") else None,
         }
 
         self._recalculate_risk(
@@ -780,6 +783,10 @@ class CorrelationEngine:
         incident["updated_at"] = (
             detection["timestamp"]
         )
+        recovered = str(detection.get("type", "")).upper().endswith("_RECOVERED")
+        incident["current_state"] = "RECOVERED" if recovered else "ACTIVE"
+        incident["active_now"] = not recovered
+        incident["recovered_at"] = detection["timestamp"] if recovered else None
 
         self._recalculate_risk(
             incident
@@ -1059,6 +1066,9 @@ class CorrelationEngine:
                 incident["created_at"],
             "updated_at":
                 incident["updated_at"],
+            "current_state": incident.get("current_state", "ACTIVE"),
+            "active_now": bool(incident.get("active_now", True)),
+            "recovered_at": incident.get("recovered_at"),
         }
 
     # =========================================================

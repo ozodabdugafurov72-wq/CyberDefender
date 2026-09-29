@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable, Any
 
 
 class ServiceRunner:
     """Platform-neutral lifecycle wrapper used by the Windows Service host."""
     VERSION = "1.1"
+    RUNTIME_FRESHNESS_SECONDS = 60.0
 
     def __init__(self, runtime_factory: Callable[[], Any], *, interval_seconds: float = 5.0,
                  telemetry_client: Any | None = None, lifecycle: Any | None = None,
@@ -24,6 +26,13 @@ class ServiceRunner:
         self.last_error: str | None = None
         self.telemetry_failures = 0
         self.last_telemetry_error: str | None = None
+        self._telemetry_lock = threading.Lock()
+        self._cycle_lock = threading.Lock()
+        self._cycle_in_progress = False
+        self._cycle_started_monotonic: float | None = None
+        self._last_cycle_completed_monotonic: float | None = None
+        self._cycle_error = False
+        self._heartbeat_watchdog: threading.Thread | None = None
 
         # ACP primary reachability observer.
         # Evidence only; cannot affect authorization or local protection.
@@ -62,6 +71,84 @@ class ServiceRunner:
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def _emit_heartbeat(self, runtime: Any, client: Any) -> None:
+        """Send one bounded, non-authoritative heartbeat sample."""
+        heartbeat_attempted = False
+        try:
+            if hasattr(runtime, "health_snapshot"):
+                health = runtime.health_snapshot()
+            elif hasattr(runtime, "health_check"):
+                health = runtime.health_check()
+            else:
+                health = {}
+            if not isinstance(health, dict):
+                health = {}
+            resource = health.get("resource_guard", {})
+            if not isinstance(resource, dict):
+                resource = {}
+            runtime_health = health.get("runtime", {})
+            if not isinstance(runtime_health, dict):
+                runtime_health = {}
+
+            with self._cycle_lock:
+                cycle_in_progress = self._cycle_in_progress
+                cycle_started = self._cycle_started_monotonic
+                cycle_error = self._cycle_error
+                completed = self._last_cycle_completed_monotonic
+            now = time.monotonic()
+            cycle_age = (
+                max(0.0, now - cycle_started)
+                if cycle_in_progress and cycle_started is not None
+                else 0.0
+            )
+            stale = (
+                cycle_in_progress
+                and cycle_age >= self.RUNTIME_FRESHNESS_SECONDS
+            ) or (
+                completed is None
+                and cycle_in_progress
+                and cycle_age >= self.RUNTIME_FRESHNESS_SECONDS
+            )
+            health_state = str(runtime_health.get("status", "UNKNOWN"))
+            last_error = (
+                "RUNTIME_CYCLE_STALE"
+                if stale
+                else ("SERVICE_RUNTIME_ERROR" if cycle_error else None)
+            )
+            if stale:
+                health_state = "DEGRADED"
+
+            heartbeat_attempted = True
+            with self._telemetry_lock:
+                accepted = client.heartbeat(
+                    runtime_version=str(getattr(runtime, "VERSION", "")),
+                    health_state=health_state,
+                    service_state="RUNNING",
+                    resource_state=str(resource.get("state", "")),
+                    last_error=last_error,
+                )
+            if accepted is True:
+                self.last_telemetry_error = None
+                self._record_primary_reachability(True, source="heartbeat")
+            elif accepted is False:
+                self._record_primary_reachability(False, source="heartbeat")
+                raise RuntimeError("fleet heartbeat rejected")
+            else:
+                self._record_primary_reachability(None, source="heartbeat")
+        except Exception as exc:
+            self.telemetry_failures += 1
+            self.last_telemetry_error = f"heartbeat:{type(exc).__name__}"
+            if heartbeat_attempted:
+                self._record_primary_reachability(False, source="heartbeat")
+
+    def _heartbeat_watchdog_loop(self, runtime: Any, client: Any) -> None:
+        """Keep fleet liveness independent from a slow managed cycle."""
+        while not self.stop_event.wait(self.interval_seconds):
+            with self._cycle_lock:
+                in_progress = self._cycle_in_progress
+            if in_progress:
+                self._emit_heartbeat(runtime, client)
 
     def run(self, *, max_cycles: int | None = None) -> None:
         runtime = None
@@ -116,12 +203,27 @@ class ServiceRunner:
                         source="register",
                     )
 
+            if client is not None:
+                self._heartbeat_watchdog = threading.Thread(
+                    target=self._heartbeat_watchdog_loop,
+                    args=(runtime, client),
+                    name="CyberDefender-FleetHeartbeatWatchdog",
+                    daemon=True,
+                )
+                self._heartbeat_watchdog.start()
+
             while not self.stop_event.is_set():
+                with self._cycle_lock:
+                    self._cycle_in_progress = True
+                    self._cycle_started_monotonic = time.monotonic()
+                    self._cycle_error = False
                 try:
                     runtime.run_cycle()
                     self.cycles += 1
                 except Exception as exc:
                     self.failures += 1
+                    with self._cycle_lock:
+                        self._cycle_error = True
                     self.last_error = type(exc).__name__
                     try:
                         runtime.safety.enter_safe_mode(
@@ -129,6 +231,10 @@ class ServiceRunner:
                         )
                     except Exception:
                         pass
+                finally:
+                    with self._cycle_lock:
+                        self._cycle_in_progress = False
+                        self._last_cycle_completed_monotonic = time.monotonic()
 
                 if self.lifecycle is not None:
                     try:
@@ -141,68 +247,15 @@ class ServiceRunner:
                         pass
 
                 if client is not None:
-                    heartbeat_attempted = False
-
-                    try:
-                        if hasattr(runtime, "health_snapshot"):
-                            health = runtime.health_snapshot()
-                        elif hasattr(runtime, "health_check"):
-                            health = runtime.health_check()
-                        else:
-                            health = {}
-                        if not isinstance(health, dict):
-                            health = {}
-                        resource = health.get("resource_guard", {})
-                        if not isinstance(resource, dict):
-                            resource = {}
-                        runtime_health = health.get("runtime", {})
-                        if not isinstance(runtime_health, dict):
-                            runtime_health = {}
-                        heartbeat_attempted = True
-
-                        accepted = client.heartbeat(
-                            runtime_version=str(getattr(runtime, "VERSION", "")),
-                            health_state=str(runtime_health.get("status", "UNKNOWN")),
-                            service_state="RUNNING",
-                            resource_state=str(resource.get("state", "")),
-                            last_error="SERVICE_RUNTIME_ERROR" if getattr(runtime, "last_error", None) else None,
-                        )
-                        if accepted is True:
-                            self._record_primary_reachability(
-                                True,
-                                source="heartbeat",
-                            )
-
-                        elif accepted is False:
-                            self._record_primary_reachability(
-                                False,
-                                source="heartbeat",
-                            )
-
-                            raise RuntimeError(
-                                "fleet heartbeat rejected"
-                            )
-
-                        else:
-                            self._record_primary_reachability(
-                                None,
-                                source="heartbeat",
-                            )
-
-                    except Exception as exc:
-                        self.telemetry_failures += 1
-                        self.last_telemetry_error = f"heartbeat:{type(exc).__name__}"
-
-                        if heartbeat_attempted:
-                            self._record_primary_reachability(
-                                False,
-                                source="heartbeat",
-                            )
+                    self._emit_heartbeat(runtime, client)
 
                 if max_cycles is not None and self.cycles >= max_cycles:
                     break
                 self.stop_event.wait(self.interval_seconds)
         finally:
+            self.stop_event.set()
+            if self._heartbeat_watchdog is not None:
+                self._heartbeat_watchdog.join(timeout=max(1.0, self.interval_seconds * 2.0))
             if runtime is None:
                 self.cleanup_verified = True
             if runtime is not None:

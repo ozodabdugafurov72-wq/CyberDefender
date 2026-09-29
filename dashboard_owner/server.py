@@ -355,22 +355,8 @@ def incident_summary(incidents: list[dict]) -> dict:
     }
 
 def dedupe_events(events: list[dict], limit: int = 18) -> list[dict]:
-    grouped: dict[tuple[str, str, str], dict] = {}
-    for event in events:
-        kind = str(event.get("event_type", event.get("type", event.get("name", "EVENT"))))
-        level = str(event.get("severity", event.get("level", event.get("risk_level", "INFO")))).upper()
-        detail = event.get("message", event.get("details", event.get("description", event.get("reason", event.get("admission_reason", "Runtime evidence")))))
-        detail_text = detail if isinstance(detail, str) else json.dumps(safe_json(detail), ensure_ascii=False, sort_keys=True)
-        key = (kind, level, detail_text)
-        row = grouped.get(key)
-        ts = event.get("timestamp", event.get("generated_at", event.get("created_at")))
-        if row is None:
-            grouped[key] = {"kind": kind, "level": level, "detail": detail_text, "count": 1, "first": ts, "last": ts}
-        else:
-            row["count"] += 1
-            row["last"] = ts
-            if row.get("first") is None:
-                row["first"] = ts
+    grouped: dict[tuple[str, str, str, str], dict] = {}
+
     def _timestamp_sort_key(value) -> float:
         if value is None:
             return 0.0
@@ -391,7 +377,74 @@ def dedupe_events(events: list[dict], limit: int = 18) -> list[dict]:
         except (TypeError, ValueError, OverflowError):
             return 0.0
 
+    for event in events:
+        kind = str(event.get("event_type", event.get("type", event.get("name", "EVENT"))))
+        level = str(event.get("severity", event.get("level", event.get("risk_level", "INFO")))).upper()
+        endpoint_id = str(
+            event.get("endpoint_id")
+            or event.get("host_id")
+            or event.get("asset_id")
+            or event.get("sensor_id")
+            or "agent-local"
+        )
+        source = str(event.get("source", event.get("component", "unknown")))
+        stable_code = str(event.get("event_code", kind)).strip().upper() or "EVENT"
+        current_state = str(event.get("current_state", "")).strip().upper()
+        if not current_state:
+            current_state = "RECOVERED" if stable_code.endswith("_RECOVERED") else "ACTIVE"
+        stable_family = stable_code.removesuffix("_RECOVERED")
+        subject = event.get(
+            "subject_id",
+            event.get("entity_id", event.get("process_id", "")),
+        )
+        subject_text = json.dumps(safe_json(subject), ensure_ascii=False, sort_keys=True)
+        detail = event.get("message", event.get("details", event.get("description", event.get("reason", event.get("admission_reason", "Runtime evidence")))))
+        detail_text = detail if isinstance(detail, str) else json.dumps(safe_json(detail), ensure_ascii=False, sort_keys=True)
+        # Human-readable/localized wording, source, severity, and lifecycle
+        # state are evidence attributes, not family identity. This keeps an
+        # active warning and its recovery in one endpoint-scoped family while
+        # preserving the latest state and historical source/severity evidence.
+        key = (endpoint_id, stable_family, subject_text, "event-family-v1")
+        row = grouped.get(key)
+        ts = event.get("timestamp", event.get("generated_at", event.get("created_at")))
+        if row is None:
+            grouped[key] = {
+                "kind": kind,
+                "event_code": stable_family,
+                "endpoint_id": endpoint_id,
+                "source": source,
+                "sources": [source],
+                "current_state": current_state,
+                "level": level,
+                "levels": [level],
+                "detail": detail_text,
+                "count": 1,
+                "first": ts,
+                "last": ts,
+                "active_now": current_state == "ACTIVE",
+                "_state_timestamp": ts,
+            }
+        else:
+            row["count"] += 1
+            if source not in row["sources"]:
+                row["sources"].append(source)
+            if level not in row["levels"]:
+                row["levels"].append(level)
+            if _timestamp_sort_key(ts) >= _timestamp_sort_key(row.get("_state_timestamp")):
+                row["kind"] = kind
+                row["source"] = source
+                row["current_state"] = current_state
+                row["level"] = level
+                row["detail"] = detail_text
+                row["active_now"] = current_state == "ACTIVE"
+                row["_state_timestamp"] = ts
+            if row.get("first") is None or _timestamp_sort_key(ts) < _timestamp_sort_key(row.get("first")):
+                row["first"] = ts
+            if _timestamp_sort_key(ts) >= _timestamp_sort_key(row.get("last")):
+                row["last"] = ts
     rows = list(grouped.values())
+    for row in rows:
+        row.pop("_state_timestamp", None)
     rows.sort(key=lambda x: _timestamp_sort_key(x.get("last")), reverse=True)
     return rows[:limit]
 

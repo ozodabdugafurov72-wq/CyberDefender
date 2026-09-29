@@ -38,15 +38,30 @@ class FleetReadModel:
                 SUM(CASE WHEN install_state='INSTALLED' AND last_seen>=? THEN 1 ELSE 0 END) online,
                 SUM(CASE WHEN install_state='INSTALLED' AND last_seen<? THEN 1 ELSE 0 END) offline,
                 SUM(CASE WHEN health_state='DEGRADED' THEN 1 ELSE 0 END) degraded,
-                SUM(CASE WHEN health_state='CRITICAL' THEN 1 ELSE 0 END) critical FROM fleet_endpoints""", (cutoff, cutoff)).fetchone()
+                SUM(CASE WHEN health_state='CRITICAL' THEN 1 ELSE 0 END) critical,
+                SUM(CASE WHEN install_state='INSTALLED' AND last_seen<? THEN 1 ELSE 0 END) stale FROM fleet_endpoints""", (cutoff, cutoff, cutoff)).fetchone()
             rows = conn.execute("SELECT endpoint_id,hostname,install_state,health_state,service_state,runtime_version,resource_state,first_seen,last_seen,last_error FROM fleet_endpoints ORDER BY last_seen DESC LIMIT ?", (max(1,min(int(limit),500)),)).fetchall()
         finally:
             conn.close()
         summary = {}
         for key in ("downloads_total","downloads_completed","downloads_failed"):
             summary[key] = int((d[key] if d else 0) or 0)
-        for key in ("endpoints_total","installed","pending","install_failed","revoked","online","offline","degraded","critical"):
+        for key in ("endpoints_total","installed","pending","install_failed","revoked","online","offline","degraded","critical","stale"):
             summary[key] = int((f[key] if f else 0) or 0)
+        endpoints = []
+        for row in rows:
+            item = dict(row)
+            last_seen = item.get("last_seen")
+            try:
+                stale = float(last_seen) < cutoff
+            except (TypeError, ValueError):
+                stale = True
+            item["historical_health_state"] = item.get("health_state")
+            item["health_stale"] = stale
+            item["health_state_current"] = "STALE" if stale else item.get("health_state")
+            if stale:
+                item["health_state"] = "STALE"
+            endpoints.append(item)
         return {"status":"HEALTHY","version":self.VERSION,"read_only":True,"authoritative":False,
                 "exact_download_events":True,"people_identity_counted":False,"online_after_seconds":online_after_seconds,
-                "summary":summary,"endpoints":[dict(r) for r in rows]}
+                "summary":summary,"endpoints":endpoints}

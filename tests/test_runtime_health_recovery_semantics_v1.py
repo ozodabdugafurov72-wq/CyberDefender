@@ -32,14 +32,14 @@ assert resolve(
 ) is False
 
 
-# Do NOT clear if current runtime evidence still reports failures.
+# Historical counters remain evidence and do not permanently block recovery.
 assert resolve(
     current_degraded=True,
     active_degradation=False,
     cycle_failures=1,
     component_failures=0,
     last_error=None,
-) is True
+) is False
 
 assert resolve(
     current_degraded=True,
@@ -47,7 +47,7 @@ assert resolve(
     cycle_failures=0,
     component_failures=1,
     last_error=None,
-) is True
+) is False
 
 assert resolve(
     current_degraded=True,
