@@ -220,6 +220,15 @@ class EventState:
                     f"Invalid last_seen for '{event_type}'."
                 )
 
+            if "tenant_id" in state:
+                tenant_id = state["tenant_id"]
+                if tenant_id is not None and (
+                    not isinstance(tenant_id, str) or not tenant_id.strip()
+                ):
+                    raise EventStateIntegrityError(
+                        f"Invalid tenant_id for '{event_type}'."
+                    )
+
     # =========================================================
     # PERSISTENCE
     # =========================================================
@@ -405,6 +414,10 @@ class EventState:
                 now,
             )
 
+        tenant_id = getattr(event, "tenant_id", None)
+        if tenant_id is None and isinstance(previous, dict):
+            tenant_id = previous.get("tenant_id")
+
         candidate_state = {
             "state": "ACTIVE",
             "lifecycle": lifecycle,
@@ -414,6 +427,8 @@ class EventState:
             "last_seen": now,
             "occurrence_count": occurrence_count,
         }
+        if tenant_id is not None:
+            candidate_state["tenant_id"] = tenant_id
 
         current_state[event_type] = (
             candidate_state
@@ -709,4 +724,3 @@ class EventState:
             "last_error_component":
                 self._last_error_component,
         }
-

@@ -28,6 +28,7 @@ def main() -> int:
             value=1,
             source="test",
             message="active before recovery",
+            tenant_id="test-tenant",
         )
         runtime.state_manager.update(active)
 

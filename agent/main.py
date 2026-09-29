@@ -2699,6 +2699,30 @@ class CyberDefenderRuntime:
             message=str(
                 detection["message"]
             ),
+            tenant_id=(
+                str(detection.get("tenant_id")).strip()
+                if detection.get("tenant_id") is not None
+                and str(detection.get("tenant_id")).strip()
+                else None
+            ),
+            host_id=(
+                str(detection.get("host_id")).strip()
+                if detection.get("host_id") is not None
+                and str(detection.get("host_id")).strip()
+                else None
+            ),
+            asset_id=(
+                str(detection.get("asset_id")).strip()
+                if detection.get("asset_id") is not None
+                and str(detection.get("asset_id")).strip()
+                else None
+            ),
+            sensor_id=(
+                str(detection.get("sensor_id")).strip()
+                if detection.get("sensor_id") is not None
+                and str(detection.get("sensor_id")).strip()
+                else None
+            ),
         )
 
     # ========================================================
@@ -3107,6 +3131,13 @@ class CyberDefenderRuntime:
         """
 
         self.cycle_count += 1
+
+        # ``component_failures`` and ``cycle_failures`` are forensic
+        # counters.  They intentionally survive recovery and therefore must
+        # not keep the current health state degraded forever.  The current
+        # cycle owns the live error signal; a later clean cycle may recover
+        # automatically while the historical counters remain visible.
+        self.last_error = None
 
         cycle_started = time.monotonic()
 
@@ -3707,12 +3738,25 @@ class CyberDefenderRuntime:
                 continue
 
             try:
+                prior_state = manager.get_state(event_type)
+                tenant_id = (
+                    prior_state.get("tenant_id")
+                    if isinstance(prior_state, dict)
+                    else None
+                )
+                if not isinstance(tenant_id, str) or not tenant_id.strip():
+                    self.recovery_failures += 1
+                    self.component_failures += 1
+                    self.degraded = True
+                    self.last_error = "recovery:tenant_identity_unavailable"
+                    continue
                 recovered_event = SecurityEvent(
                     event_type=f"{event_type}_RECOVERED",
                     severity="INFO",
                     value=0,
                     source="EventState",
                     message=f"{event_type} holati tiklandi.",
+                    tenant_id=tenant_id.strip(),
                 )
             except Exception as exc:
                 self.component_failures += 1
@@ -3771,11 +3815,10 @@ class CyberDefenderRuntime:
         """
         Resolve CURRENT runtime health without losing fail-closed semantics.
 
-        A historical transient degradation may clear only when:
-        - no active critical/persistence/safety degradation exists;
-        - current cycle failure count is zero;
-        - current component failure count is zero;
-        - there is no current runtime error.
+        A historical transient degradation may clear when no active
+        critical/persistence/safety degradation exists and the current
+        runtime error signal is clear.  The failure counters are historical
+        evidence and are deliberately not used as a permanent latch.
 
         Active safety/security degradation always wins.
         """
@@ -3783,12 +3826,7 @@ class CyberDefenderRuntime:
         if active_degradation:
             return True
 
-        if (
-            current_degraded
-            and int(cycle_failures) == 0
-            and int(component_failures) == 0
-            and not last_error
-        ):
+        if current_degraded and not last_error:
             return False
 
         return bool(current_degraded)

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 import json
@@ -119,6 +120,37 @@ class RuntimeOutboxWiringTests(unittest.TestCase):
             acks = []
             self.assertFalse(build_adapter(outbox, ack=lambda event_id: acks.append(event_id) or True).handle_event(detection()))
             self.assertEqual([], acks)
+
+    def test_tenantless_event_is_rejected_and_not_acked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            acks = []
+            adapter = build_adapter(
+                DurableIncidentOutbox(directory, KEY),
+                ack=lambda event_id: acks.append(event_id) or True,
+            )
+            self.assertFalse(adapter.handle_event(detection(tenant_id=None)))
+            self.assertEqual([], acks)
+
+    def test_event_state_preserves_tenant_for_recovery(self):
+        from agent.event import SecurityEvent
+        from agent.state import EventState
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            state = EventState(path)
+            state.update(SecurityEvent(
+                event_type="PROCESS_START",
+                severity="HIGH",
+                value=1,
+                source="test",
+                message="synthetic",
+                tenant_id="tenant-a",
+            ))
+            reopened = EventState(path)
+            self.assertEqual(
+                reopened.get_state("PROCESS_START").get("tenant_id"),
+                "tenant-a",
+            )
 
     def test_reopen_before_ack_keeps_one_logical_row(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -97,7 +97,21 @@ def main() -> int:
         wrap_instance_method(runtime, "observe", probe, "observer")
         wrap_instance_method(runtime, "detect", probe, "detection")
         wrap_instance_method(runtime, "rule_detect", probe, "rule_detection")
-        wrap_instance_method(runtime, "process_detection", probe, "security_event_builder")
+        # This traversal represents an admitted event.  Supply a deterministic
+        # test tenant through the same event builder path used by production;
+        # the production tenant requirement remains fail-closed for tenantless
+        # events and is covered by the P0.3.1B negative tests.
+        original_process_detection = runtime.process_detection
+
+        def process_detection_with_test_tenant(self, detection, source, current_event_types):
+            if isinstance(detection, dict):
+                detection = dict(detection)
+                if not detection.get("tenant_id"):
+                    detection["tenant_id"] = "test-tenant-traversal"
+            probe.mark("security_event_builder")
+            return original_process_detection(detection, source, current_event_types)
+
+        setattr(runtime, "process_detection", MethodType(process_detection_with_test_tenant, runtime))
 
         # SecurityEvent -> RuntimeSecurityPipeline -> Durable Pipeline -> EventBus
         wrap_instance_method(runtime.runtime_pipeline, "ingest", probe, "runtime_pipeline.ingest")

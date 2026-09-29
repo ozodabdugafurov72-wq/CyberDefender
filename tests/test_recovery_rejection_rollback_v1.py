@@ -24,6 +24,7 @@ def main() -> int:
                 value=1,
                 source="test",
                 message="active",
+                tenant_id="test-tenant",
             )
             runtime.state_manager.update(active)
             before = runtime.state_manager.get_state("ROLLBACK_TEST")
