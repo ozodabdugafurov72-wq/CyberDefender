@@ -204,7 +204,8 @@ class LabQuarantineCoordinator:
         if operator_approved is not True:
             return self._failure("ADMISSION", "EXPLICIT_OPERATOR_APPROVAL_REQUIRED")
         if not isinstance(telemetry_event, dict) or telemetry_event.get("event_type") not in {
-            "HOST_SNAPSHOT", "RESOURCE_STATUS", "PROCESS_SNAPSHOT"
+            "HOST_SNAPSHOT", "RESOURCE_STATUS", "PROCESS_SNAPSHOT",
+            "PROCESS_START", "FILE_ACTIVITY", "SCRIPT_ACTIVITY", "FILE_INDICATOR",
         }:
             return self._failure("ADMISSION", "TELEMETRY_EVENT_REQUIRED")
         event_id = telemetry_event.get("event_id")

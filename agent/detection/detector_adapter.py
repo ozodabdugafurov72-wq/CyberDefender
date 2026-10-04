@@ -86,6 +86,8 @@ class DetectorAdapter:
                 detection_event = {
                     "event_type": "DETECTION",
                     "source": "DetectorAdapter",
+                    "event_id": detection.get("event_id") or event.get("event_id"),
+                    "timestamp": detection.get("timestamp") or event.get("timestamp"),
                     "severity": detection.get(
                         "severity",
                         "INFO"

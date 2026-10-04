@@ -474,20 +474,16 @@ class Detector:
             self._invalid_events += 1
             return []
 
-        if event_type == "HOST_SNAPSHOT":
-            return self._analyze_host(
-                data
-            )
-
-        if event_type == "RESOURCE_STATUS":
-            return self._analyze_resource(
-                data
-            )
-
-        if event_type == "PROCESS_SNAPSHOT":
-            return self._analyze_process(
-                data
-            )
+        if event_type in {"HOST_SNAPSHOT", "RESOURCE_STATUS", "PROCESS_SNAPSHOT", "PROCESS_START", "FILE_ACTIVITY", "SCRIPT_ACTIVITY", "FILE_INDICATOR"}:
+            analyze_event = getattr(self.rule_engine, "analyze_event", None)
+            if callable(analyze_event):
+                return analyze_event(event)
+            if event_type == "HOST_SNAPSHOT":
+                return self._analyze_host(data)
+            if event_type == "RESOURCE_STATUS":
+                return self._analyze_resource(data)
+            if event_type == "PROCESS_SNAPSHOT":
+                return self._analyze_process(data)
 
         self._events_ignored += 1
         self._unsupported_events += 1

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .threat_signals import ThreatSignalEngine
+
 
 class RuleEngine:
     """
@@ -42,6 +44,7 @@ class RuleEngine:
         config: Optional[dict[str, Any]] = None,
     ):
         self.thresholds = self._load_thresholds(config)
+        self.threat_signals = ThreatSignalEngine(config)
 
         self._analyzed_count = 0
         self._detection_count = 0
@@ -149,7 +152,7 @@ class RuleEngine:
             return []
 
         if event.get("event_type") != "HOST_SNAPSHOT":
-            return []
+            return self.threat_signals.analyze_event(event)
 
         data = event.get("data")
 
@@ -399,4 +402,19 @@ class RuleEngine:
             "thresholds": dict(
                 self.thresholds
             ),
+            "threat_signals": self.threat_signals.health_check(),
+        }
+
+    def health_check(self) -> dict[str, Any]:
+        """Expose the existing RuleEngine health contract plus threat telemetry."""
+        threat = self.threat_signals.health_check()
+        return {
+            "component": self.NAME,
+            "version": self.VERSION,
+            "status": "HEALTHY" if threat.get("status") == "HEALTHY" else "DEGRADED",
+            "analyzed": self._analyzed_count,
+            "detections": self._detection_count,
+            "threat_signals": threat,
+            "fail_closed": True,
+            "authorization": "NOT_GRANTED",
         }
