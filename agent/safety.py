@@ -288,6 +288,80 @@ class SafetyCore:
 
         return False
 
+    def authorize_lab_quarantine(
+        self,
+        scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Authorize only the explicitly bounded Quarantine v2 lab canary.
+
+        This is a separate lab capability boundary. It never changes the
+        production ``evaluate`` contract and never grants production
+        authorization.
+        """
+        try:
+            from agent.quarantine.contracts import (
+                CANARY_MARKER,
+                CANARY_MARKER_FILENAME,
+                LAB_CANARY_EXECUTION,
+                canonical_scope_digest,
+            )
+
+            if not isinstance(scope, dict):
+                raise ValueError("scope must be a dict")
+            required = (
+                "incident_id", "requested_action", "idempotency_key", "target", "approved_root",
+                "target_sha256", "requester", "evidence_ref", "decision_digest",
+                "mode", "canary_marker",
+            )
+            if any(not isinstance(scope.get(key), str) or not scope[key].strip() for key in required):
+                raise ValueError("lab scope incomplete")
+            if (scope["requested_action"] != "QUARANTINE" or scope["mode"] != LAB_CANARY_EXECUTION
+                    or scope["canary_marker"] != CANARY_MARKER):
+                raise ValueError("lab canary contract mismatch")
+            for field in ("target_sha256", "decision_digest"):
+                value = scope[field].lower()
+                if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+                    raise ValueError("lab digest invalid")
+
+            with self._lock:
+                if self.safe_mode:
+                    raise PermissionError("SAFETY_CORE_SAFE_MODE")
+                if self.shutdown_requested:
+                    raise PermissionError("SAFETY_CORE_SHUTDOWN_REQUESTED")
+
+            root = Path(scope["approved_root"]).expanduser().resolve(strict=True)
+            target = Path(scope["target"]).expanduser().resolve(strict=True)
+            marker = root / CANARY_MARKER_FILENAME
+            target.relative_to(root)
+            if self.is_protected_path(root) or self.is_protected_path(target):
+                raise PermissionError("PROTECTED_PATH")
+            if root.is_symlink() or target.is_symlink() or not root.is_dir() or not target.is_file():
+                raise PermissionError("LAB_PATH_INVALID")
+            if not marker.is_file() or marker.is_symlink() or marker.read_bytes() != CANARY_MARKER.encode("utf-8"):
+                raise PermissionError("LAB_CANARY_MARKER_INVALID")
+
+            return {
+                "component": "SafetyCore",
+                "version": self.VERSION,
+                "allowed": True,
+                "mode": LAB_CANARY_EXECUTION,
+                "scope_digest": canonical_scope_digest(scope),
+                "production_authorization": "NOT_GRANTED",
+                "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+                "real_world_effect_scope": "ONE_LAB_FILE_ONLY",
+                "fail_closed": True,
+            }
+        except Exception as exc:
+            return {
+                "component": "SafetyCore",
+                "version": self.VERSION,
+                "allowed": False,
+                "mode": "LAB_CANARY_EXECUTION",
+                "reason": type(exc).__name__,
+                "fail_closed": True,
+                "production_authorization": "NOT_GRANTED",
+            }
+
     # =========================================================
     # PROTECTED PATH
     # =========================================================

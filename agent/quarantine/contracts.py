@@ -77,6 +77,7 @@ class QuarantineRequest:
     def scope(self) -> dict[str, str]:
         return {
             "incident_id": self.incident_id,
+            "requested_action": "QUARANTINE",
             "idempotency_key": self.idempotency_key,
             "target": self.target,
             "approved_root": self.approved_root,
@@ -163,7 +164,10 @@ class QuarantineCapabilityIssuer:
         if not isinstance(snapshot, dict) or snapshot.get("safe_mode") or snapshot.get("shutdown_requested"):
             return False
         result = attest(request.scope())
-        if not isinstance(result, dict) or result.get("allowed") is not True or result.get("mode") != LAB_CANARY_EXECUTION:
+        if (not isinstance(result, dict) or result.get("allowed") is not True
+                or result.get("mode") != LAB_CANARY_EXECUTION
+                or result.get("production_authorization") != "NOT_GRANTED"
+                or result.get("lab_authorization") != "QUARANTINE_CAPABILITY_CONSUMED"):
             return False
         supplied_digest = result.get("scope_digest")
         expected_digest = canonical_scope_digest(request.scope())

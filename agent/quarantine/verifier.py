@@ -22,6 +22,8 @@ class QuarantineIndependentVerifier:
                 return self._fail("RECORD_NOT_QUARANTINED")
             if record.get("target_sha256") != target_sha256:
                 return self._fail("TARGET_HASH_MISMATCH")
+            if record.get("requested_action") != "QUARANTINE":
+                return self._fail("ACTION_SCOPE_MISMATCH")
             if evidence_ref is not None and record.get("evidence_ref") != evidence_ref:
                 return self._fail("EVIDENCE_SCOPE_MISMATCH")
             if decision_digest is not None and record.get("decision_digest") != decision_digest:
@@ -53,6 +55,7 @@ class QuarantineIndependentVerifier:
                 "component": "QuarantineIndependentVerifier", "version": self.VERSION,
                 "accepted": True, "verified": True, "verification_outcome": "QUARANTINED_VERIFIED",
                 "quarantine_id": quarantine_id, "incident_id": record["incident_id"],
+                "requested_action": record["requested_action"],
                 "evidence_ref": record["evidence_ref"], "decision_digest": record["decision_digest"],
                 "capability_id": record["capability_id"], "scope_digest": record["scope_digest"],
                 "production_authorization": "NOT_GRANTED",

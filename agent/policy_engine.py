@@ -16,6 +16,8 @@ mandatory before any future privileged action gateway can authorize work.
 
 from threading import RLock
 from typing import Any
+from hashlib import sha256
+import json
 import time
 
 
@@ -98,6 +100,25 @@ class PolicyEngine:
             raise PolicyEngineError("SafetyCore health_snapshot dict bo'lishi kerak")
         return bool(snapshot.get("safe_mode")), bool(snapshot.get("shutdown_requested"))
 
+    @staticmethod
+    def _decision_digest(assessment: dict[str, Any]) -> str:
+        """Canonical digest shared with IndependentVerifier for one decision."""
+        payload = {
+            "incident_id": str(assessment["incident_id"]),
+            "risk_score": int(assessment["risk_score"]),
+            "risk_level": str(assessment["risk_level"]).strip().upper(),
+            "requested_action": str(assessment["requested_action"]).strip().upper(),
+            "policy_outcome": str(assessment["policy_outcome"]),
+            "policy_reason": str(assessment.get("policy_reason", ""))[:128],
+            "recommendation": str(assessment.get("recommendation", ""))[:128],
+            "authorization": assessment.get("authorization"),
+            "action": assessment.get("action"),
+            "safe_mode": bool(assessment.get("safe_mode")),
+            "shutdown_requested": bool(assessment.get("shutdown_requested")),
+        }
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        return sha256(raw).hexdigest()
+
     def _evaluate_one(self, item: dict[str, Any], *, safety: Any) -> dict[str, Any]:
         if not isinstance(item, dict):
             raise PolicyEngineError("risk assessment dict bo'lishi kerak")
@@ -138,7 +159,7 @@ class PolicyEngine:
             reason = "NO_PRIVILEGED_AUTHORIZATION_PATH"
             recommendation = "OBSERVE"
 
-        return {
+        result = {
             "incident_id": incident_id.strip(),
             "risk_score": score,
             "risk_level": level,
@@ -152,6 +173,8 @@ class PolicyEngine:
             "safe_mode": safe_mode,
             "shutdown_requested": shutdown_requested,
         }
+        result["decision_digest"] = self._decision_digest(result)
+        return result
 
     def evaluate(self, risk_result: dict[str, Any], *, safety: Any = None) -> dict[str, Any]:
         """Evaluate risk against deterministic policy. Never authorizes or executes."""

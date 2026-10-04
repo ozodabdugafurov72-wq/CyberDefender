@@ -38,7 +38,9 @@ class LabSafety:
 
     def authorize_lab_quarantine(self, scope: dict[str, str]) -> dict[str, object]:
         return {"allowed": self.allowed, "mode": LAB_CANARY_EXECUTION,
-                "scope_digest": self.scope_digest_override or canonical_scope_digest(scope)}
+                "scope_digest": self.scope_digest_override or canonical_scope_digest(scope),
+                "production_authorization": "NOT_GRANTED",
+                "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED"}
 
 
 def decision_evidence(incident_id: str, digest: str) -> tuple[dict[str, object], dict[str, object]]:
@@ -107,6 +109,7 @@ class QuarantineV2Tests(unittest.TestCase):
         self.assertIsNotNone(record)
         self.assertEqual(record["capability_id"], capability["capability_id"])
         self.assertEqual(record["scope_digest"], capability["scope_digest"])
+        self.assertEqual(record["requested_action"], "QUARANTINE")
         self.assertEqual(record["decision_digest"], request.decision_digest)
         self.assertEqual(record["evidence_ref"], request.evidence_ref)
         self.assertEqual(result["production_authorization"], "NOT_GRANTED")
@@ -136,8 +139,10 @@ class QuarantineV2Tests(unittest.TestCase):
         safety = SafetyStub()
         policy = PolicyEngine().evaluate(risk, safety=safety)
         verification = IndependentVerifier().verify(risk, policy, safety=safety)
-        self.assertNotIn("decision_digest", policy["assessments"][0])
+        self.assertIsInstance(policy["assessments"][0].get("decision_digest"), str)
         self.assertIsInstance(verification["assessments"][0].get("decision_digest"), str)
+        self.assertEqual(policy["assessments"][0]["decision_digest"],
+                         verification["assessments"][0]["decision_digest"])
         request = replace(self._request(key="real-schema"),
                           decision_digest=verification["assessments"][0]["decision_digest"])
         with self.assertRaises(QuarantineContractError):

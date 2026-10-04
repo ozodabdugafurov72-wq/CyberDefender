@@ -209,7 +209,7 @@ class BoundedQuarantineVault:
         except Exception as exc:
             raise QuarantineVaultError("evidence capture failed") from exc
 
-    def begin(self, *, incident_id: str, idempotency_key: str, original_path: str, approved_root: str,
+    def begin(self, *, incident_id: str, requested_action: str, idempotency_key: str, original_path: str, approved_root: str,
               target_sha256: str, target_size: int, requester: str, evidence: dict[str, Any],
               source_identity: dict[str, int], evidence_ref: str, decision_digest: str,
               capability_id: str, scope_digest: str) -> dict[str, Any]:
@@ -218,7 +218,7 @@ class BoundedQuarantineVault:
         object_path = self.objects_dir / quarantine_id / Path(original_path).name
         record = {
             "schema": self.SCHEMA, "version": self.VERSION, "quarantine_id": quarantine_id,
-            "incident_id": incident_id, "idempotency_key": idempotency_key,
+            "incident_id": incident_id, "requested_action": requested_action, "idempotency_key": idempotency_key,
             "original_path": original_path, "approved_root": approved_root,
             "target_sha256": target_sha256, "target_size": target_size, "requester": requester,
             "evidence_quarantine_id": evidence["quarantine_id"], "object_path": str(object_path),
@@ -251,7 +251,8 @@ class BoundedQuarantineVault:
                 "schema": "cd.quarantine.receipt.v2", "quarantine_id": record["quarantine_id"],
                 "state": "QUARANTINED", "target_sha256": record["target_sha256"],
                 "object_sha256": self._sha256(raw), "created_at": self._now(),
-                "incident_id": record["incident_id"], "evidence_ref": record["evidence_ref"],
+                "incident_id": record["incident_id"], "requested_action": record["requested_action"],
+                "evidence_ref": record["evidence_ref"],
                 "decision_digest": record["decision_digest"], "capability_id": record["capability_id"],
                 "scope_digest": record["scope_digest"],
                 "production_authorization": record["production_authorization"],
@@ -317,7 +318,7 @@ class BoundedQuarantineVault:
             linked = all(
                 value.get(field) == record.get(field)
                 for field in (
-                    "incident_id", "evidence_ref", "decision_digest", "capability_id", "scope_digest",
+                    "incident_id", "requested_action", "evidence_ref", "decision_digest", "capability_id", "scope_digest",
                     "production_authorization", "lab_authorization",
                 )
             )

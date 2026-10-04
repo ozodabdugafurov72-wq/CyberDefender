@@ -194,6 +194,7 @@ class BoundedQuarantineExecutor:
             if not self.vault.evidence_vault.verify_evidence(evidence["quarantine_id"]):
                 return self._deny("EVIDENCE_NOT_VERIFIED")
             record = self.vault.begin(incident_id=req.incident_id, idempotency_key=req.idempotency_key,
+                                      requested_action="QUARANTINE",
                                       original_path=str(target), approved_root=str(self.approved_root), target_sha256=actual_hash,
                                       target_size=size, requester=req.requester, evidence=evidence,
                                       source_identity=identity_after_read, evidence_ref=req.evidence_ref,
@@ -217,7 +218,8 @@ class BoundedQuarantineExecutor:
             self.executions += 1
             return {"component": "BoundedQuarantineExecutor", "version": self.VERSION, "accepted": True,
                     "executed": True, "status": "QUARANTINED", "quarantine_id": final["quarantine_id"],
-                    "target_sha256": actual_hash, "verification": verification, "authorization": "NOT_GRANTED",
+                    "target_sha256": actual_hash, "requested_action": "QUARANTINE",
+                    "verification": verification, "authorization": "NOT_GRANTED",
                     "production_authorization": "NOT_GRANTED",
                     "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
                     "capability_id": consumed["capability_id"], "scope_digest": consumed["scope_digest"],
