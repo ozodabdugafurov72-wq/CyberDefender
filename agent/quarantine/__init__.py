@@ -12,6 +12,7 @@ from .contracts import (
 from .executor import BoundedQuarantineExecutor
 from .v2_vault import BoundedQuarantineVault, QuarantineVaultError
 from .verifier import QuarantineIndependentVerifier
+from .coordinator import LabQuarantineCoordinator
 
 __all__ = [
     "SecureQuarantineVault",
@@ -27,4 +28,5 @@ __all__ = [
     "QuarantineRequest",
     "QuarantineVaultError",
     "canonical_scope_digest",
+    "LabQuarantineCoordinator",
 ]
