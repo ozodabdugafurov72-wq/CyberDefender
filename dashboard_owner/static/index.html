@@ -21,6 +21,7 @@
     <button class="nav" data-target="fleet"><i>07</i><span>Fleet & Distribution</span><em id="navFleet">0</em></button>
     <button class="nav" data-target="sensor-plane"><i>08</i><span>Sensor Authority</span><em id="navCanary">—</em></button>
     <button class="nav" data-target="applications-panel"><i>09</i><span>Active Applications</span></button>
+    <button class="nav" data-target="quarantine"><i>10</i><span>Quarantine & Containment</span><em id="navQuarantine">0</em></button>
   </nav>
   <div class="sidebar-bottom">
     <div class="operator"><span class="avatar">O</span><div><b>OWNER / OPERATOR</b><small>Local control session</small></div></div>
@@ -70,6 +71,15 @@
 <section class="split" id="incidents">
  <article class="panel incident-panel"><div class="panel-head"><div><span class="eyebrow">INCIDENT COMMAND</span><h3>Priority Queue</h3></div><span class="count-pill" id="incidentBadge">0 ACTIVE</span></div><div class="incident-summary"><div><span>SECURITY</span><b id="securityIncidentCount">0</b></div><div><span>RESOURCE</span><b id="resourceIncidentCount">0</b></div><div><span>CRITICAL SECURITY</span><b id="criticalIncidentCount">0</b></div></div><div class="incident-filters"><input id="incidentSearch" type="search" maxlength="96" placeholder="Search incident / correlation key"><select id="incidentSeverity"><option value="">ALL SEVERITIES</option><option>CRITICAL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option><option>INFO</option></select><select id="incidentClass"><option value="">ALL CLASSES</option><option>SECURITY</option><option>RESOURCE</option></select><button id="incidentRefresh" type="button">REFRESH</button></div><div class="incident-list" id="incidentList"></div></article>
  <article class="panel posture-panel"><div class="panel-head"><div><span class="eyebrow">POSTURE ANALYSIS</span><h3>Threat vs Resource</h3></div><span class="live-pill">LIVE</span></div><div class="dual-posture"><div class="posture-block"><span>THREAT</span><b id="threatBig">CLEAR</b><small>Security incidents</small></div><div class="posture-divider"></div><div class="posture-block"><span>RESOURCE</span><b id="resourceBig">UNKNOWN</b><small>Endpoint pressure</small></div></div><div class="mini-bars"><div><span>CPU</span><i><b id="cpuBar"></b></i><strong id="cpu">—</strong></div><div><span>MEMORY</span><i><b id="memoryBar"></b></i><strong id="memory">—</strong></div><div><span>DISK</span><i><b id="diskBar"></b></i><strong id="disk">—</strong></div></div></article>
+</section>
+
+<section class="panel quarantine-panel" id="quarantine">
+ <div class="panel-head"><div><span class="eyebrow">CONTAINMENT OVERSIGHT</span><h3>Quarantine & Containment</h3></div><span class="small-pill" id="ownerQuarantineHealth">UNAVAILABLE</span></div>
+ <div class="quarantine-guard">READ ONLY · Production authorization remains NOT_GRANTED. Lab capability consumption is displayed separately. No restore, delete or privileged action is available here.</div>
+ <div class="quarantine-metrics"><div><span>QUARANTINED NOW</span><b id="ownerQTotal">0</b></div><div><span>VERIFIED QUARANTINED</span><b id="ownerQVerified">0</b></div><div><span>PENDING VERIFICATION</span><b id="ownerQPending">0</b></div><div><span>FAILED / UNKNOWN</span><b id="ownerQFailed">0</b></div><div><span>RECOVERY REQUIRED</span><b id="ownerQRecovery">0</b></div><div><span>AFFECTED ENDPOINTS</span><b id="ownerQEndpoints">0</b></div><div><span>HIGH / CRITICAL</span><b id="ownerQCritical">0</b></div><div><span>EVIDENCE INTEGRITY</span><b id="ownerQIntegrity">0</b></div><div><span>SUCCESS RATIO</span><b id="ownerQRatio">—</b></div></div>
+ <div class="quarantine-auth-strip"><div><span>PRODUCTION AUTHORIZATION</span><b id="ownerQProductionAuth">NOT_GRANTED</b></div><div><span>LAB AUTHORIZATION</span><b id="ownerQLabAuth">QUARANTINE_CAPABILITY_CONSUMED</b></div></div>
+ <div class="quarantine-fleet-head"><span>INCIDENT</span><span>ENDPOINT</span><span>TENANT</span><span>RISK</span><span>DETECTION</span><span>CONTAINMENT</span><span>VERIFICATION</span><span>EVIDENCE</span><span>TIME</span></div>
+ <div class="quarantine-fleet-list" id="ownerQuarantineList"><div class="quarantine-empty">No quarantine records</div></div>
 </section>
 
 <section class="split" id="endpoint">

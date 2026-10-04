@@ -135,21 +135,44 @@ if PYWIN32_AVAILABLE:
                 self._runner = ServiceRunner(factory, interval_seconds=5.0, telemetry_client=client,
                                              lifecycle=guard, stop_event=self._stop_event)
                 write_service_log(SERVICE_NAME, "RUNNING")
-                servicemanager.LogInfoMsg("CyberDefender service starting")
+                try:
+                    servicemanager.LogInfoMsg("CyberDefender service starting")
+                except Exception:
+                    # EventLog registration is non-authoritative observability;
+                    # it must never terminate the protection loop.
+                    write_service_log(SERVICE_NAME, "EVENTLOG_UNAVAILABLE")
                 self._runner.run()
+                exit_reason = getattr(self._runner, "exit_reason", "UNKNOWN_EXIT")
+                write_service_log(SERVICE_NAME, "EXIT", exit_reason=exit_reason)
+                if not self._stop_event.is_set():
+                    # A runner that returns without an SCM stop is an
+                    # abnormal lifecycle exit. Keep the crash guard in
+                    # control so it can apply bounded recovery instead of
+                    # silently presenting a clean service stop.
+                    guard.failed("RUNTIME_RETURNED")
+                    return False
                 if not self._runner.cleanup_verified:
                     guard.failed("CLEANUP_UNVERIFIED")
                     return False
                 write_service_log(SERVICE_NAME, "STOPPED")
-                servicemanager.LogInfoMsg("CyberDefender service stopped")
+                try:
+                    servicemanager.LogInfoMsg("CyberDefender service stopped")
+                except Exception:
+                    write_service_log(SERVICE_NAME, "EVENTLOG_UNAVAILABLE")
             except BaseException as exc:
+                write_service_log(
+                    SERVICE_NAME,
+                    "EXIT",
+                    exit_reason=getattr(self._runner, "exit_reason", "UNKNOWN_EXIT"),
+                )
                 write_service_log(SERVICE_NAME, "FATAL", exc=exc)
                 try: servicemanager.LogErrorMsg("CyberDefenderAgent: ATTEMPT_FAILED; see protected lifecycle evidence")
                 except Exception: pass
-                if self._runner is not None and not self._runner.cleanup_verified:
-                    guard.failed("CLEANUP_UNVERIFIED")
-                    return False
-                raise
+                try:
+                    guard.failed("UNHANDLED_EXCEPTION")
+                except Exception:
+                    pass
+                return False
 else:
     class CyberDefenderWindowsService:
         pass

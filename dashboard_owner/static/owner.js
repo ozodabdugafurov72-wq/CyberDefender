@@ -66,7 +66,7 @@
     text("threatBig",d.threat_status||"UNKNOWN"); text("resourceBig",d.resource_posture||"UNKNOWN");
     setBar("cpu","cpuBar",obs.cpu_percent); setBar("memory","memoryBar",obs.memory_percent); setBar("disk","diskBar",obs.disk_percent);
     renderEndpointSurface(d,obs,res,rt); text("footerHost",d.endpoint?.hostname||"LOCAL ENDPOINT"); text("sequence",d.publisher?.sequence??"—"); text("updated",`UPDATED ${ts(d.publisher?.generated_at)}`);
-    renderPipeline(d.security_chain||[]); if(!historyMode) renderLiveIncidents(d.incidents||[]); renderComponents(d.components||[]); renderApplications(d.process_inventory||[]); renderEvents(d.event_groups||[]); renderFleet(d.fleet||{}); renderSensorPlane(d.sensor_plane||{});
+    renderPipeline(d.security_chain||[]); if(!historyMode) renderLiveIncidents(d.incidents||[]); renderComponents(d.components||[]); renderApplications(d.process_inventory||[]); renderEvents(d.event_groups||[]); renderFleet(d.fleet||{}); renderSensorPlane(d.sensor_plane||{}); renderQuarantine(d.quarantine||{});
     const components=d.components||[], totalComponents=components.length;
     const nominalComponents=components.filter(x=>["HEALTHY","SAFE"].includes(String(x.status).toUpperCase())).length;
     const operationalComponents=components.filter(x=>["HEALTHY","SAFE"].includes(String(x.operational_status||x.status).toUpperCase())).length;
@@ -98,6 +98,13 @@
     e.innerHTML=items.slice(0,18).map(x=>`<div class="app-row"><div><b>${esc(x.display_name||"Unknown Process")}</b><small>${esc(x.technical_name||"unknown")} · PID ${esc((x.pids||[]).slice(0,3).join(", ")||"—")}</small></div><span>${esc(x.processes||1)}×</span><span>${esc(n(x.memory_percent,2))}%</span><span>${esc(n(x.cpu_percent,2))}%</span><span class="app-user">${esc(x.username||"SYSTEM / unknown")}</span></div>`).join("");
   }
   function renderEvents(items){ const e=$("events"); if(!e)return; if(!items.length){e.innerHTML=`<div class="evidence-row"><div><b>No evidence events</b><small>Runtime evidence stream is empty.</small></div><span>INFO</span><span>0</span><span class="last">—</span></div>`;return;} e.innerHTML=items.slice(0,18).map(x=>{const raw=String(x.kind||"EVENT"), l=String(x.level||"INFO").toLowerCase();return `<div class="evidence-row"><div><b>${esc(humanEvent(raw))}</b><small>${esc(x.detail||"Runtime evidence")} · code: ${esc(raw)}</small></div><span class="level ${esc(l)}">${esc(String(x.level||"INFO").toUpperCase())}</span><span class="occ">${esc(x.count)}×</span><span class="last">${esc(ts(x.last))}</span></div>`;}).join(""); }
+
+  function renderQuarantine(q){
+    const s=q?.summary||{}; text("ownerQuarantineHealth",q?.status||"UNAVAILABLE"); text("ownerQTotal",s.total_quarantined??0); text("ownerQVerified",s.verified_quarantined??0); text("ownerQPending",s.pending_verification??0); text("ownerQFailed",s.failed_unknown??0); text("ownerQRecovery",s.recovery_required??0); text("ownerQEndpoints",s.affected_endpoints??0); text("ownerQCritical",s.high_critical??0); text("ownerQIntegrity",s.evidence_integrity_problems??0); text("ownerQRatio",s.containment_success_ratio==null?"—":`${(Number(s.containment_success_ratio)*100).toFixed(1)}%`); text("ownerQProductionAuth",q?.production_authorization||"NOT_GRANTED"); text("ownerQLabAuth",q?.lab_authorization||"QUARANTINE_CAPABILITY_CONSUMED"); text("navQuarantine",s.recovery_required?"!":(s.total_quarantined??0));
+    const e=$("ownerQuarantineList"); if(!e)return; const rows=Array.isArray(q?.items)?q.items:[];
+    if(!rows.length){e.innerHTML=`<div class="quarantine-empty">${q?.error_count?"Quarantine records are unavailable or failed integrity validation.":"No quarantine records"}</div>`;return;}
+    e.innerHTML=rows.slice(0,100).map(x=>{const state=String(x.containment_state||"UNKNOWN").toUpperCase();const bad=["FAILED_AFTER_EFFECT","UNKNOWN_AFTER_EFFECT","RECOVERY_REQUIRED"].includes(state)||x.integrity_problem||x.recovery_required;return `<button class="quarantine-fleet-row ${bad?"q-bad":""}" type="button" data-quarantine-id="${esc(x.quarantine_id||"")}"><span>${esc(x.incident_id||"—")}</span><span>${esc(x.endpoint_id||"UNKNOWN")}</span><span>${esc(x.tenant_id||"UNKNOWN")}</span><span>${esc(x.risk_level||"UNKNOWN")}</span><span>${esc(x.detection_type||"UNKNOWN")}</span><span>${esc(state)}</span><span>${esc(x.verification_outcome||"UNKNOWN")}</span><span>${esc(x.evidence_status||"UNKNOWN")}</span><span>${esc(ts(x.timestamp))}</span></button>`;}).join("");
+  }
 
   function renderSensorPlane(sp){
     const c=sp?.canary||{}, ipc=sp?.ipc||{}, p=sp?.parity||{}, ne=sp?.native_enrichment||{};
@@ -347,6 +354,11 @@
     }catch{ openDrawer("Endpoint unavailable","ENDPOINT DETAILS",`<div class="drawer-empty">Structured endpoint state is not available yet. Keep the agent running for at least one cycle.</div>`); }
   }
 
+  async function openQuarantine(id){
+    openDrawer("Loading quarantine…","QUARANTINE DETAILS",`<div class="drawer-empty">Verifying persisted record, receipt and evidence…</div>`);
+    try{const r=await fetch(`/owner/api/quarantine/${encodeURIComponent(id)}`,{cache:"no-store"});if(!r.ok)throw new Error();const x=(await r.json()).quarantine||{};const html=`<div class="detail-grid"><div><span>CONTAINMENT</span><b>${esc(x.containment_state||"UNKNOWN")}</b></div><div><span>VERIFICATION</span><b>${esc(x.verification_outcome||"UNKNOWN")}</b></div><div><span>RISK</span><b>${esc(x.risk_level||"UNKNOWN")} · ${esc(x.risk_score??"—")}</b></div><div><span>EVIDENCE</span><b>${esc(x.evidence_status||"UNKNOWN")}</b></div></div><div class="detail-block"><span>INCIDENT / TARGET</span><b>${esc(x.incident_id||"—")}</b><small>${esc(x.target_name||"UNKNOWN")} · ${esc(x.target_path||"—")}</small></div><div class="detail-block"><span>INTEGRITY SIGNALS</span><b>Object ${x.object_integrity?"✓":"✗"} · Evidence ${x.evidence_integrity?"✓":"✗"} · Receipt ${x.receipt_integrity?"✓":"✗"} · Post-action ${x.post_action_verification?"✓":"✗"}</b><small>SHA-256 ${esc(x.target_sha256||"—")}</small></div><div class="detail-block"><span>AUTHORIZATION</span><b>Production: ${esc(x.production_authorization||"NOT_GRANTED")}</b><small>Lab: ${esc(x.lab_authorization||"NOT_GRANTED")} · capability ${esc(x.capability_id||"—")}</small></div><div class="safety-banner">Read-only audit projection. No dashboard action can invoke quarantine, restore, delete, Policy, Independent Verification or Safety Core.</div>`;openDrawer(x.quarantine_id||id,"QUARANTINE DETAILS",html);}catch{openDrawer("Quarantine unavailable","QUARANTINE DETAILS",`<div class="drawer-empty">The persisted record is unavailable or failed integrity validation.</div>`);}
+  }
+
   async function openDemoScenario(){
     openDrawer("Building safe scenario…","CRITICAL THREAT SIMULATION",`<div class="drawer-empty">Generating synthetic telemetry only…</div>`);
     try{
@@ -371,6 +383,7 @@
 
   document.querySelectorAll(".nav").forEach(b=>b.addEventListener("click",()=>{document.getElementById(b.dataset.target)?.scrollIntoView({behavior:"smooth",block:"start"});document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));b.classList.add("active");}));
   document.addEventListener('click', e=>{
+    const quarantine=e.target.closest?.('[data-quarantine-id]'); if(quarantine){ openQuarantine(quarantine.dataset.quarantineId); return; }
     const incident=e.target.closest?.('[data-incident-id]'); if(incident){ openIncident(incident.dataset.incidentId); return; }
     const action=e.target.closest?.('[data-action]')?.dataset?.action; if(!action) return;
     if(action==='demo-critical-threat'){ openDemoScenario(); return; }

@@ -14,6 +14,7 @@ from pathlib import Path
 from agent.demo_scenario import CriticalThreatDemoScenario
 from dashboard_owner.read_model import OwnerReadModel
 from dashboard_owner.fleet_read_model import FleetReadModel
+from dashboard_owner.quarantine_read_model import QuarantineReadModel
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT = Path(os.environ.get("CYBERDEFENDER_ROOT", Path(__file__).resolve().parent.parent)).resolve()
@@ -37,6 +38,7 @@ MAX_EVENTS = 160
 MAX_EVENT_LOG_TAIL_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_API_QUERY_CHARS = 96
+QUARANTINE_MAX_ITEMS = 100
 
 SECURITY_HEADERS = {
     "Cache-Control": "no-store, max-age=0",
@@ -159,6 +161,33 @@ def owner_read_model() -> OwnerReadModel:
 
 def fleet_read_model() -> FleetReadModel:
     return FleetReadModel(DISTRIBUTION_DB_FILE)
+
+def quarantine_read_model(*, tenant_id: str | None = None) -> QuarantineReadModel:
+    return QuarantineReadModel(tenant_id=tenant_id)
+
+def quarantine_tenant_scope() -> str | None:
+    """Return only the service-configured tenant scope; never trust a query value."""
+    value = os.environ.get("CYBERDEFENDER_TENANT_ID", "").strip()
+    return value[:128] if value else None
+
+def quarantine_snapshot(*, tenant_id: str | None = None, detail: bool = False) -> dict:
+    try:
+        return quarantine_read_model(tenant_id=tenant_id).snapshot(detail=detail)
+    except (OSError, ValueError, TypeError):
+        return {
+            "schema": "cyberdefender.quarantine-read-model.v1", "version": QuarantineReadModel.VERSION,
+            "status": "UNAVAILABLE", "read_only": True, "authoritative": False,
+            "summary": {"total_quarantined": 0, "verified_quarantined": 0, "pending_verification": 0,
+                         "failed_unknown": 0, "recovery_required": 0, "evidence_integrity_problems": 1,
+                         "affected_endpoints": 0, "affected_tenants": 0, "high_critical": 0,
+                         "containment_success_ratio": None}, "items": [], "error_count": 1,
+        }
+
+def quarantine_detail(quarantine_id: str, *, tenant_id: str | None = None) -> dict | None:
+    try:
+        return quarantine_read_model(tenant_id=tenant_id).detail(quarantine_id)
+    except (OSError, ValueError, TypeError):
+        return None
 
 def fleet_snapshot() -> dict:
     try:
@@ -659,6 +688,7 @@ def build_admin_state() -> dict:
         "publisher": owner.get("publisher", {}),
         "safety": owner.get("safety", {}),
         "governance": owner.get("governance", {}),
+        "quarantine": quarantine_snapshot(tenant_id=quarantine_tenant_scope(), detail=True),
     })
 
 
@@ -862,6 +892,7 @@ def build_state() -> dict:
         "events": evidence_events,
         "event_groups": dedupe_events(evidence_events),
         "publisher": snapshot.get("publisher", {}),
+        "quarantine": quarantine_snapshot(detail=False),
     })
 
 
@@ -892,6 +923,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_data((ADMIN_STATIC / "index.html").read_bytes(), "text/html; charset=utf-8"); return
         if path == "/admin/api/state":
             payload = json.dumps(build_admin_state(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self.send_data(payload, "application/json; charset=utf-8"); return
+        if path == "/admin/api/quarantine":
+            payload = json.dumps(quarantine_snapshot(tenant_id=quarantine_tenant_scope(), detail=True), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             self.send_data(payload, "application/json; charset=utf-8"); return
         if path.startswith("/admin/static/"):
             relative = path[len("/admin/static/"):]
@@ -924,6 +958,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send_data(payload, "application/json; charset=utf-8"); return
         if path == "/owner/api/fleet":
             payload = json.dumps(fleet_snapshot(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self.send_data(payload, "application/json; charset=utf-8"); return
+        if path == "/owner/api/quarantine":
+            payload = json.dumps(quarantine_snapshot(detail=False), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self.send_data(payload, "application/json; charset=utf-8"); return
+        if path.startswith("/owner/api/quarantine/"):
+            quarantine_id = unquote(path[len("/owner/api/quarantine/"):])[:128]
+            tenant_scope = quarantine_tenant_scope()
+            if tenant_scope is None:
+                self.send_data(b'{"error":"QUARANTINE_TENANT_SCOPE_REQUIRED"}', "application/json; charset=utf-8", 403); return
+            item = quarantine_detail(quarantine_id, tenant_id=tenant_scope)
+            if item is None:
+                self.send_data(b'{"error":"QUARANTINE_NOT_FOUND"}', "application/json; charset=utf-8", 404); return
+            payload = json.dumps({"status": "OK", "authoritative": False, "read_only": True, "quarantine": item}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             self.send_data(payload, "application/json; charset=utf-8"); return
         if path == "/owner/api/demo/critical-threat":
             payload = json.dumps(CriticalThreatDemoScenario.build(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")

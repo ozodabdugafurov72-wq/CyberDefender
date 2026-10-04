@@ -10,8 +10,14 @@ from agent.service_crash_store import default_root, protected_path
 _LOCK = Lock()
 _MAX_BYTES = 2 * 1024 * 1024
 _BACKUPS = 2
-_EVENTS = frozenset({"READY", "STARTING", "RUNNING", "STOPPED", "FATAL", "LATCHED", "PROBE",
-                     "UNAVAILABLE", "HEALTHY", "DEGRADED", "STALLED", "TELEMETRY_UNAVAILABLE"})
+_EVENTS = frozenset({"READY", "STARTING", "RUNNING", "STOPPED", "EXIT", "FATAL", "LATCHED", "PROBE",
+                     "UNAVAILABLE", "HEALTHY", "DEGRADED", "STALLED", "TELEMETRY_UNAVAILABLE",
+                     "EVENTLOG_UNAVAILABLE"})
+_EXIT_REASONS = frozenset({
+    "STOP_REQUESTED", "SHUTDOWN_REQUESTED", "RUNTIME_RETURNED", "UNHANDLED_EXCEPTION",
+    "RESOURCE_GUARD_TERMINATION", "SERVICE_STOP_EVENT_SET", "COLLECTOR_FAILURE",
+    "TEST_CYCLE_LIMIT", "UNKNOWN_EXIT",
+})
 _EXCEPTIONS = frozenset({"RuntimeError", "ValueError", "TypeError", "OSError", "PermissionError",
                          "TimeoutError", "ConnectionError", "ImportError", "ModuleNotFoundError"})
 
@@ -44,7 +50,8 @@ def _rotate(path: Path) -> None:
         raise  # Do not append beyond the retention bound if rotation fails.
 
 
-def write_service_log(service: str, message: str, *, exc: BaseException | None = None) -> None:
+def write_service_log(service: str, message: str, *, exc: BaseException | None = None,
+                      exit_reason: str | None = None) -> None:
     """Allowlisted, bounded per-service evidence; no arbitrary exception text.
 
     Separate files and an OS exclusive lock serialize rotation across processes.
@@ -57,6 +64,8 @@ def write_service_log(service: str, message: str, *, exc: BaseException | None =
         if exc is not None:
             name=type(exc).__name__
             record["exception_category"]=name if name in _EXCEPTIONS else "OTHER_EXCEPTION"
+        if exit_reason is not None:
+            record["exit_reason"] = exit_reason if exit_reason in _EXIT_REASONS else "UNKNOWN_EXIT"
         raw=json.dumps(record,separators=(",",":"),ensure_ascii=True).encode("ascii")+b"\n"
         if len(raw)>512: return
         with _LOCK:

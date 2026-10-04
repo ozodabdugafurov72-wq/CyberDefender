@@ -60,7 +60,7 @@ def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(
                 if guard.admit():
                     observer(service,"STARTING")
                     result=run_attempt(guard)
-                    if not stop_event.is_set():
+                    if not stop_event.is_set() and not getattr(guard, "_failure_marked", False):
                         guard.failed("CLEANUP_UNVERIFIED" if result is False else "ATTEMPT_FAILED")
                 state=guard.snapshot()["state"]
             except Exception:

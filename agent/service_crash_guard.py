@@ -57,6 +57,8 @@ class CrashGuard:
         self._attached_at = clock()
         self._last_tick = clock()
         self._store_failed = False
+        self._failure_marked = False
+        self.last_failure_code = None
         self.watchdog = None
         if self.record["active_attempt"]:
             self._failure("PREVIOUS_ATTEMPT_INTERRUPTED")
@@ -83,6 +85,8 @@ class CrashGuard:
 
     def _failure(self, code):
         self.allow_optional = False
+        self._failure_marked = True
+        self.last_failure_code = code
         r = self.record
         r["cumulative_failures"] += 1
         r["recent_failures"] = (r["recent_failures"] + [dict(
@@ -112,6 +116,8 @@ class CrashGuard:
                 r["state"] = "STARTING"
             r["generation"] += 1; r["attempts_since_stable"] += 1
             r["active_attempt"] = True; r["clean_stop"] = False
+            self._failure_marked = False
+            self.last_failure_code = None
             self._stable_since = None; self._checks = 0
             self._commit()  # Durable debit must complete before the factory runs.
             if self.watchdog is not None: self.watchdog.begin()
@@ -136,7 +142,11 @@ class CrashGuard:
     def failed(self, code="ATTEMPT_FAILED"):
         with self.lock:
             # Allowlisted reason codes only: never accept an exception string.
-            if code not in {"ATTEMPT_FAILED", "WORK_UNHEALTHY", "CLEANUP_UNVERIFIED"}: code = "ATTEMPT_FAILED"
+            if code not in {
+                "ATTEMPT_FAILED", "WORK_UNHEALTHY", "CLEANUP_UNVERIFIED",
+                "RUNTIME_RETURNED", "UNHANDLED_EXCEPTION", "RESOURCE_GUARD_TERMINATION",
+                "COLLECTOR_FAILURE", "UNKNOWN_EXIT",
+            }: code = "ATTEMPT_FAILED"
             self._failure(code)
             if self.watchdog is not None: self.watchdog.unavailable()
             if code == "CLEANUP_UNVERIFIED": self.record["state"] = "UNAVAILABLE"

@@ -20,6 +20,8 @@ class ServiceRunner:
         self.stop_event = stop_event if stop_event is not None else threading.Event()
         self.lifecycle = lifecycle
         self.cleanup_verified = False
+        self.exit_reason = "NOT_STARTED"
+        self.exit_detail: str | None = None
         self.runtime = None
         self.cycles = 0
         self.failures = 0
@@ -70,6 +72,7 @@ class ServiceRunner:
             pass
 
     def stop(self) -> None:
+        self.exit_reason = "SERVICE_STOP_EVENT_SET"
         self.stop_event.set()
 
     def _emit_heartbeat(self, runtime: Any, client: Any) -> None:
@@ -152,8 +155,11 @@ class ServiceRunner:
 
     def run(self, *, max_cycles: int | None = None) -> None:
         runtime = None
+        self.exit_reason = "RUNNING"
+        self.exit_detail = None
         try:
             if self.stop_event.is_set():
+                self.exit_reason = "STOP_REQUESTED"
                 self.cleanup_verified = True
                 return
             runtime = self.runtime_factory()
@@ -250,10 +256,20 @@ class ServiceRunner:
                     self._emit_heartbeat(runtime, client)
 
                 if max_cycles is not None and self.cycles >= max_cycles:
+                    self.exit_reason = "TEST_CYCLE_LIMIT"
                     break
                 self.stop_event.wait(self.interval_seconds)
+            if self.exit_reason == "RUNNING":
+                self.exit_reason = (
+                    "SERVICE_STOP_EVENT_SET"
+                    if self.stop_event.is_set()
+                    else "RUNTIME_RETURNED"
+                )
+        except BaseException as exc:
+            self.exit_reason = "UNHANDLED_EXCEPTION"
+            self.exit_detail = type(exc).__name__
+            raise
         finally:
-            self.stop_event.set()
             if self._heartbeat_watchdog is not None:
                 self._heartbeat_watchdog.join(timeout=max(1.0, self.interval_seconds * 2.0))
             if runtime is None:
