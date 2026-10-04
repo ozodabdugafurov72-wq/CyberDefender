@@ -155,6 +155,15 @@ class SecurityEventBridge:
                     )
                     or []
                 ),
+
+                # Provenance is already integrity-bound by SecurityEvent.
+                # Preserve only the bounded linkage metadata supplied by the
+                # runtime so downstream correlation can bind a lab response
+                # to the exact observed activity without granting authority.
+                "provenance": dict(
+                    getattr(event, "provenance", {})
+                    or {}
+                ),
             },
         }
 

@@ -391,6 +391,22 @@ class CorrelationEngine:
         except (TypeError, ValueError):
             event_timestamp = time.time()
 
+        raw_provenance = data.get("provenance")
+        provenance = {}
+        if isinstance(raw_provenance, dict):
+            # Keep only bounded linkage fields.  Provenance is evidence, not
+            # an authorization input, and must never carry arbitrary secrets.
+            for key in (
+                "activity_event_id",
+                "target",
+                "approved_root",
+                "lab_canary",
+                "execution_mode",
+            ):
+                value = raw_provenance.get(key)
+                if isinstance(value, (str, bool)):
+                    provenance[key] = str(value)[:512] if isinstance(value, str) else value
+
         return {
             "timestamp": event_timestamp,
             "source_event_id": source_event_id,
@@ -431,6 +447,7 @@ class CorrelationEngine:
             "tenant_id": data.get(
                 "tenant_id"
             ),
+            "provenance": provenance,
         }
 
     # =========================================================

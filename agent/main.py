@@ -72,6 +72,13 @@ from agent.sensors.process import (
     ProcessSensor,
 )
 
+from agent.sensors.file_activity_collector import (
+    DEFAULT_LAB_FILE_ACTIVITY_ROOT,
+    LAB_FILE_ACTIVITY_ENABLE_MARKER,
+    LAB_FILE_ACTIVITY_ENABLE_MARKER_FILENAME,
+    FileActivityCollector,
+)
+
 from agent.network import (
     AsyncPassiveNetworkInventory,
     PassiveNetworkInventory,
@@ -150,6 +157,10 @@ from agent.detector import (
     DetectionEngine,
 )
 
+from agent.detection.detector import (
+    Detector as ThreatTelemetryDetector,
+)
+
 from agent.detection.rule_adapter import (
     RuleAdapter,
 )
@@ -200,6 +211,14 @@ from agent.storage.durable_spool import (
 
 from agent.storage.durable_incident_outbox import (
     DurableIncidentOutbox,
+)
+
+from agent.quarantine import (
+    BoundedQuarantineExecutor,
+    BoundedQuarantineVault,
+    LAB_CANARY_EXECUTION,
+    LabQuarantineCoordinator,
+    QuarantineCapabilityIssuer,
 )
 
 from agent.core.runtime_security_pipeline import (
@@ -404,6 +423,21 @@ class CyberDefenderRuntime:
         self.network_inventory_failures = 0
         self.network_inventory_sample_every_cycles = 5
         self.network_inventory_deadline_seconds = 5
+
+        # Explicit, marker-gated lab filesystem observation.  The collector
+        # is absent unless the fixed LAB root is deliberately enabled.
+        self.file_activity_collector: FileActivityCollector | None = None
+        self.threat_telemetry_detector: ThreatTelemetryDetector | None = None
+        self.file_activity_events_seen = 0
+        self.file_activity_events_dropped = 0
+        self.file_activity_failures = 0
+        self.last_file_activity_events: list[dict[str, Any]] = []
+        self.last_file_activity_detections: list[dict[str, Any]] = []
+        self.last_file_activity_trigger: tuple[dict[str, Any], dict[str, Any]] | None = None
+        self.last_lab_quarantine_result: dict[str, Any] | None = None
+        self.lab_quarantine_coordinator: LabQuarantineCoordinator | None = None
+        self.lab_quarantine_attempts: dict[str, int] = {}
+        self.lab_file_activity_enabled = False
 
         self.last_process_graph_result: dict[str, Any] | None = None
         # Bounded, display-only inventory derived from the authoritative
@@ -1578,6 +1612,89 @@ class CyberDefenderRuntime:
             )
         )
 
+        self._initialize_lab_file_activity()
+
+    def _initialize_lab_file_activity(self) -> None:
+        """Initialize only the explicit fixed-root LAB observation plane."""
+        if not self._env_enabled("CYBERDEFENDER_LAB_FILE_ACTIVITY_ENABLED"):
+            return
+        configured_root = str(
+            os.getenv("CYBERDEFENDER_LAB_FILE_ACTIVITY_ROOT")
+            or DEFAULT_LAB_FILE_ACTIVITY_ROOT
+        ).strip()
+        if not configured_root:
+            return
+        try:
+            # Preserve the lexical path until FileActivityCollector performs
+            # its reparse/symlink checks; resolving first could conceal a
+            # substituted lab root.
+            root = Path(os.path.abspath(str(Path(configured_root).expanduser())))
+            if os.name == "nt":
+                expected = Path(os.path.abspath(str(DEFAULT_LAB_FILE_ACTIVITY_ROOT)))
+                if str(root).casefold() != str(expected).casefold():
+                    self.file_activity_failures += 1
+                    return
+            enable_marker = root / LAB_FILE_ACTIVITY_ENABLE_MARKER_FILENAME
+            if (
+                not enable_marker.is_file()
+                or enable_marker.read_text(encoding="utf-8") != LAB_FILE_ACTIVITY_ENABLE_MARKER
+            ):
+                self.file_activity_failures += 1
+                return
+            self.file_activity_collector = FileActivityCollector(
+                root,
+                endpoint_id=self._local_endpoint_id(),
+                tenant_id="lab-tenant",
+                host_id=socket.gethostname(),
+            )
+            self.threat_telemetry_detector = ThreatTelemetryDetector(
+                self.rule_adapter.engine if self.rule_adapter is not None else None
+            )
+            if self.threat_telemetry_detector is None:
+                self.file_activity_failures += 1
+                self.file_activity_collector = None
+                return
+            self.lab_file_activity_enabled = True
+
+            if self._env_enabled("CYBERDEFENDER_LAB_AUTO_QUARANTINE_ENABLED"):
+                vault_root = Path(
+                    os.getenv(
+                        "CYBERDEFENDER_LAB_QUARANTINE_VAULT",
+                        r"C:\CD\LAB\LiveRansomwareVault",
+                    )
+                ).expanduser().resolve(strict=False)
+                issuer = QuarantineCapabilityIssuer()
+                vault = BoundedQuarantineVault(
+                    vault_root,
+                    max_records=16,
+                    max_bytes=16 * 1024 * 1024,
+                )
+                executor = BoundedQuarantineExecutor(
+                    vault,
+                    issuer,
+                    approved_root=root,
+                )
+                self.lab_quarantine_coordinator = LabQuarantineCoordinator(
+                    detector=self.threat_telemetry_detector,
+                    correlation_engine=self.correlation_engine,
+                    risk_engine=self.risk_engine,
+                    attack_graph=self.attack_graph,
+                    policy_engine=self.policy_engine,
+                    independent_verifier=self.independent_verifier,
+                    safety=self.safety,
+                    issuer=issuer,
+                    executor=executor,
+                    approved_root=root,
+                    requester="CyberDefenderAgent-LAB",
+                )
+        except Exception:
+            # Lab telemetry is optional.  A bad marker/root/configuration must
+            # never stop the core protection runtime or grant authority.
+            self.file_activity_failures += 1
+            self.file_activity_collector = None
+            self.threat_telemetry_detector = None
+            self.lab_quarantine_coordinator = None
+
     # ========================================================
     # TRUSTED EVENT CONSUMER
     # ========================================================
@@ -1925,6 +2042,141 @@ class CyberDefenderRuntime:
             )
 
             return None
+
+    # ========================================================
+    # LAB FILE ACTIVITY OBSERVATION
+    # ========================================================
+
+    def collect_file_activity(
+        self,
+        current_event_types: set[str],
+    ) -> list[dict[str, Any]]:
+        """Poll the explicit LAB root and route raw activity to detection."""
+        collector = self.file_activity_collector
+        detector = self.threat_telemetry_detector
+        if collector is None or detector is None:
+            return []
+        try:
+            events = collector.poll()
+            if not isinstance(events, list):
+                raise ValueError("file activity collector returned invalid result")
+            bounded_events = [row for row in events[:64] if isinstance(row, dict)]
+            self.file_activity_events_seen += len(bounded_events)
+            self.last_file_activity_events = bounded_events[-16:]
+            self.last_file_activity_detections = []
+            for event in bounded_events:
+                detections = detector.handle_event(event)
+                if not isinstance(detections, list):
+                    continue
+                for detection in detections[:32]:
+                    if not isinstance(detection, dict):
+                        continue
+                    detection_for_event = dict(detection)
+                    event_data = event.get("data", {})
+                    if isinstance(event_data, dict):
+                        target = event_data.get("path") or event_data.get("new_path")
+                        if isinstance(target, str) and target.strip():
+                            detection_for_event["provenance"] = {
+                                "activity_event_id": str(event.get("event_id", ""))[:256],
+                                "target": target[:512],
+                                "approved_root": str(event_data.get("approved_root", ""))[:512],
+                                "lab_canary": event_data.get("lab_canary") is True,
+                                "execution_mode": str(event_data.get("execution_mode", ""))[:64],
+                            }
+                    self.last_file_activity_detections.append(dict(detection_for_event))
+                    self.process_detection(
+                        detection=detection_for_event,
+                        source="FileActivityCollector",
+                        current_event_types=current_event_types,
+                    )
+                    if detection_for_event.get("type") == "RANSOMWARE_BEHAVIOR":
+                        self.last_file_activity_trigger = (dict(event), dict(detection_for_event))
+            if len(self.last_file_activity_detections) > 32:
+                self.last_file_activity_detections = self.last_file_activity_detections[-32:]
+            return bounded_events
+        except Exception as exc:
+            self.file_activity_failures += 1
+            self.last_error = f"file_activity:{type(exc).__name__}"
+            return []
+
+    def run_lab_file_response(self) -> dict[str, Any] | None:
+        """Use the existing coordinator only for an explicit LAB threat."""
+        coordinator = self.lab_quarantine_coordinator
+        trigger = self.last_file_activity_trigger
+        engine = self.correlation_engine
+        if coordinator is None or trigger is None or engine is None:
+            return None
+        try:
+            incidents = engine.get_recent_incidents(limit=20)
+            telemetry, detection = trigger
+            trigger_event_id = telemetry.get("event_id")
+            trigger_data = telemetry.get("data", {})
+            trigger_target = (
+                trigger_data.get("path") or trigger_data.get("new_path")
+                if isinstance(trigger_data, dict)
+                else None
+            )
+            incident = next(
+                (
+                    row for row in incidents
+                    if isinstance(row, dict)
+                    and "RANSOMWARE_BEHAVIOR" in row.get("detection_types", [])
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("type") == "RANSOMWARE_BEHAVIOR"
+                        and isinstance(item.get("provenance"), dict)
+                        and item["provenance"].get("activity_event_id") == trigger_event_id
+                        and item["provenance"].get("target") == trigger_target
+                        for item in row.get("detections", [])
+                    )
+                ),
+                None,
+            )
+            if not isinstance(incident, dict):
+                return None
+            incident_id = incident.get("incident_id")
+            if not isinstance(incident_id, str) or not incident_id.strip():
+                return None
+            attempts = self.lab_quarantine_attempts.get(incident_id, 0)
+            if attempts >= 1:
+                return self.last_lab_quarantine_result
+            self.lab_quarantine_attempts[incident_id] = attempts + 1
+            if len(self.lab_quarantine_attempts) > 16:
+                oldest = next(iter(self.lab_quarantine_attempts))
+                self.lab_quarantine_attempts.pop(oldest, None)
+
+            data = dict(telemetry.get("data", {})) if isinstance(telemetry.get("data"), dict) else {}
+            data.update({
+                "target": data.get("path") or data.get("new_path"),
+                "approved_root": str(coordinator.approved_root),
+                "lab_canary": True,
+                "execution_mode": LAB_CANARY_EXECUTION,
+                "requested_action": "QUARANTINE",
+                "evidence_ref": f"evidence://{incident_id}",
+            })
+            response_event = dict(telemetry)
+            response_event["data"] = data
+            result = coordinator.run(
+                response_event,
+                operator_approved=True,
+                prepared_detection=detection,
+                prepared_incident=incident,
+            )
+            self.last_lab_quarantine_result = result if isinstance(result, dict) else {
+                "status": "DENIED",
+                "reason": "INVALID_COORDINATOR_RESULT",
+                "production_authorization": "NOT_GRANTED",
+            }
+            return self.last_lab_quarantine_result
+        except Exception as exc:
+            self.last_lab_quarantine_result = {
+                "status": "DENIED",
+                "reason": "LAB_RESPONSE_FAILED",
+                "error": type(exc).__name__,
+                "production_authorization": "NOT_GRANTED",
+                "fail_closed": True,
+            }
+            return self.last_lab_quarantine_result
 
     # ========================================================
     # PROCESS GRAPH
@@ -2687,6 +2939,26 @@ class CyberDefenderRuntime:
                     f"{field}"
                 )
 
+        provenance = detection.get("provenance")
+        if isinstance(provenance, dict):
+            # Only bounded, non-secret lab linkage fields cross the canonical
+            # event boundary.  Raw command lines and arbitrary detector data
+            # are never copied into provenance.
+            provenance = {
+                key: value
+                for key, value in provenance.items()
+                if key in {
+                    "activity_event_id",
+                    "target",
+                    "approved_root",
+                    "lab_canary",
+                    "execution_mode",
+                }
+                and isinstance(value, (str, bool))
+            }
+        else:
+            provenance = None
+
         return SecurityEvent(
             event_type=str(
                 detection["type"]
@@ -2723,6 +2995,7 @@ class CyberDefenderRuntime:
                 and str(detection.get("sensor_id")).strip()
                 else None
             ),
+            provenance=provenance,
         )
 
     # ========================================================
@@ -3175,6 +3448,13 @@ class CyberDefenderRuntime:
 
                 return
 
+            # Optional, fixed-root LAB observation is sampled after the
+            # authoritative host snapshot and before the normal detection
+            # stages.  It is disabled unless the service environment was
+            # explicitly marker-enabled; failures remain isolated from core
+            # protection and never perform a response action here.
+            self.collect_file_activity(current_event_types)
+
             # =================================================
             # PROCESS GRAPH OBSERVATION
             # =================================================
@@ -3358,6 +3638,12 @@ class CyberDefenderRuntime:
                         "Trusted events dispatch "
                         "failed; pending events preserved."
                     )
+
+            # The lab response coordinator consumes only an incident already
+            # produced by the trusted EventBus/correlation path.  It is
+            # deliberately before the general read-only risk/policy display
+            # stages so its own real gates are visible in this cycle.
+            self.run_lab_file_response()
 
             # =================================================
             # ATTACK GRAPH
@@ -4181,6 +4467,76 @@ class CyberDefenderRuntime:
                 "error": type(exc).__name__,
             }
 
+        # The file collector and lab coordinator are optional, explicitly
+        # marker-gated surfaces.  They are observable but never part of the
+        # critical bootstrap set, so an absent lab mode cannot degrade core
+        # protection or fabricate authorization.
+        if self.file_activity_collector is None:
+            health["file_activity_collector"] = {
+                "component": "FileActivityCollector",
+                "status": "DISABLED",
+                "enabled": False,
+                "authority": "NONE",
+                "authorization": "NOT_GRANTED",
+                "response_actions": False,
+            }
+        else:
+            try:
+                collector_health = self.file_activity_collector.health_check()
+                health["file_activity_collector"] = (
+                    collector_health
+                    if isinstance(collector_health, dict)
+                    else {"status": "INVALID_HEALTH_RESPONSE"}
+                )
+            except Exception as exc:
+                health["file_activity_collector"] = {
+                    "component": "FileActivityCollector",
+                    "status": "DEGRADED",
+                    "authority": "NONE",
+                    "authorization": "NOT_GRANTED",
+                    "error": type(exc).__name__,
+                }
+        if self.lab_quarantine_coordinator is None:
+            health["lab_quarantine"] = {
+                "component": "LabQuarantineCoordinator",
+                "status": "DISABLED",
+                "mode": LAB_CANARY_EXECUTION,
+                "production_authorization": "NOT_GRANTED",
+                "fail_closed": True,
+            }
+        else:
+            try:
+                coordinator_health = self.lab_quarantine_coordinator.health_check()
+                health["lab_quarantine"] = (
+                    coordinator_health
+                    if isinstance(coordinator_health, dict)
+                    else {"status": "INVALID_HEALTH_RESPONSE"}
+                )
+            except Exception as exc:
+                health["lab_quarantine"] = {
+                    "component": "LabQuarantineCoordinator",
+                    "status": "DEGRADED",
+                    "mode": LAB_CANARY_EXECUTION,
+                    "production_authorization": "NOT_GRANTED",
+                    "fail_closed": True,
+                    "error": type(exc).__name__,
+                }
+        health["file_activity_runtime"] = {
+            "enabled": self.lab_file_activity_enabled,
+            "events_seen": self.file_activity_events_seen,
+            "events_dropped": self.file_activity_events_dropped,
+            "failures": self.file_activity_failures,
+            "last_events": list(self.last_file_activity_events[-8:]),
+            "last_detections": list(self.last_file_activity_detections[-8:]),
+            "last_lab_quarantine_result": (
+                dict(self.last_lab_quarantine_result)
+                if isinstance(self.last_lab_quarantine_result, dict)
+                else None
+            ),
+            "authority": "NONE",
+            "production_authorization": "NOT_GRANTED",
+        }
+
         components = {
 
             "key_manager":
@@ -4567,6 +4923,22 @@ class CyberDefenderRuntime:
                     if isinstance(self.last_network_inventory, dict)
                     else {}
                 ),
+                "file_activity": {
+                    "enabled": self.lab_file_activity_enabled,
+                    "events_seen": self.file_activity_events_seen,
+                    "events_dropped": self.file_activity_events_dropped,
+                    "failures": self.file_activity_failures,
+                    "last_events": list(self.last_file_activity_events[-8:]),
+                    "last_detections": list(self.last_file_activity_detections[-8:]),
+                },
+                "lab_quarantine": (
+                    dict(self.last_lab_quarantine_result)
+                    if isinstance(self.last_lab_quarantine_result, dict)
+                    else {
+                        "status": "DISABLED",
+                        "production_authorization": "NOT_GRANTED",
+                    }
+                ),
             }
 
             
@@ -4932,6 +5304,13 @@ class CyberDefenderRuntime:
             except Exception:
                 # Optional read-only telemetry must never block shutdown.
                 pass
+
+        # The bounded file collector owns no external handles, but clear the
+        # optional lab plane on shutdown so a later runtime instance cannot
+        # accidentally reuse in-memory activity state.
+        self.file_activity_collector = None
+        self.threat_telemetry_detector = None
+        self.lab_quarantine_coordinator = None
 
         repository = self.data_repository
         self.data_repository = None

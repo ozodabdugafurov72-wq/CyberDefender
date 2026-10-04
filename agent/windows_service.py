@@ -43,6 +43,54 @@ def configure_machine_environment() -> dict[str, Path]:
     os.environ["CYBERDEFENDER_ENDPOINT_ID"] = paths["endpoint_id"].read_text(encoding="ascii").strip()
     os.environ["CYBERDEFENDER_DISTRIBUTION_DB"] = str(paths["distribution_db"])
     os.environ["CYBERDEFENDER_FLEET_TOKEN_FILE"] = str(paths["fleet_token"])
+    # Clear lab-only toggles before evaluating the fixed marker contract so a
+    # recycled service process cannot retain a stale enablement decision.
+    for _name in (
+        "CYBERDEFENDER_LAB_FILE_ACTIVITY_ENABLED",
+        "CYBERDEFENDER_LAB_FILE_ACTIVITY_ROOT",
+        "CYBERDEFENDER_LAB_AUTO_QUARANTINE_ENABLED",
+        "CYBERDEFENDER_LAB_QUARANTINE_VAULT",
+    ):
+        os.environ.pop(_name, None)
+    # LAB file observation is opt-in through fixed-root, operator-created
+    # marker files.  No arbitrary environment path can enable it in the
+    # installed service, and auto-containment has a separate marker.
+    try:
+        from agent.sensors.file_activity_collector import (
+            DEFAULT_LAB_FILE_ACTIVITY_ROOT,
+            FILE_ACTIVITY_CANARY_MARKER,
+            FILE_ACTIVITY_CANARY_MARKER_FILENAME,
+            QUARANTINE_CANARY_MARKER,
+            QUARANTINE_CANARY_MARKER_FILENAME,
+            LAB_AUTO_QUARANTINE_ENABLE_MARKER,
+            LAB_AUTO_QUARANTINE_ENABLE_MARKER_FILENAME,
+            LAB_FILE_ACTIVITY_ENABLE_MARKER,
+            LAB_FILE_ACTIVITY_ENABLE_MARKER_FILENAME,
+        )
+        lab_root = DEFAULT_LAB_FILE_ACTIVITY_ROOT
+        enable_marker = lab_root / LAB_FILE_ACTIVITY_ENABLE_MARKER_FILENAME
+        canary_marker = lab_root / FILE_ACTIVITY_CANARY_MARKER_FILENAME
+        if (
+            enable_marker.is_file()
+            and enable_marker.read_text(encoding="utf-8") == LAB_FILE_ACTIVITY_ENABLE_MARKER
+            and canary_marker.is_file()
+            and canary_marker.read_text(encoding="utf-8") == FILE_ACTIVITY_CANARY_MARKER
+        ):
+            os.environ["CYBERDEFENDER_LAB_FILE_ACTIVITY_ENABLED"] = "1"
+            os.environ["CYBERDEFENDER_LAB_FILE_ACTIVITY_ROOT"] = str(lab_root)
+            auto_marker = lab_root / LAB_AUTO_QUARANTINE_ENABLE_MARKER_FILENAME
+            quarantine_marker = lab_root / QUARANTINE_CANARY_MARKER_FILENAME
+            if (
+                auto_marker.is_file()
+                and auto_marker.read_text(encoding="utf-8") == LAB_AUTO_QUARANTINE_ENABLE_MARKER
+                and quarantine_marker.is_file()
+                and quarantine_marker.read_text(encoding="utf-8") == QUARANTINE_CANARY_MARKER
+            ):
+                os.environ["CYBERDEFENDER_LAB_AUTO_QUARANTINE_ENABLED"] = "1"
+                os.environ["CYBERDEFENDER_LAB_QUARANTINE_VAULT"] = str(lab_root.parent / "LiveRansomwareVault")
+    except Exception:
+        os.environ.pop("CYBERDEFENDER_LAB_FILE_ACTIVITY_ENABLED", None)
+        os.environ.pop("CYBERDEFENDER_LAB_AUTO_QUARANTINE_ENABLED", None)
     return paths
 
 

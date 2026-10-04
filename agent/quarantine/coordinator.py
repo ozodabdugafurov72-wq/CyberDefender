@@ -197,7 +197,14 @@ class LabQuarantineCoordinator:
             return (None, None, "EVIDENCE_REFERENCE_REQUIRED", "", "")
         return root, target, target_sha256, evidence_ref, ""
 
-    def run(self, telemetry_event: dict[str, Any], *, operator_approved: bool = False) -> dict[str, Any]:
+    def run(
+        self,
+        telemetry_event: dict[str, Any],
+        *,
+        operator_approved: bool = False,
+        prepared_detection: dict[str, Any] | None = None,
+        prepared_incident: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Process one marked telemetry event; every failure is fail-closed."""
         started = time.time()
         self.runs += 1
@@ -230,10 +237,46 @@ class LabQuarantineCoordinator:
             )
         root, target, target_sha256, evidence_ref, _ = scope
         try:
-            detections = self.detector.handle_event(telemetry_event)
-            if not isinstance(detections, list) or len(detections) != 1 or not isinstance(detections[0], dict):
-                return self._failure("DETECTION", "EXACTLY_ONE_CANARY_DETECTION_REQUIRED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
-            detection = dict(detections[0])
+            if prepared_detection is not None or prepared_incident is not None:
+                if not isinstance(prepared_detection, dict) or not isinstance(prepared_incident, dict):
+                    return self._failure("DETECTION", "PREPARED_PIPELINE_INPUT_INVALID", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                if prepared_detection.get("type") != "RANSOMWARE_BEHAVIOR":
+                    return self._failure("DETECTION", "PREPARED_THREAT_DETECTION_REQUIRED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                prepared_provenance = prepared_detection.get("provenance")
+                if (
+                    not isinstance(prepared_provenance, dict)
+                    or prepared_provenance.get("activity_event_id") != event_id
+                    or prepared_provenance.get("target") != str(target)
+                    or prepared_provenance.get("lab_canary") is not True
+                    or prepared_provenance.get("execution_mode") != LAB_CANARY_EXECUTION
+                ):
+                    return self._failure("DETECTION", "PREPARED_DETECTION_SCOPE_MISMATCH", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                if prepared_incident.get("event_type") != "INCIDENT":
+                    return self._failure("CORRELATION", "PREPARED_INCIDENT_REQUIRED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                incident_detections = prepared_incident.get("detections", [])
+                if not isinstance(incident_detections, list) or not any(
+                    isinstance(row, dict) and row.get("type") == "RANSOMWARE_BEHAVIOR"
+                    for row in incident_detections
+                ):
+                    return self._failure("CORRELATION", "PREPARED_INCIDENT_THREAT_MISMATCH", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                if not any(
+                    isinstance(row, dict)
+                    and row.get("type") == "RANSOMWARE_BEHAVIOR"
+                    and isinstance(row.get("provenance"), dict)
+                    and row["provenance"].get("activity_event_id") == event_id
+                    and row["provenance"].get("target") == str(target)
+                    and row.get("tenant_id") in {None, tenant_id}
+                    and row.get("host_id") in {None, data.get("host_id", endpoint_id)}
+                    for row in incident_detections
+                ):
+                    return self._failure("CORRELATION", "PREPARED_INCIDENT_SCOPE_MISMATCH", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                detection = dict(prepared_detection)
+                incident_event = dict(prepared_incident)
+            else:
+                detections = self.detector.handle_event(telemetry_event)
+                if not isinstance(detections, list) or len(detections) != 1 or not isinstance(detections[0], dict):
+                    return self._failure("DETECTION", "EXACTLY_ONE_CANARY_DETECTION_REQUIRED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                detection = dict(detections[0])
             detection.update({
                 "tenant_id": data.get("tenant_id", "lab-tenant"),
                 "host_id": data.get("host_id", endpoint_id),
@@ -241,17 +284,18 @@ class LabQuarantineCoordinator:
                 "target": str(target),
                 "approved_root": str(root),
             })
-            detection_event = {
-                "event_type": "DETECTION",
-                "event_id": event_id,
-                "timestamp": telemetry_event.get("timestamp", time.time()),
-                "source": "LabQuarantineCoordinator",
-                "severity": detection.get("severity", "CRITICAL"),
-                "data": detection,
-            }
-            incident_event = self.correlation_engine.ingest(detection_event, strict=True)
-            if not isinstance(incident_event, dict) or incident_event.get("event_type") != "INCIDENT":
-                return self._failure("CORRELATION", "INCIDENT_NOT_CREATED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+            if prepared_detection is None and prepared_incident is None:
+                detection_event = {
+                    "event_type": "DETECTION",
+                    "event_id": event_id,
+                    "timestamp": telemetry_event.get("timestamp", time.time()),
+                    "source": "LabQuarantineCoordinator",
+                    "severity": detection.get("severity", "CRITICAL"),
+                    "data": detection,
+                }
+                incident_event = self.correlation_engine.ingest(detection_event, strict=True)
+                if not isinstance(incident_event, dict) or incident_event.get("event_type") != "INCIDENT":
+                    return self._failure("CORRELATION", "INCIDENT_NOT_CREATED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
             incident_id = incident_event.get("incident_id")
             if not isinstance(incident_id, str) or not incident_id.strip():
                 return self._failure("CORRELATION", "INCIDENT_ID_MISSING", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
