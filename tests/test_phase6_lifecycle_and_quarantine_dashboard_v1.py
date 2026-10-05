@@ -209,8 +209,11 @@ class QuarantineDashboardReadModelTests(unittest.TestCase):
         (self.root / CANARY_MARKER_FILENAME).write_text(CANARY_MARKER, encoding="utf-8")
         self.vault_root = self.base / "vault"
         self.vault = BoundedQuarantineVault(self.vault_root, max_records=64, max_bytes=8 * 1024 * 1024)
+        self.previous_vaults = QuarantineReadModel.APPROVED_VAULTS
+        QuarantineReadModel.APPROVED_VAULTS = (("test", self.vault_root),)
 
     def tearDown(self) -> None:
+        QuarantineReadModel.APPROVED_VAULTS = self.previous_vaults
         self.temp.cleanup()
 
     def _verified_record(self) -> dict[str, object]:
@@ -300,8 +303,10 @@ class QuarantineDashboardReadModelTests(unittest.TestCase):
         import dashboard_owner.server as server
         previous = os.environ.get("CYBERDEFENDER_LAB_QUARANTINE_VAULT")
         previous_tenant = os.environ.get("CYBERDEFENDER_TENANT_ID")
+        previous_vaults = QuarantineReadModel.APPROVED_VAULTS
         os.environ["CYBERDEFENDER_LAB_QUARANTINE_VAULT"] = str(self.vault_root)
         os.environ["CYBERDEFENDER_TENANT_ID"] = "UNKNOWN"
+        QuarantineReadModel.APPROVED_VAULTS = (("test", self.vault_root),)
         try:
             owner = server.quarantine_snapshot(detail=False)
             admin = server.quarantine_snapshot(detail=True)
@@ -326,6 +331,7 @@ class QuarantineDashboardReadModelTests(unittest.TestCase):
                 os.environ.pop("CYBERDEFENDER_TENANT_ID", None)
             else:
                 os.environ["CYBERDEFENDER_TENANT_ID"] = previous_tenant
+            QuarantineReadModel.APPROVED_VAULTS = previous_vaults
 
 
 if __name__ == "__main__":
