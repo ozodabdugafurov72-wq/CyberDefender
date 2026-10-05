@@ -171,6 +171,9 @@ class BoundedQuarantineExecutor:
                         or not same_root
                         or not same_target):
                     return self._deny("DUPLICATE_IDEMPOTENCY_CONFLICT")
+                requested_attribution = req.attribution()
+                if any(existing.get(key) != value for key, value in requested_attribution.items()):
+                    return self._deny("DUPLICATE_ATTRIBUTION_CONFLICT")
                 if existing.get("state") != "QUARANTINED":
                     return self._deny("AMBIGUOUS_EXISTING_RECORD")
                 verification = self.verifier.verify(existing["quarantine_id"], original_path=req.target,
@@ -190,7 +193,7 @@ class BoundedQuarantineExecutor:
             if actual_hash != req.target_sha256:
                 return self._deny("TARGET_HASH_MISMATCH")
             self.vault.ensure_capacity(size)
-            evidence = self.vault.capture_evidence(raw, reason="LAB_CANARY_QUARANTINE", source="BoundedQuarantineExecutor", event_id=req.incident_id)
+            evidence = self.vault.capture_evidence(raw, reason="LAB_CANARY_QUARANTINE", source="BoundedQuarantineExecutor", event_id=req.event_id or req.incident_id)
             if not self.vault.evidence_vault.verify_evidence(evidence["quarantine_id"]):
                 return self._deny("EVIDENCE_NOT_VERIFIED")
             record = self.vault.begin(incident_id=req.incident_id, idempotency_key=req.idempotency_key,
@@ -199,7 +202,7 @@ class BoundedQuarantineExecutor:
                                       target_size=size, requester=req.requester, evidence=evidence,
                                       source_identity=identity_after_read, evidence_ref=req.evidence_ref,
                                       decision_digest=req.decision_digest, capability_id=consumed["capability_id"],
-                                      scope_digest=consumed["scope_digest"])
+                                      scope_digest=consumed["scope_digest"], attribution=req.attribution())
             final = self.vault.contain(record, target)
             if final.get("state") != "QUARANTINED":
                 if final.get("state") in {"FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT"}:
@@ -213,6 +216,16 @@ class BoundedQuarantineExecutor:
             if verification.get("verified") is not True:
                 failed = self.vault.mark_after_effect_failure(final["quarantine_id"], "POST_ACTION_UNVERIFIED")
                 return self._after_effect(failed.get("failure_code", "POST_ACTION_UNVERIFIED"),
+                                          quarantine_id=final["quarantine_id"], state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
+                                          capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
+            try:
+                final = self.vault.mark_verified(
+                    final["quarantine_id"],
+                    verification_outcome=str(verification.get("verification_outcome") or "QUARANTINED_VERIFIED"),
+                )
+            except (QuarantineVaultError, OSError, ValueError):
+                failed = self.vault.mark_after_effect_failure(final["quarantine_id"], "VERIFICATION_RECORD_WRITE_FAILURE")
+                return self._after_effect(failed.get("failure_code", "VERIFICATION_RECORD_WRITE_FAILURE"),
                                           quarantine_id=final["quarantine_id"], state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
                                           capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
             self.executions += 1

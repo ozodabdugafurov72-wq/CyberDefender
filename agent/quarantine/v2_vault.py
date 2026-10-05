@@ -27,6 +27,11 @@ class BoundedQuarantineVault:
     MAX_RECORDS_DEFAULT = 64
     MAX_BYTES_DEFAULT = 16 * 1024 * 1024
     MAX_TARGET_BYTES_DEFAULT = 2 * 1024 * 1024
+    ATTRIBUTION_FIELDS = (
+        "event_id", "endpoint_id", "tenant_id", "detection_types", "detection_count",
+        "detection_confidence", "risk_score", "risk_level", "policy_outcome",
+        "policy_reason", "verifier_outcome",
+    )
 
     def __init__(self, vault_dir: str | Path, *, max_records: int = MAX_RECORDS_DEFAULT,
                  max_bytes: int = MAX_BYTES_DEFAULT, max_target_bytes: int = MAX_TARGET_BYTES_DEFAULT) -> None:
@@ -212,7 +217,7 @@ class BoundedQuarantineVault:
     def begin(self, *, incident_id: str, requested_action: str, idempotency_key: str, original_path: str, approved_root: str,
               target_sha256: str, target_size: int, requester: str, evidence: dict[str, Any],
               source_identity: dict[str, int], evidence_ref: str, decision_digest: str,
-              capability_id: str, scope_digest: str) -> dict[str, Any]:
+              capability_id: str, scope_digest: str, attribution: dict[str, Any] | None = None) -> dict[str, Any]:
         self.ensure_capacity(target_size)
         quarantine_id = "qv2-" + uuid.uuid4().hex
         object_path = self.objects_dir / quarantine_id / Path(original_path).name
@@ -229,6 +234,18 @@ class BoundedQuarantineVault:
             "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
             "state": "EVIDENCE_CAPTURED", "created_at": self._now(),
         }
+        if isinstance(attribution, dict):
+            for field in self.ATTRIBUTION_FIELDS:
+                value = attribution.get(field)
+                if value is None or value == []:
+                    continue
+                if field == "detection_types":
+                    if not isinstance(value, (list, tuple)):
+                        raise QuarantineVaultError("invalid detection_types attribution")
+                    value = [str(item)[:128] for item in list(value)[:64] if isinstance(item, str) and item.strip()]
+                    if not value:
+                        continue
+                record[field] = value
         return self._write_record(record)
 
     def contain(self, record: dict[str, Any], source: Path) -> dict[str, Any]:
@@ -258,6 +275,9 @@ class BoundedQuarantineVault:
                 "production_authorization": record["production_authorization"],
                 "lab_authorization": record["lab_authorization"],
             }
+            for field in self.ATTRIBUTION_FIELDS:
+                if field in record:
+                    receipt_unsigned[field] = record[field]
             receipt = dict(receipt_unsigned, receipt_sha256=self._sha256(self._canonical(receipt_unsigned)))
             self._atomic_write(self.receipts_dir / f"{record['quarantine_id']}.json", self._canonical(receipt))
             return self._write_record(dict(record, state="QUARANTINED", contained_at=self._now(),
@@ -286,6 +306,18 @@ class BoundedQuarantineVault:
         except Exception:
             return dict(failed, state="UNKNOWN_AFTER_EFFECT", failure_code="PERSISTENCE_FAILURE_AFTER_EFFECT",
                         real_world_effect=True, recovery_required=True)
+
+    def mark_verified(self, quarantine_id: str, *, verification_outcome: str, verified_at: str | None = None) -> dict[str, Any]:
+        """Persist post-action verification without rewriting the object/receipt."""
+        with self._lock:
+            record = self.get_verified_record(quarantine_id)
+            if not isinstance(record, dict) or record.get("state") != "QUARANTINED":
+                raise QuarantineVaultError("record is not quarantined")
+            if not isinstance(verification_outcome, str) or not verification_outcome.strip():
+                raise QuarantineVaultError("verification outcome required")
+            updated = dict(record, verification_outcome=verification_outcome.strip()[:64],
+                           verified_at=verified_at or self._now(), post_action_verification=True)
+            return self._write_record(updated)
 
     def mark_after_effect_failure(self, quarantine_id: str, code: str) -> dict[str, Any]:
         try:
@@ -322,11 +354,17 @@ class BoundedQuarantineVault:
                     "production_authorization", "lab_authorization",
                 )
             )
+            attribution_linked = all(
+                not (field in record and field not in value) and
+                (field not in record or field not in value or value.get(field) == record.get(field))
+                for field in self.ATTRIBUTION_FIELDS
+            )
             return (
                 value.get("receipt_sha256") == self._sha256(self._canonical(unsigned))
                 and value.get("state") == "QUARANTINED"
                 and value.get("target_sha256") == record.get("target_sha256")
                 and linked
+                and attribution_linked
             )
         except Exception:
             return False

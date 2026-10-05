@@ -79,6 +79,14 @@ def run_canary() -> dict[str, Any]:
             "evidence_ref": evidence_ref,
             "decision_digest": decision_digest,
             "mode": LAB_CANARY_EXECUTION,
+            # This standalone runner has no source telemetry endpoint/tenant
+            # or detector event to attribute. Persist only the decision data
+            # actually produced by the real policy/verifier components.
+            "risk_score": policy_assessment.get("risk_score"),
+            "risk_level": policy_assessment.get("risk_level"),
+            "policy_outcome": policy_assessment.get("policy_outcome"),
+            "policy_reason": policy_assessment.get("policy_reason"),
+            "verifier_outcome": verified_assessment.get("verification_outcome"),
         })
         issuer = QuarantineCapabilityIssuer()
         capability = issuer.issue(

@@ -51,7 +51,7 @@ class QuarantineIndependentVerifier:
                 return self._fail("CONTAINED_OBJECT_NOT_VERIFIED")
             if not self.vault.verify_receipt(quarantine_id, record):
                 return self._fail("RECEIPT_NOT_VERIFIED")
-            return {
+            result = {
                 "component": "QuarantineIndependentVerifier", "version": self.VERSION,
                 "accepted": True, "verified": True, "verification_outcome": "QUARANTINED_VERIFIED",
                 "quarantine_id": quarantine_id, "incident_id": record["incident_id"],
@@ -63,6 +63,14 @@ class QuarantineIndependentVerifier:
                 "authorization": "NOT_GRANTED",
                 "real_world_effect_observed": True, "fail_closed": True,
             }
+            for field in (
+                "event_id", "endpoint_id", "tenant_id", "detection_types", "detection_count",
+                "detection_confidence", "risk_score", "risk_level", "policy_outcome",
+                "policy_reason", "verifier_outcome", "verification_outcome", "verified_at",
+            ):
+                if field in record:
+                    result[field] = record[field]
+            return result
         except (QuarantineVaultError, OSError, TypeError, ValueError):
             return self._fail("VERIFICATION_ERROR")
 

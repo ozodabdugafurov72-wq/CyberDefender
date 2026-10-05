@@ -38,6 +38,55 @@ def _sha256_text(value: Any, field: str) -> str:
     return value
 
 
+def _optional_text(value: Any, field: str, maximum: int = 256) -> str | None:
+    if value is None:
+        return None
+    return _text(value, field, maximum)
+
+
+def _optional_score(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise QuarantineContractError(f"{field} must be numeric")
+    score = int(value)
+    if score != value or score < 0 or score > 100:
+        raise QuarantineContractError(f"invalid {field}")
+    return score
+
+
+def _optional_confidence(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise QuarantineContractError(f"{field} must be numeric")
+    confidence = float(value)
+    if confidence != confidence or confidence in (float("inf"), float("-inf")) or not 0.0 <= confidence <= 1.0:
+        raise QuarantineContractError(f"invalid {field}")
+    return confidence
+
+
+def _optional_count(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 1024:
+        raise QuarantineContractError(f"invalid {field}")
+    return value
+
+
+def _detection_types(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise QuarantineContractError("detection_types must be a list")
+    result: list[str] = []
+    for item in list(value)[:64]:
+        text = _text(item, "detection_type", 128)
+        if text not in result:
+            result.append(text)
+    return tuple(result)
+
+
 @dataclass(frozen=True, slots=True)
 class QuarantineRequest:
     incident_id: str
@@ -50,6 +99,19 @@ class QuarantineRequest:
     decision_digest: str
     mode: str = LAB_CANARY_EXECUTION
     canary_marker: str = CANARY_MARKER
+    # These fields are trusted pipeline attribution.  They are deliberately
+    # optional: absent authoritative data remains absent/UNKNOWN in storage.
+    event_id: str | None = None
+    endpoint_id: str | None = None
+    tenant_id: str | None = None
+    detection_types: tuple[str, ...] = ()
+    detection_count: int | None = None
+    detection_confidence: float | None = None
+    risk_score: int | None = None
+    risk_level: str | None = None
+    policy_outcome: str | None = None
+    policy_reason: str | None = None
+    verifier_outcome: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Any) -> "QuarantineRequest":
@@ -72,6 +134,17 @@ class QuarantineRequest:
             decision_digest=_sha256_text(value.get("decision_digest"), "decision_digest"),
             mode=mode,
             canary_marker=marker,
+            event_id=_optional_text(value.get("event_id"), "event_id", 256),
+            endpoint_id=_optional_text(value.get("endpoint_id"), "endpoint_id", 128),
+            tenant_id=_optional_text(value.get("tenant_id"), "tenant_id", 128),
+            detection_types=_detection_types(value.get("detection_types")),
+            detection_count=_optional_count(value.get("detection_count"), "detection_count"),
+            detection_confidence=_optional_confidence(value.get("detection_confidence"), "detection_confidence"),
+            risk_score=_optional_score(value.get("risk_score"), "risk_score"),
+            risk_level=_optional_text(value.get("risk_level"), "risk_level", 32),
+            policy_outcome=_optional_text(value.get("policy_outcome"), "policy_outcome", 64),
+            policy_reason=_optional_text(value.get("policy_reason"), "policy_reason", 256),
+            verifier_outcome=_optional_text(value.get("verifier_outcome"), "verifier_outcome", 64),
         )
 
     def scope(self) -> dict[str, str]:
@@ -88,6 +161,23 @@ class QuarantineRequest:
             "mode": self.mode,
             "canary_marker": self.canary_marker,
         }
+
+    def attribution(self) -> dict[str, Any]:
+        """Return only non-secret, trusted pipeline attribution fields."""
+        values: dict[str, Any] = {
+            "event_id": self.event_id,
+            "endpoint_id": self.endpoint_id,
+            "tenant_id": self.tenant_id,
+            "detection_types": list(self.detection_types),
+            "detection_count": self.detection_count,
+            "detection_confidence": self.detection_confidence,
+            "risk_score": self.risk_score,
+            "risk_level": self.risk_level,
+            "policy_outcome": self.policy_outcome,
+            "policy_reason": self.policy_reason,
+            "verifier_outcome": self.verifier_outcome,
+        }
+        return {key: value for key, value in values.items() if value is not None and value != []}
 
 
 def _canonical_scope(scope: dict[str, str]) -> bytes:

@@ -103,6 +103,13 @@ class LabQuarantineCoordinator:
         return value
 
     @staticmethod
+    def _optional_text(value: Any, maximum: int) -> str | None:
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        return value[:maximum] if value else None
+
+    @staticmethod
     def _resolve(value: Any) -> Path | None:
         try:
             if value is None:
@@ -223,8 +230,12 @@ class LabQuarantineCoordinator:
             return self._failure("ADMISSION", "EVENT_ID_REQUIRED")
         if not isinstance(data, dict):
             return self._failure("ADMISSION", "TELEMETRY_DATA_REQUIRED", event_id=event_id)
-        endpoint_id = data.get("endpoint_id") if isinstance(data.get("endpoint_id"), str) else None
-        tenant_id = data.get("tenant_id") if isinstance(data.get("tenant_id"), str) else None
+        # Endpoint and tenant are accepted only from explicit trusted event
+        # fields.  Never substitute a hostname, local/default tenant, or
+        # containment outcome for missing attribution.
+        endpoint_id = self._optional_text(data.get("endpoint_id"), 128)
+        tenant_id = self._optional_text(data.get("tenant_id"), 128)
+        host_id = self._optional_text(data.get("host_id"), 128)
         scope = self._validate_scope(data)
         if scope[0] is None:
             return self._failure(
@@ -278,8 +289,8 @@ class LabQuarantineCoordinator:
                     return self._failure("DETECTION", "EXACTLY_ONE_CANARY_DETECTION_REQUIRED", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
                 detection = dict(detections[0])
             detection.update({
-                "tenant_id": data.get("tenant_id", "lab-tenant"),
-                "host_id": data.get("host_id", endpoint_id),
+                "tenant_id": tenant_id,
+                "host_id": host_id,
                 "entity_id": str(target),
                 "target": str(target),
                 "approved_root": str(root),
@@ -299,6 +310,19 @@ class LabQuarantineCoordinator:
             incident_id = incident_event.get("incident_id")
             if not isinstance(incident_id, str) or not incident_id.strip():
                 return self._failure("CORRELATION", "INCIDENT_ID_MISSING", event_id=event_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+            incident_tenant = self._optional_text(incident_event.get("tenant_id"), 128)
+            if tenant_id is not None and incident_tenant is not None and incident_tenant != tenant_id:
+                return self._failure("CORRELATION", "TENANT_ATTRIBUTION_CONFLICT", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+            incident_rows = incident_event.get("detections") if isinstance(incident_event.get("detections"), list) else []
+            for row in incident_rows:
+                if not isinstance(row, dict):
+                    continue
+                row_tenant = self._optional_text(row.get("tenant_id"), 128)
+                row_host = self._optional_text(row.get("host_id"), 128)
+                if tenant_id is not None and row_tenant is not None and row_tenant != tenant_id:
+                    return self._failure("CORRELATION", "TENANT_ATTRIBUTION_CONFLICT", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+                if endpoint_id is not None and row_host is not None and row_host != endpoint_id:
+                    return self._failure("CORRELATION", "ENDPOINT_ATTRIBUTION_CONFLICT", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
             risk = self.risk_engine.assess(self.attack_graph, [incident_event])
             if not isinstance(risk, dict) or not isinstance(risk.get("assessments"), list) or len(risk["assessments"]) != 1:
                 return self._failure("RISK", "RISK_ASSESSMENT_REJECTED", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
@@ -325,6 +349,18 @@ class LabQuarantineCoordinator:
                 or verified_item.get("decision_digest") != decision_digest
             ):
                 return self._failure("INDEPENDENT_VERIFIER", "DECISION_NOT_VERIFIED", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+            detection_types = incident_event.get("detection_types")
+            if not isinstance(detection_types, list):
+                detection_types = []
+            detection_types = [item.strip()[:128] for item in detection_types if isinstance(item, str) and item.strip()][:64]
+            if not detection_types and isinstance(detection.get("type"), str) and detection["type"].strip():
+                detection_types = [detection["type"].strip()[:128]]
+            detection_count = incident_event.get("event_count")
+            if not isinstance(detection_count, int) or detection_count < 0:
+                detection_count = len(incident_rows) or (1 if detection_types else None)
+            detection_confidence = detection.get("confidence")
+            if not isinstance(detection_confidence, (int, float)) or isinstance(detection_confidence, bool) or not 0.0 <= float(detection_confidence) <= 1.0:
+                detection_confidence = None
             request = QuarantineRequest.from_mapping({
                 "incident_id": incident_id,
                 "idempotency_key": f"{incident_id}:quarantine",
@@ -335,6 +371,17 @@ class LabQuarantineCoordinator:
                 "evidence_ref": evidence_ref,
                 "decision_digest": decision_digest,
                 "mode": LAB_CANARY_EXECUTION,
+                "event_id": event_id,
+                "endpoint_id": endpoint_id,
+                "tenant_id": tenant_id,
+                "detection_types": detection_types,
+                "detection_count": detection_count,
+                "detection_confidence": detection_confidence,
+                "risk_score": assessment.get("risk_score"),
+                "risk_level": assessment.get("risk_level"),
+                "policy_outcome": policy_item.get("policy_outcome"),
+                "policy_reason": policy_item.get("policy_reason"),
+                "verifier_outcome": verified_item.get("verification_outcome"),
             })
             safety_attestation = self.safety.authorize_lab_quarantine(request.scope())
             if not isinstance(safety_attestation, dict) or safety_attestation.get("allowed") is not True:
@@ -359,6 +406,14 @@ class LabQuarantineCoordinator:
                 "incident_id": incident_id,
                 "endpoint_id": endpoint_id,
                 "tenant_id": tenant_id,
+                "detection_types": detection_types,
+                "detection_count": detection_count,
+                "detection_confidence": detection_confidence,
+                "risk_score": assessment.get("risk_score"),
+                "risk_level": assessment.get("risk_level"),
+                "policy_outcome": policy_item.get("policy_outcome"),
+                "policy_reason": policy_item.get("policy_reason"),
+                "verifier_outcome": verified_item.get("verification_outcome"),
                 "target": str(target),
                 "target_sha256": target_sha256,
                 "risk_result": risk,

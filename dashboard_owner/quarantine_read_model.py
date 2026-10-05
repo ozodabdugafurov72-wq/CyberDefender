@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import math
 import os
 import stat
 from pathlib import Path
@@ -177,31 +178,46 @@ class QuarantineReadModel:
             return None
 
     def _verify_evidence(self, root: Path, record: dict[str, Any]) -> bool:
+        return self._read_evidence_metadata(root, record) is not None
+
+    def _read_evidence_metadata(self, root: Path, record: dict[str, Any]) -> dict[str, Any] | None:
         evidence_id = self._safe_text(record.get("evidence_quarantine_id"), 128)
         if evidence_id is None or Path(evidence_id).name != evidence_id:
-            return False
+            return None
         evidence_root = root / "v2-evidence"
         metadata = self._read_json(evidence_root / "records" / f"{evidence_id}.json")
         if not isinstance(metadata, dict):
-            return False
+            return None
         filename = self._safe_text(metadata.get("evidence_file"), 256)
         expected = self._safe_text(metadata.get("raw_sha256"), 64)
         if filename is None or Path(filename).name != filename or expected is None:
-            return False
+            return None
         evidence_path = evidence_root / "evidence" / filename
         if not self._under(evidence_path, evidence_root) or self._has_reparse_component(evidence_path):
-            return False
+            return None
         try:
             raw = evidence_path.read_bytes()
-            return len(raw) <= self.MAX_ITEM_BYTES and hmac.compare_digest(self._sha256(raw), expected)
+            if len(raw) > self.MAX_ITEM_BYTES or not hmac.compare_digest(self._sha256(raw), expected):
+                return None
+            # Metadata is integrity-linked by the raw hash above.  Expose only
+            # bounded, non-secret attribution fields to the read model.
+            return {
+                key: value for key, value in metadata.items()
+                if key in {"event_id", "endpoint_id", "tenant_id", "detection_types", "detection_count",
+                           "detection_confidence", "risk_score", "risk_level", "policy_outcome",
+                           "policy_reason", "verifier_outcome", "verification_outcome", "verified_at"}
+            }
         except (OSError, ValueError):
-            return False
+            return None
 
-    def _verify_receipt(self, root: Path, record: dict[str, Any]) -> bool:
+    def _read_receipt(self, root: Path, record: dict[str, Any]) -> dict[str, Any] | None:
         quarantine_id = self._safe_text(record.get("quarantine_id"), 128)
         if quarantine_id is None or Path(quarantine_id).name != quarantine_id:
-            return False
-        receipt = self._read_json(root / "v2-receipts" / f"{quarantine_id}.json")
+            return None
+        return self._read_json(root / "v2-receipts" / f"{quarantine_id}.json")
+
+    def _verify_receipt(self, root: Path, record: dict[str, Any]) -> bool:
+        receipt = self._read_receipt(root, record)
         if not isinstance(receipt, dict):
             return False
         supplied = receipt.get("receipt_sha256")
@@ -216,7 +232,16 @@ class QuarantineReadModel:
                 "capability_id", "scope_digest", "production_authorization", "lab_authorization",
             ))
         )
-        return bool(linked)
+        attribution_linked = all(
+            not (key in record and key not in receipt) and
+            (key not in record or key not in receipt or receipt.get(key) == record.get(key))
+            for key in (
+                "event_id", "endpoint_id", "tenant_id", "detection_types", "detection_count",
+                "detection_confidence", "risk_score", "risk_level", "policy_outcome",
+                "policy_reason", "verifier_outcome",
+            )
+        )
+        return bool(linked and attribution_linked)
 
     def _verify_object(self, root: Path, record: dict[str, Any]) -> bool:
         object_path_text = self._safe_text(record.get("object_path"), 1024)
@@ -233,15 +258,61 @@ class QuarantineReadModel:
         except (OSError, TypeError, ValueError):
             return False
 
-    def _project(self, record: dict[str, Any], *, detail: bool, receipt_ok: bool, evidence_ok: bool, object_ok: bool, source_label: str) -> dict[str, Any]:
+    def _project(self, record: dict[str, Any], *, detail: bool, receipt: dict[str, Any] | None,
+                 receipt_ok: bool, evidence_ok: bool, object_ok: bool, source_label: str) -> dict[str, Any]:
+        provenance: dict[str, str] = {}
+
+        def trusted(field: str) -> Any:
+            value = record.get(field)
+            if value is not None and value != []:
+                provenance[field] = "record"
+                return value
+            if receipt_ok and isinstance(receipt, dict):
+                value = receipt.get(field)
+                if value is not None and value != []:
+                    provenance[field] = "receipt"
+                    return value
+            return None
+
+        def text_value(field: str, maximum: int) -> str | None:
+            return self._safe_text(trusted(field), maximum)
+
+        detection_types_raw = trusted("detection_types")
+        detection_types = [self._safe_text(value, 128) for value in detection_types_raw[:64]] if isinstance(detection_types_raw, list) else []
+        detection_types = [value for value in detection_types if value]
+        if not detection_types:
+            legacy_detection = self._safe_text(trusted("detection_type"), 128)
+            if legacy_detection:
+                detection_types = [legacy_detection]
+                provenance["detection_types"] = provenance.get("detection_type", "record")
+        if detection_types:
+            provenance["detection_types"] = provenance.get("detection_types", "record")
+        event_id = text_value("event_id", 256)
+        endpoint = text_value("endpoint_id", 128) or "UNKNOWN"
+        tenant = text_value("tenant_id", 128) or "UNKNOWN"
+        target = text_value("original_path", 512)
+        target_hash = text_value("target_sha256", 64)
+        risk_level = text_value("risk_level", 32) or "UNKNOWN"
+        risk_score = trusted("risk_score")
+        if (isinstance(risk_score, bool) or not isinstance(risk_score, (int, float))
+                or not math.isfinite(float(risk_score)) or int(risk_score) != risk_score
+                or not 0 <= int(risk_score) <= 100):
+            risk_score = None
+        detection_count = trusted("detection_count")
+        if isinstance(detection_count, bool) or not isinstance(detection_count, int) or not 0 <= detection_count <= 1024:
+            detection_count = None
+        detection_confidence = trusted("detection_confidence")
+        if (isinstance(detection_confidence, bool) or not isinstance(detection_confidence, (int, float))
+                or not math.isfinite(float(detection_confidence)) or not 0.0 <= float(detection_confidence) <= 1.0):
+            detection_confidence = None
+        policy_outcome = text_value("policy_outcome", 64) or "UNKNOWN"
+        policy_reason = text_value("policy_reason", 256)
+        verifier_outcome = text_value("verifier_outcome", 64)
         state = self._safe_text(record.get("state"), 64) or "UNKNOWN"
-        target = self._safe_text(record.get("original_path"), 512)
-        target_hash = self._safe_text(record.get("target_sha256"), 64)
-        tenant = self._safe_text(record.get("tenant_id"), 128) or "UNKNOWN"
-        endpoint = self._safe_text(record.get("endpoint_id"), 128) or "UNKNOWN"
         item = {
             "quarantine_id": self._safe_text(record.get("quarantine_id"), 128),
             "incident_id": self._safe_text(record.get("incident_id"), 128),
+            "event_id": event_id or "UNKNOWN",
             "endpoint_id": endpoint,
             "tenant_id": tenant,
             "timestamp": self._safe_text(record.get("contained_at"), 64) or self._safe_text(record.get("created_at"), 64),
@@ -249,14 +320,22 @@ class QuarantineReadModel:
             "target_path": target,
             "target_sha256": target_hash,
             "target_sha256_short": target_hash[:12] if target_hash else "UNKNOWN",
-            "detection_type": self._safe_text(record.get("detection_type"), 128) or self._safe_text(record.get("reason"), 128) or "UNKNOWN",
-            "risk_score": record.get("risk_score"),
-            "risk_level": self._safe_text(record.get("risk_level"), 32) or "UNKNOWN",
-            "policy_outcome": self._safe_text(record.get("policy_outcome"), 64) or "UNKNOWN",
+            "detection_types": detection_types,
+            "detection_type": ", ".join(detection_types) if detection_types else "UNKNOWN",
+            "detection_count": detection_count,
+            "detection_confidence": detection_confidence,
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "policy_outcome": policy_outcome,
+            "policy_reason": policy_reason or "UNKNOWN",
+            "verifier_outcome": verifier_outcome or "UNKNOWN",
             "production_authorization": self._safe_text(record.get("production_authorization"), 64) or "NOT_GRANTED",
             "lab_authorization": self._safe_text(record.get("lab_authorization"), 96) or "NOT_GRANTED",
             "containment_state": state,
-            "verification_outcome": self._safe_text(record.get("verification_outcome"), 64) or ("VERIFIED" if state == "QUARANTINED" and object_ok and receipt_ok else "UNKNOWN"),
+            # A read-model integrity check is kept separate from the
+            # persisted verifier outcome; legacy rows without that field stay
+            # UNKNOWN rather than being relabelled from containment state.
+            "verification_outcome": self._safe_text(record.get("verification_outcome"), 64) or "UNKNOWN",
             "evidence_status": "VERIFIED" if evidence_ok else "INTEGRITY_FAILURE",
             "object_integrity": object_ok,
             "evidence_integrity": evidence_ok,
@@ -266,8 +345,23 @@ class QuarantineReadModel:
             "integrity_problem": not (evidence_ok and receipt_ok and (state != "QUARANTINED" or object_ok)),
             "source_vault": source_label,
         }
+        for display_field, record_field in (
+            ("quarantine_id", "quarantine_id"), ("incident_id", "incident_id"),
+            ("target_path", "original_path"), ("target_sha256", "target_sha256"),
+            ("containment_state", "state"), ("production_authorization", "production_authorization"),
+            ("lab_authorization", "lab_authorization"), ("evidence_ref", "evidence_ref"),
+            ("decision_digest", "decision_digest"), ("capability_id", "capability_id"),
+            ("scope_digest", "scope_digest"),
+        ):
+            if record.get(record_field) is not None:
+                provenance[display_field] = "record"
+        if record.get("contained_at") is not None:
+            provenance["timestamp"] = "record"
+        elif record.get("created_at") is not None:
+            provenance["timestamp"] = "record"
         if detail:
             item.update({
+                "verified_at": self._safe_text(record.get("verified_at"), 64),
                 "evidence_ref": self._safe_text(record.get("evidence_ref"), 256),
                 "decision_digest": self._safe_text(record.get("decision_digest"), 64),
                 "capability_id": self._safe_text(record.get("capability_id"), 128),
@@ -276,6 +370,7 @@ class QuarantineReadModel:
                 "contained_at": self._safe_text(record.get("contained_at"), 64),
                 "failure_code": self._safe_text(record.get("failure_code"), 128),
                 "requested_action": self._safe_text(record.get("requested_action"), 64),
+                "provenance": dict(provenance),
             })
         return self._strip_secrets(item)
 
@@ -324,10 +419,11 @@ class QuarantineReadModel:
             tenant = self._safe_text(record.get("tenant_id"), 128) or "UNKNOWN"
             if self.tenant_id is not None and tenant != self.tenant_id:
                 continue
+            receipt = self._read_receipt(root, record)
             receipt_ok = self._verify_receipt(root, record)
             evidence_ok = self._verify_evidence(root, record)
             object_ok = self._verify_object(root, record) if record.get("state") == "QUARANTINED" else True
-            row = self._project(record, detail=detail, receipt_ok=receipt_ok, evidence_ok=evidence_ok, object_ok=object_ok, source_label=label)
+            row = self._project(record, detail=detail, receipt=receipt, receipt_ok=receipt_ok, evidence_ok=evidence_ok, object_ok=object_ok, source_label=label)
             # Absolute object paths and the record MAC differ when identical
             # evidence is copied into another approved vault. Normalize only
             # that vault-local path before comparing duplicate content.
@@ -429,6 +525,9 @@ class QuarantineReadModel:
         pending = sum(1 for row in rows if row.get("containment_state") not in {"QUARANTINED", "FAILED", "FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT"})
         verified = sum(1 for row in rows if row.get("post_action_verification") is True)
         recovery = sum(1 for row in rows if row.get("recovery_required") is True)
+        evidence_verified = sum(1 for row in rows if row.get("evidence_integrity") is True)
+        known_endpoints = {row.get("endpoint_id") for row in rows if row.get("endpoint_id") not in {None, "UNKNOWN"}}
+        known_tenants = {row.get("tenant_id") for row in rows if row.get("tenant_id") not in {None, "UNKNOWN"}}
         return {
             "schema": "cyberdefender.quarantine-read-model.v1", "version": self.VERSION,
             "status": status, "read_only": True, "authoritative": False,
@@ -439,9 +538,13 @@ class QuarantineReadModel:
                 "total_quarantined": sum(1 for row in rows if row.get("containment_state") == "QUARANTINED"),
                 "verified_quarantined": verified, "pending_verification": pending,
                 "failed_unknown": failed, "recovery_required": recovery,
+                "evidence_verified": evidence_verified,
+                "integrity_problems": integrity,
+                # Backward-compatible alias retained for existing consumers;
+                # the UI uses the explicit verified/problems metrics.
                 "evidence_integrity_problems": integrity,
-                "affected_endpoints": len({row.get("endpoint_id") for row in rows}),
-                "affected_tenants": len({row.get("tenant_id") for row in rows}),
+                "affected_endpoints": len(known_endpoints),
+                "affected_tenants": len(known_tenants),
                 "high_critical": sum(1 for row in rows if row.get("risk_level") in {"HIGH", "CRITICAL"}),
                 "containment_success_ratio": round(verified / len(rows), 4) if rows else None,
             },
