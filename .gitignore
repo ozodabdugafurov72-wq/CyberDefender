@@ -31,3 +31,4 @@ storage_key.b64
 *.key
 
 # CyberDefender canonical-baseline local/build exclusions
+dist/

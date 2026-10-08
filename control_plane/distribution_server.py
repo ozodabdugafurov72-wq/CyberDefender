@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from control_plane.distribution_repository import DistributionRepository
 
 HOST = os.getenv("CYBERDEFENDER_DISTRIBUTION_HOST", "127.0.0.1")
-PORT = int(os.getenv("CYBERDEFENDER_DISTRIBUTION_PORT", "8785"))
+PORT = int(os.getenv("PORT") or os.getenv("CYBERDEFENDER_DISTRIBUTION_PORT", "8785"))
 DB = Path(os.getenv("CYBERDEFENDER_DISTRIBUTION_DB", Path(os.getenv("LOCALAPPDATA", ".")) / "CyberDefender" / "state" / "control_plane" / "distribution.db")).expanduser().resolve()
 _default_base = Path(os.environ.get("PROGRAMDATA") or os.environ.get("LOCALAPPDATA") or ".") / "CyberDefender"
 _default_artifact = _default_base / "distribution" / "CyberDefenderPackage.zip"
@@ -21,6 +21,8 @@ MAX_BODY = 64 * 1024
 
 
 def _token() -> str:
+    if os.getenv("CYBERDEFENDER_FLEET_TOKEN"):
+        return os.environ["CYBERDEFENDER_FLEET_TOKEN"].strip()
     try: return TOKEN_FILE.read_text(encoding="ascii").strip()
     except OSError: return ""
 
@@ -52,6 +54,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/":
+            self._json(200, {"name": "CyberDefender", "health": "/health",
+                             "download": "/download/cyberdefender"}); return
         if parsed.path == "/health":
             self._json(200,{"status":"HEALTHY","component":"DistributionServer","version":"0.1"}); return
         if parsed.path == "/download/cyberdefender":
