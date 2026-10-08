@@ -127,10 +127,13 @@ class WindowsPassiveNetworkProvider:
     """
 
     # Host profiling showed the read-only NetTCP/IP snapshot can take about
-    # 3.2 seconds on Windows 11.  Keep a finite 5-second budget so a slow CIM
-    # provider cannot stall the Agent indefinitely; AsyncPassiveNetworkInventory
-    # isolates this optional collector from the core protection loop.
-    POWERSHELL_TIMEOUT_SECONDS = 5.0
+    # 3.2 seconds on Windows 11.  On the current host, PowerShell startup and
+    # NetTCP/IP provider scheduling add enough variance to exceed five seconds
+    # even when the command completes normally.  Keep a finite eight-second
+    # budget: it covers the observed cold-start latency while remaining bounded,
+    # and AsyncPassiveNetworkInventory isolates this optional collector from the
+    # core protection loop.
+    POWERSHELL_TIMEOUT_SECONDS = 8.0
     MAX_WINDOWS_JSON_BYTES = 1024 * 1024
     MAX_RAW_CONNECTIONS = 2048
 

@@ -422,7 +422,12 @@ class CyberDefenderRuntime:
         self.last_network_inventory: dict[str, Any] | None = None
         self.network_inventory_failures = 0
         self.network_inventory_sample_every_cycles = 5
-        self.network_inventory_deadline_seconds = 5
+        # The Windows passive snapshot has a finite eight-second provider
+        # budget.  Keep the async integration deadline aligned with that
+        # budget so a successful slow snapshot is not reported as an in-flight
+        # deadline breach.
+        self.network_inventory_deadline_seconds = 8
+        self._network_inventory_last_request_cycle: int | None = None
 
         # Explicit, marker-gated lab filesystem observation.  The collector
         # is absent unless the fixed LAB root is deliberately enabled.
@@ -1231,7 +1236,7 @@ class CyberDefenderRuntime:
             self.network_inventory_deadline_seconds = min(
                 self._positive_int(
                     os.getenv("CYBERDEFENDER_NETWORK_DEADLINE_SECONDS"),
-                    5,
+                    8,
                 ),
                 60,
             )
@@ -3797,14 +3802,21 @@ class CyberDefenderRuntime:
         if worker is None:
             return self.last_network_inventory
 
+        # Request immediately at startup, then use a bounded cadence even
+        # while no successful sample exists.  Re-requesting every core cycle
+        # after a slow-provider failure can create an avoidable subprocess
+        # storm and keep an optional component degraded indefinitely.
+        last_request_cycle = getattr(self, "_network_inventory_last_request_cycle", None)
+        cadence = max(1, int(self.network_inventory_sample_every_cycles or 1))
         should_request = (
-            self.last_network_inventory is None
-            or self.cycle_count % self.network_inventory_sample_every_cycles == 0
+            last_request_cycle is None
+            or int(self.cycle_count) - int(last_request_cycle) >= cadence
         )
 
         if should_request:
             try:
                 worker.request_sample()
+                self._network_inventory_last_request_cycle = int(self.cycle_count)
             except Exception:
                 # Request scheduling itself is non-authoritative and isolated.
                 self.network_inventory_failures += 1
