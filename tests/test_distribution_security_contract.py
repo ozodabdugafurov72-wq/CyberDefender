@@ -67,6 +67,18 @@ class DistributionSecurityContractTests(unittest.TestCase):
             self.assertEqual(snapshot["endpoints"][0]["endpoint_id"], "endpoint-1")
             self.assertNotIn("last_error", snapshot["endpoints"][0])
 
+    def test_startup_initializes_empty_persistent_database(self):
+        test_root = Path(".test-tmp").resolve()
+        test_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="cd-startup-db-", dir=test_root) as directory:
+            db = Path(directory) / "distribution.db"
+            self.assertFalse(db.exists())
+            server._initialize_database(db)
+            snapshot = server._owner_snapshot(db)
+            self.assertEqual(snapshot["status"], "HEALTHY")
+            self.assertEqual(snapshot["summary"]["downloads_total"], 0)
+            self.assertEqual(snapshot["summary"]["endpoints_total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

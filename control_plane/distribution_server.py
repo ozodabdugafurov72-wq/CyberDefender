@@ -142,6 +142,12 @@ def _owner_snapshot(db_path: Path, *, online_after_seconds: float = 90.0) -> dic
     return {"status": "HEALTHY", "summary": summary, "endpoints": [dict(row) for row in rows], "read_only": True}
 
 
+def _initialize_database(db_path: Path) -> None:
+    """Create the distribution schema before read-only consumers query it."""
+    repository = DistributionRepository(db_path)
+    repository.close()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CyberDefender"
     sys_version = ""
@@ -243,6 +249,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve() -> None:
     DB.parent.mkdir(parents=True, exist_ok=True)
+    _initialize_database(DB)
     print(f"CyberDefender Distribution telemetry: http://{HOST}:{PORT}")
     ThreadingHTTPServer((HOST,PORT), Handler).serve_forever()
 
