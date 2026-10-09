@@ -1,9 +1,9 @@
 FROM python:3.13-slim AS verify
 
 WORKDIR /source
-COPY owner_cloud ./owner_cloud
-COPY tests/test_owner_cloud_security.py ./tests/test_owner_cloud_security.py
-RUN python -B -m unittest discover -s tests -p "test_owner_cloud_security.py" -v \
+COPY . .
+RUN python scripts/scan_repository_secrets.py \
+    && python -B -m unittest discover -s tests -p "test_owner_cloud_security.py" -v \
     && touch /security-tests-passed
 
 FROM python:3.13-slim

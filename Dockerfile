@@ -1,6 +1,7 @@
 FROM python:3.13-slim AS package
 WORKDIR /source
 COPY . .
+RUN python scripts/scan_repository_secrets.py
 RUN python -B -m unittest discover -s tests -p "test_distribution_security_contract.py" -v
 RUN python scripts/build_distribution_package.py --output /artifacts/CyberDefenderPackage.zip
 
