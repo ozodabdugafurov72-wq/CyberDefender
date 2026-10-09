@@ -3,7 +3,9 @@ FROM python:3.13-slim AS verify
 WORKDIR /source
 COPY . .
 RUN python scripts/scan_repository_secrets.py \
-    && python -B -m unittest discover -s tests -p "test_owner_cloud_security.py" -v \
+    && python -B -m unittest \
+        tests.test_owner_cloud_security \
+        tests.test_owner_distribution_client_security -v \
     && touch /security-tests-passed
 
 FROM python:3.13-slim

@@ -23,6 +23,14 @@ class FakeDistribution:
                 "critical": 0,
                 "downloads_completed": 4,
             },
+            "xdr": {
+                "status": "READY",
+                "schema": "OCSF",
+                "schema_version": "1.9.0",
+                "runtime_contract_validation": True,
+                "signed_ingest": True,
+                "replay_protection": True,
+            },
             "transport": "RAILWAY_PRIVATE_AUTHENTICATED",
         }
 
@@ -120,7 +128,13 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         csrf = self.csrf(page)
         state = self.request("GET", "/api/v1/state", cookie=session_cookie)
         self.assertEqual(state.status, 200)
-        self.assertTrue(json.loads(state.body)["mode"] == "READ_ONLY")
+        state_payload = json.loads(state.body)
+        self.assertTrue(state_payload["mode"] == "READ_ONLY")
+        self.assertEqual(state_payload["security"]["authentication"], "ENFORCED")
+        self.assertEqual(state_payload["security"]["server_side_rbac"], "ENFORCED")
+        self.assertEqual(state_payload["security"]["csrf"], "ENFORCED")
+        self.assertFalse(state_payload["security"]["risk_is_authorization"])
+        self.assertTrue(state_payload["distribution"]["xdr"]["signed_ingest"])
         logout = self.request(
             "POST",
             "/logout",
@@ -129,6 +143,18 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         )
         self.assertEqual(logout.status, 303)
         self.assertEqual(self.request("GET", "/api/v1/state", cookie=session_cookie).status, 401)
+
+    def test_dashboard_waits_for_runtime_security_and_xdr_evidence(self):
+        session_cookie, _ = self.login()
+        page = self.request("GET", "/owner", cookie=session_cookie)
+        self.assertEqual(page.status, 200)
+        html = page.body.decode("utf-8")
+        for element_id in (
+            "xdrStatus", "xdrSchema", "xdrSigned", "xdrReplay", "xdrValidation",
+            "authGate", "rbacGate", "csrfGate", "actionGate", "trustGate",
+        ):
+            self.assertIn(f'id="{element_id}"', html)
+        self.assertNotIn('<span class="pass">PASS</span>', html)
 
     def test_admin_rbac_and_privileged_action_are_server_side_denied(self):
         session_cookie, _ = self.login("admin", "Admin-Test-Password-42!")

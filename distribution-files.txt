@@ -125,7 +125,9 @@ config/process_sensor_runtime.example.json
 control_plane/__init__.py
 control_plane/distribution_repository.py
 control_plane/distribution_server.py
+control_plane/fleet_protocol.py
 control_plane/windows_service.py
+control_plane/xdr_compat.py
 dashboard_owner/__init__.py
 dashboard_owner/fleet_read_model.py
 dashboard_owner/quarantine_read_model.py
@@ -175,6 +177,7 @@ docs/network/ACTIVE_VERIFICATION_ACTIVATION_PLAN.md
 docs/network/NETWORK_INVENTORY_V0_1.md
 docs/roadmap/ROADMAP_2026_2036_v1.md
 docs/security/AI_MANIPULATION_HARDENING_v1.md
+docs/security/FLEET_XDR_COMPATIBILITY_V1.md
 docs/security/PROBABILISTIC_INTELLIGENCE_CONTRACT_v1.md
 docs/security/PSI_IMPLEMENTATION_NOTES_v0_1.md
 docs/security/PSI_IMPLEMENTATION_NOTES_v0_2.md

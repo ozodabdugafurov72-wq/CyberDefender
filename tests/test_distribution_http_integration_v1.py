@@ -8,7 +8,7 @@ from agent.fleet.client import FleetTelemetryClient
 
 with tempfile.TemporaryDirectory(prefix="cd_dist_http_") as td:
     root=Path(td); artifact=root/"CyberDefenderPackage.zip"; artifact.write_bytes(b"cyberdefender-test-artifact"*1024)
-    token=root/"fleet_token.txt"; token.write_text("test-token",encoding="ascii")
+    token=root/"fleet_token.txt"; token.write_text("test-token-0123456789-abcdef-0123456789",encoding="ascii")
     db=root/"distribution.db"
     srv.ARTIFACT=artifact; srv.TOKEN_FILE=token; srv.DB=db
     httpd=ThreadingHTTPServer(("127.0.0.1",0),srv.Handler); port=httpd.server_address[1]

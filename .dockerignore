@@ -6,6 +6,7 @@
 .codex*
 .vscode
 .pytest_cache
+.test-tmp
 _backup*
 _v6_backups
 state

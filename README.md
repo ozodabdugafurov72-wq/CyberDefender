@@ -44,12 +44,23 @@ The Windows dependency list is `requirements.txt`.
 | Replicas | `1` |
 | `CYBERDEFENDER_DISTRIBUTION_DB` | `/data/distribution.db` (image default) |
 | `CYBERDEFENDER_INSTALLER_PATH` | `/app/distribution/CyberDefenderPackage.zip` (image default) |
-| `CYBERDEFENDER_FLEET_TOKEN` | Optional secret for authenticated enrollment/heartbeat POSTs |
+| `CYBERDEFENDER_FLEET_TOKEN` | Optional 32–512 byte ASCII secret for signed enrollment/heartbeat POSTs |
+| `CYBERDEFENDER_DISTRIBUTION_READ_TOKEN` | Separate 32+ character credential for the private Owner/XDR read API |
 
 Without a fleet token, downloads and health checks work, but fleet POSTs reject
-all requests. Set a strong token using Railway's secret variables when enabling
-fleet writes; never commit it. Windows endpoints need the matching token and
-remote server URL configured separately. Existing local token-file support remains.
+all requests. When configured, fleet writes require the bearer credential plus
+the `cyberdefender.fleet.v1` HMAC signature, a bounded timestamp, a body digest,
+and a one-time nonce. Replays, altered payloads, stale requests, malformed endpoint
+identity, and unsupported state values fail closed. Set both credentials only in
+Railway Variables; never commit them. Windows endpoints need the matching fleet
+token and remote server URL configured separately. Existing local token-file
+support remains.
+
+The private Owner API exposes a read-only OCSF 1.9.0 Device Inventory Info
+(`class_uid=5001`) mapping for signed fleet records. This is an interoperability
+foundation; it does not claim TAXII transport, multi-tenant isolation, per-device
+certificates, or active XDR response. See
+[`docs/security/FLEET_XDR_COMPATIBILITY_V1.md`](docs/security/FLEET_XDR_COMPATIBILITY_V1.md).
 
 After Railway assigns your domain:
 

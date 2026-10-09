@@ -156,6 +156,14 @@ class Application:
                     "environment": self.config.environment,
                     "actor": {"username": session["username"], "role": session["role"]},
                     "distribution": upstream,
+                    "security": {
+                        "authentication": "ENFORCED",
+                        "server_side_rbac": "ENFORCED",
+                        "csrf": "ENFORCED",
+                        "privileged_actions": "DISABLED_READ_ONLY",
+                        "risk_is_authorization": False,
+                        "secure_session_cookie": self.config.secure_cookies,
+                    },
                 },
             )
         if method == "GET" and path == "/api/v1/audit":
@@ -360,9 +368,14 @@ class Application:
 <div class="grid compact"><article><span>Endpoints</span><b id="endpoints">—</b></article>
 <article><span>Online</span><b id="online">—</b></article><article><span>Critical</span><b id="critical">—</b></article>
 <article><span>Downloads</span><b id="downloads">—</b></article></div></section>
+<section class="panel"><h2>XDR interoperability</h2><ul class="gates">
+<li><b>Compatibility</b><span id="xdrStatus">CHECKING</span></li><li><b>Schema</b><span id="xdrSchema">—</span></li>
+<li><b>Signed ingest</b><span id="xdrSigned">CHECKING</span></li><li><b>Replay protection</b><span id="xdrReplay">CHECKING</span></li>
+<li><b>Runtime contract</b><span id="xdrValidation">CHECKING</span></li></ul></section>
 <section class="panel"><h2>Security gates</h2><ul class="gates">
-<li><b>Authentication</b><span class="pass">PASS</span></li><li><b>Server-side RBAC</b><span class="pass">PASS</span></li>
-<li><b>Privileged actions</b><span>DISABLED</span></li><li><b>Risk ≠ Authorization</b><span>ENFORCED</span></li></ul></section>
+<li><b>Authentication</b><span id="authGate">CHECKING</span></li><li><b>Server-side RBAC</b><span id="rbacGate">CHECKING</span></li>
+<li><b>CSRF</b><span id="csrfGate">CHECKING</span></li><li><b>Privileged actions</b><span id="actionGate">CHECKING</span></li>
+<li><b>Risk ≠ Authorization</b><span id="trustGate">CHECKING</span></li></ul></section>
 <section class="panel owner-only" id="auditPanel" hidden><h2>Recent access audit</h2><div id="audit">Loading…</div></section>
 </main><script src="/static/app.js" defer></script></body></html>"""
         return self._html(200, page)

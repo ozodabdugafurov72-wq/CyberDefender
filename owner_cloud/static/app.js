@@ -6,9 +6,15 @@ async function loadState(){
     const response=await fetch("/api/v1/state",{credentials:"same-origin",headers:{"Accept":"application/json"}});
     if(response.status===401){location.assign("/login");return}
     if(!response.ok)throw new Error("state unavailable");
-    const data=await response.json(),dist=data.distribution||{},summary=dist.summary||{};
+    const data=await response.json(),dist=data.distribution||{},summary=dist.summary||{},xdr=dist.xdr||{},security=data.security||{};
     set("distributionStatus",dist.status||"UNAVAILABLE");set("transport",dist.transport||"PRIVATE");
     set("endpoints",summary.endpoints_total);set("online",summary.online);set("critical",summary.critical);
+    set("xdrStatus",xdr.status||"UNAVAILABLE");set("xdrSchema",xdr.schema&&xdr.schema_version?xdr.schema+" "+xdr.schema_version:"UNAVAILABLE");
+    set("xdrSigned",xdr.signed_ingest===true?"ENFORCED":"UNAVAILABLE");set("xdrReplay",xdr.replay_protection===true?"ENFORCED":"UNAVAILABLE");
+    set("xdrValidation",xdr.runtime_contract_validation===true?"ENFORCED":"UNAVAILABLE");
+    set("authGate",security.authentication||"UNAVAILABLE");set("rbacGate",security.server_side_rbac||"UNAVAILABLE");
+    set("csrfGate",security.csrf||"UNAVAILABLE");set("actionGate",security.privileged_actions||"UNAVAILABLE");
+    set("trustGate",security.risk_is_authorization===false?"ENFORCED":"UNAVAILABLE");
     set("downloads",summary.downloads_completed);set("updated","Updated "+new Date().toLocaleTimeString());
   }catch(_){set("distributionStatus","UNAVAILABLE");set("updated","Private API unavailable")}
 }

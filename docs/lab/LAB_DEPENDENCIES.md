@@ -1,6 +1,6 @@
 # Dependency preparation
 
-READY_LOCALLY: requirements and platform rules are documented in [H1D9_LAB_DEPENDENCIES.md](../H1D9_LAB_DEPENDENCIES.md). Actual requirements: psutil >=7.2,<8; cryptography >=46,<47; pywin32 >=310 on Windows. Target Python must be approved x64 Python 3.13+; local source testing uses the existing 3.14 environment. Windows PowerShell 5.1 is required by the existing runbook. The preserved package carries the pinned Rust release binary; Cargo is only needed for source Rust tests.
+READY_LOCALLY: requirements and platform rules are documented in [H1D9_LAB_DEPENDENCIES.md](../H1D9_LAB_DEPENDENCIES.md). Actual requirements are pinned to psutil 7.2.2, cryptography 50.0.2, and pywin32 312 on Windows. Target Python must be approved x64 Python 3.13+; local source testing uses the existing 3.14 environment. Windows PowerShell 5.1 is required by the existing runbook. The preserved package carries the pinned Rust release binary; Cargo is only needed for source Rust tests.
 
 EXTERNAL_PREREQUISITE — UNRESOLVED: no independently verified complete offline Python installer/wheel bundle is available as a sprint deliverable. Do not copy the development venv or claim local imports prove an offline installation will succeed.
 
