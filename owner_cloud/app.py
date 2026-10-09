@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import time
 import uuid
@@ -205,9 +206,12 @@ class Application:
 
     def _client_hash(self, request: Request) -> str:
         candidate = request.peer_ip.strip() or "unknown"
-        forwarded = request.header("X-Forwarded-For")
-        if forwarded:
-            candidate = forwarded.split(",")[-1].strip() or candidate
+        real_ip = request.header("X-Real-IP").strip()
+        if real_ip:
+            try:
+                candidate = ipaddress.ip_address(real_ip).compressed
+            except ValueError:
+                pass
         return hashlib.sha256(candidate.encode("utf-8", "replace")).hexdigest()
 
     def _session(self, request: Request) -> dict | None:

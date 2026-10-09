@@ -66,7 +66,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         values = {
             "Host": "owner.test",
             "X-Forwarded-Proto": "https",
-            "X-Forwarded-For": "203.0.113.10",
+            "X-Real-IP": "203.0.113.10",
         }
         if cookie:
             values["Cookie"] = cookie
@@ -181,6 +181,27 @@ class OwnerCloudSecurityTests(unittest.TestCase):
                 ).status
             )
         self.assertEqual(statuses, [401, 401, 429])
+
+    def test_client_hash_uses_stable_railway_real_ip(self):
+        first = Request(
+            "GET",
+            "/health",
+            {"X-Real-IP": "203.0.113.10", "X-Forwarded-For": "198.51.100.1"},
+            b"",
+            "10.0.0.2",
+        )
+        second = Request(
+            "GET",
+            "/health",
+            {"X-Real-IP": "203.0.113.10", "X-Forwarded-For": "198.51.100.99"},
+            b"",
+            "10.0.0.3",
+        )
+        self.assertEqual(self.app._client_hash(first), self.app._client_hash(second))
+
+        invalid = Request("GET", "/health", {"X-Real-IP": "not-an-ip"}, b"", "10.0.0.4")
+        fallback = Request("GET", "/health", {}, b"", "10.0.0.4")
+        self.assertEqual(self.app._client_hash(invalid), self.app._client_hash(fallback))
 
     def test_host_and_https_are_enforced_in_production_mode(self):
         production = Config(
