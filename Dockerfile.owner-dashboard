@@ -1,0 +1,9 @@
+FROM python:3.13-slim
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    CYBERDEFENDER_OWNER_HOST=0.0.0.0 \
+    CYBERDEFENDER_OWNER_DB=/data/owner.db \
+    CYBERDEFENDER_DEBUG=0
+COPY owner_cloud ./owner_cloud
+CMD ["python", "-m", "owner_cloud.server"]
