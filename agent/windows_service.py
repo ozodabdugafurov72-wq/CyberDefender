@@ -30,6 +30,7 @@ def _machine_paths() -> dict[str, Path]:
         "key": program_data / "secrets" / "storage_key.b64",
         "fleet_token": program_data / "secrets" / "fleet_token.txt",
         "endpoint_id": program_data / "identity" / "endpoint_id.txt",
+        "distribution_url": program_data / "identity" / "distribution_url.txt",
         "distribution_db": program_data / "control-plane" / "distribution.db",
     }
 
@@ -43,6 +44,12 @@ def configure_machine_environment() -> dict[str, Path]:
     os.environ["CYBERDEFENDER_ENDPOINT_ID"] = paths["endpoint_id"].read_text(encoding="ascii").strip()
     os.environ["CYBERDEFENDER_DISTRIBUTION_DB"] = str(paths["distribution_db"])
     os.environ["CYBERDEFENDER_FLEET_TOKEN_FILE"] = str(paths["fleet_token"])
+    distribution_url = paths["distribution_url"]
+    if distribution_url.is_file():
+        value = distribution_url.read_text(encoding="ascii").strip()
+        if not value or len(value) > 2048:
+            raise ValueError("invalid persisted distribution URL")
+        os.environ["CYBERDEFENDER_DISTRIBUTION_URL"] = value
     # Clear lab-only toggles before evaluating the fixed marker contract so a
     # recycled service process cannot retain a stale enablement decision.
     for _name in (

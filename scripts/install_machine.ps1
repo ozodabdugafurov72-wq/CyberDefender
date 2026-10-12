@@ -1,5 +1,6 @@
 param(
     [string]$Python = "",
+    [string]$DistributionUrl = "http://127.0.0.1:8785",
     [switch]$NoStart
 )
 $ErrorActionPreference = "Stop"
@@ -104,6 +105,18 @@ function Show-ServiceDiagnostics {
 
 Assert-Administrator
 
+try { $FleetOrigin = [Uri]$DistributionUrl } catch { throw 'DistributionUrl must be an absolute HTTP(S) origin.' }
+$LoopbackHosts = @('localhost','127.0.0.1','::1')
+$IsLoopback = $LoopbackHosts -contains $FleetOrigin.DnsSafeHost.ToLowerInvariant()
+if (-not $FleetOrigin.IsAbsoluteUri -or -not $FleetOrigin.Host -or
+    $FleetOrigin.UserInfo -or $FleetOrigin.Query -or $FleetOrigin.Fragment -or
+    $FleetOrigin.AbsolutePath -notin @('','/') -or
+    ($IsLoopback -and $FleetOrigin.Scheme -notin @('http','https')) -or
+    (-not $IsLoopback -and $FleetOrigin.Scheme -ne 'https')) {
+    throw 'DistributionUrl must be a credential-free HTTPS origin; HTTP is allowed only for loopback.'
+}
+$DistributionUrl = $DistributionUrl.TrimEnd('/')
+
 $SourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $AppParent = Join-Path $env:ProgramFiles "CyberDefender"
 $InstallRoot = Join-Path $AppParent "app"
@@ -120,6 +133,7 @@ $DistributionArtifact = Join-Path $DistributionDir "CyberDefenderPackage.zip"
 $KeyFile = Join-Path $SecretDir "storage_key.b64"
 $FleetToken = Join-Path $SecretDir "fleet_token.txt"
 $EndpointIdFile = Join-Path $IdentityDir "endpoint_id.txt"
+$DistributionUrlFile = Join-Path $IdentityDir "distribution_url.txt"
 $DistributionDb = Join-Path $ControlPlaneDir "distribution.db"
 $Services=@('CyberDefenderAgent','CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $InstallStarted=Get-Date
@@ -211,6 +225,7 @@ try {
         [Convert]::ToBase64String($bytes) | Set-Content $FleetToken -Encoding ascii -NoNewline
     }
     if (-not (Test-Path $EndpointIdFile)) { [guid]::NewGuid().ToString() | Set-Content $EndpointIdFile -Encoding ascii -NoNewline }
+    $DistributionUrl | Set-Content $DistributionUrlFile -Encoding ascii -NoNewline
     Invoke-NativeChecked 'icacls.exe' @($SecretDir,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F')
     Invoke-NativeChecked 'icacls.exe' @($IdentityDir,'/inheritance:r','/grant:r','*S-1-5-18:(OI)(CI)F','*S-1-5-32-544:(OI)(CI)F')
 
@@ -223,6 +238,7 @@ try {
     $env:CYBERDEFENDER_STATE_DIR=$StateDir
     $env:CYBERDEFENDER_STORAGE_KEY_B64=(Get-Content -Raw $KeyFile).Trim()
     $env:CYBERDEFENDER_ENDPOINT_ID=(Get-Content -Raw $EndpointIdFile).Trim()
+    $env:CYBERDEFENDER_DISTRIBUTION_URL=$DistributionUrl
     $env:CYBERDEFENDER_DISTRIBUTION_DB=$DistributionDb
     $env:CYBERDEFENDER_FLEET_TOKEN_FILE=$FleetToken
     $env:CYBERDEFENDER_INSTALLER_PATH=$DistributionArtifact
