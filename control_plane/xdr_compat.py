@@ -30,8 +30,10 @@ _OCSF_SEVERITY_IDS = {
 
 CAPABILITY_ENDPOINT_HEALTH = "endpoint-health"
 CAPABILITY_DEVICE_INVENTORY = "ocsf-device-inventory"
+CAPABILITY_RESPONSE_EVIDENCE = "verified-response-evidence"
+RESPONSE_EVIDENCE_SCHEMA = "cyberdefender.response-evidence.v1"
 SUPPORTED_CAPABILITIES = frozenset(
-    {CAPABILITY_ENDPOINT_HEALTH, CAPABILITY_DEVICE_INVENTORY}
+    {CAPABILITY_ENDPOINT_HEALTH, CAPABILITY_DEVICE_INVENTORY, CAPABILITY_RESPONSE_EVIDENCE}
 )
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -101,6 +103,122 @@ def validate_ingest_contract(payload: Mapping[str, Any], *, signed_timestamp: in
         "telemetry_schema_version": OCSF_SCHEMA_VERSION,
         "capabilities": capabilities,
         "observed_at": observed_seconds,
+    }
+
+
+def validate_response_evidence(value: Any, *, endpoint_id: Any) -> dict[str, Any]:
+    """Validate the bounded, non-secret response proof carried by signed fleet ingest."""
+    evidence = _required_mapping(value, "response_evidence")
+    allowed = {
+        "schema", "evidence_id", "incident_id", "event_id", "target_name", "target_sha256",
+        "detection_types", "risk_score", "risk_level", "policy_outcome", "policy_reason",
+        "verifier_outcome", "action_state", "verification_outcome", "response_latency_ms",
+        "execution_latency_ms", "detection_to_response_ms", "restore_latency_ms", "evidence_ref",
+        "production_authorization", "lab_authorization", "receipt_integrity",
+        "post_action_verification",
+    }
+    if set(evidence) - allowed:
+        raise ValueError("unsupported response evidence field")
+    if evidence.get("schema") != RESPONSE_EVIDENCE_SCHEMA:
+        raise ValueError("unsupported response evidence schema")
+    endpoint = validate_endpoint_id(endpoint_id)
+    evidence_id = _required_text(evidence.get("evidence_id"), "evidence_id", 128, pattern=_IDENTIFIER_RE)
+    incident_id = _required_text(evidence.get("incident_id"), "incident_id", 160)
+    event_id = _required_text(evidence.get("event_id"), "event_id", 256)
+    target_name = _required_text(evidence.get("target_name"), "target_name", 255)
+    if target_name in {".", ".."} or "/" in target_name or "\\" in target_name:
+        raise ValueError("target_name must be a basename")
+    target_sha256 = str(evidence.get("target_sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", target_sha256):
+        raise ValueError("invalid target_sha256")
+    detection_types = evidence.get("detection_types")
+    if not isinstance(detection_types, list) or not detection_types or len(detection_types) > 16:
+        raise ValueError("invalid detection_types")
+    normalized_detections = []
+    for item in detection_types:
+        detection = _required_text(item, "detection_type", 128)
+        if detection not in normalized_detections:
+            normalized_detections.append(detection)
+    risk_score = evidence.get("risk_score")
+    if isinstance(risk_score, bool) or not isinstance(risk_score, (int, float)):
+        raise ValueError("invalid risk_score")
+    risk_score = float(risk_score)
+    if not math.isfinite(risk_score) or not 0 <= risk_score <= 100:
+        raise ValueError("invalid risk_score")
+    risk_level = _required_text(evidence.get("risk_level"), "risk_level", 24).upper()
+    if risk_level not in _OCSF_SEVERITY_IDS:
+        raise ValueError("invalid risk_level")
+    policy_outcome = _required_text(evidence.get("policy_outcome"), "policy_outcome", 64)
+    if policy_outcome != "REQUIRE_VERIFICATION":
+        raise ValueError("invalid policy_outcome")
+    policy_reason = _required_text(evidence.get("policy_reason"), "policy_reason", 256)
+    verifier_outcome = _required_text(evidence.get("verifier_outcome"), "verifier_outcome", 64)
+    if verifier_outcome != "VERIFIED":
+        raise ValueError("invalid verifier_outcome")
+    action_state = _required_text(evidence.get("action_state"), "action_state", 32)
+    if action_state not in {"QUARANTINED", "RESTORED"}:
+        raise ValueError("invalid action_state")
+    verification_outcome = _required_text(
+        evidence.get("verification_outcome"), "verification_outcome", 64
+    )
+    expected_outcome = "RESTORED_VERIFIED" if action_state == "RESTORED" else "QUARANTINED_VERIFIED"
+    if verification_outcome != expected_outcome:
+        raise ValueError("invalid verification_outcome")
+
+    def latency(field: str, *, optional: bool = False) -> float | None:
+        raw = evidence.get(field)
+        if raw is None and optional:
+            return None
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError(f"invalid {field}")
+        measured = float(raw)
+        if not math.isfinite(measured) or not 0 <= measured <= 86_400_000:
+            raise ValueError(f"invalid {field}")
+        return round(measured, 3)
+
+    response_latency_ms = latency("response_latency_ms")
+    execution_latency_ms = latency("execution_latency_ms")
+    detection_to_response_ms = latency("detection_to_response_ms")
+    restore_latency_ms = latency("restore_latency_ms", optional=True)
+    if action_state == "RESTORED" and restore_latency_ms is None:
+        raise ValueError("restore latency required")
+    evidence_ref = _required_text(evidence.get("evidence_ref"), "evidence_ref", 256)
+    production_authorization = _required_text(
+        evidence.get("production_authorization"), "production_authorization", 32
+    )
+    if production_authorization != "NOT_GRANTED":
+        raise ValueError("production authorization claim rejected")
+    lab_authorization = _required_text(evidence.get("lab_authorization"), "lab_authorization", 96)
+    expected_lab = "RESTORE_CAPABILITY_CONSUMED" if action_state == "RESTORED" else "QUARANTINE_CAPABILITY_CONSUMED"
+    if lab_authorization != expected_lab:
+        raise ValueError("invalid lab authorization")
+    if evidence.get("receipt_integrity") is not True or evidence.get("post_action_verification") is not True:
+        raise ValueError("unverified response evidence")
+    return {
+        "schema": RESPONSE_EVIDENCE_SCHEMA,
+        "evidence_id": evidence_id,
+        "endpoint_id": endpoint,
+        "incident_id": incident_id,
+        "event_id": event_id,
+        "target_name": target_name,
+        "target_sha256": target_sha256,
+        "detection_types": normalized_detections,
+        "risk_score": round(risk_score, 3),
+        "risk_level": risk_level,
+        "policy_outcome": policy_outcome,
+        "policy_reason": policy_reason,
+        "verifier_outcome": verifier_outcome,
+        "action_state": action_state,
+        "verification_outcome": verification_outcome,
+        "response_latency_ms": response_latency_ms,
+        "execution_latency_ms": execution_latency_ms,
+        "detection_to_response_ms": detection_to_response_ms,
+        "restore_latency_ms": restore_latency_ms,
+        "evidence_ref": evidence_ref,
+        "production_authorization": production_authorization,
+        "lab_authorization": lab_authorization,
+        "receipt_integrity": True,
+        "post_action_verification": True,
     }
 
 

@@ -180,6 +180,61 @@ class QuarantineRequest:
         return {key: value for key, value in values.items() if value is not None and value != []}
 
 
+@dataclass(frozen=True, slots=True)
+class RestoreRequest:
+    """Exact, lab-only restore scope for one verified quarantine object."""
+
+    quarantine_id: str
+    incident_id: str
+    idempotency_key: str
+    target: str
+    approved_root: str
+    target_sha256: str
+    requester: str
+    restore_reason: str = "LAB_CANARY_RESET"
+    mode: str = LAB_CANARY_EXECUTION
+    canary_marker: str = CANARY_MARKER
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "RestoreRequest":
+        if not isinstance(value, dict):
+            raise QuarantineContractError("restore request must be dict")
+        mode = _text(value.get("mode", LAB_CANARY_EXECUTION), "mode", 32)
+        marker = _text(value.get("canary_marker", CANARY_MARKER), "canary_marker", 64)
+        reason = _text(value.get("restore_reason", "LAB_CANARY_RESET"), "restore_reason", 64)
+        if mode != LAB_CANARY_EXECUTION or marker != CANARY_MARKER:
+            raise QuarantineContractError("restore is restricted to the lab canary")
+        if reason != "LAB_CANARY_RESET":
+            raise QuarantineContractError("unsupported restore reason")
+        return cls(
+            quarantine_id=_text(value.get("quarantine_id"), "quarantine_id", 128),
+            incident_id=_text(value.get("incident_id"), "incident_id", 128),
+            idempotency_key=_text(value.get("idempotency_key"), "idempotency_key", 160),
+            target=_text(value.get("target"), "target", 512),
+            approved_root=_text(value.get("approved_root"), "approved_root", 512),
+            target_sha256=_sha256_text(value.get("target_sha256"), "target_sha256"),
+            requester=_text(value.get("requester"), "requester", 128),
+            restore_reason=reason,
+            mode=mode,
+            canary_marker=marker,
+        )
+
+    def scope(self) -> dict[str, str]:
+        return {
+            "quarantine_id": self.quarantine_id,
+            "incident_id": self.incident_id,
+            "idempotency_key": self.idempotency_key,
+            "requested_action": "RESTORE",
+            "target": self.target,
+            "approved_root": self.approved_root,
+            "target_sha256": self.target_sha256,
+            "requester": self.requester,
+            "restore_reason": self.restore_reason,
+            "mode": self.mode,
+            "canary_marker": self.canary_marker,
+        }
+
+
 def _canonical_scope(scope: dict[str, str]) -> bytes:
     return "|".join(f"{key}={scope[key]}" for key in sorted(scope)).encode("utf-8")
 
@@ -342,4 +397,159 @@ class QuarantineCapabilityIssuer:
                 "status": "HEALTHY", "issued": self.issued, "consumed": self.consumed,
                 "denied": self.denied, "replays": self.replays, "outstanding": len(self._tokens),
                 "fail_closed": True, "secrets_exported": False,
+            }
+
+
+class RestoreCapabilityIssuer:
+    """Issue one-time capabilities for a verified lab-canary restore only."""
+
+    VERSION = "1.0"
+    DEFAULT_TTL_SECONDS = 30.0
+    MAX_OUTSTANDING = 16
+
+    def __init__(self, *, ttl_seconds: float = DEFAULT_TTL_SECONDS,
+                 max_outstanding: int = MAX_OUTSTANDING) -> None:
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be > 0")
+        if isinstance(max_outstanding, bool) or not isinstance(max_outstanding, int) or max_outstanding < 1:
+            raise ValueError("max_outstanding must be >= 1")
+        self.ttl_seconds = float(ttl_seconds)
+        self.max_outstanding = max_outstanding
+        self._secret = secrets.token_bytes(32)
+        self._lock = RLock()
+        self._tokens: dict[str, dict[str, Any]] = {}
+        self.issued = 0
+        self.consumed = 0
+        self.denied = 0
+        self.replays = 0
+
+    @staticmethod
+    def _eligibility_matches(request: RestoreRequest, verification: Any) -> bool:
+        return bool(
+            isinstance(verification, dict)
+            and verification.get("accepted") is True
+            and verification.get("verified") is True
+            and verification.get("verification_outcome") == "RESTORE_ELIGIBLE_VERIFIED"
+            and verification.get("quarantine_id") == request.quarantine_id
+            and verification.get("incident_id") == request.incident_id
+            and verification.get("target_sha256") == request.target_sha256
+            and verification.get("target") == request.target
+            and verification.get("production_authorization") == "NOT_GRANTED"
+        )
+
+    @staticmethod
+    def _safety_attestation(request: RestoreRequest, safety: Any) -> bool:
+        if safety is None:
+            return False
+        health = getattr(safety, "health_snapshot", None)
+        attest = getattr(safety, "authorize_lab_restore", None)
+        if not callable(health) or not callable(attest):
+            return False
+        snapshot = health()
+        if not isinstance(snapshot, dict) or snapshot.get("safe_mode") or snapshot.get("shutdown_requested"):
+            return False
+        result = attest(request.scope())
+        if (
+            not isinstance(result, dict)
+            or result.get("allowed") is not True
+            or result.get("mode") != LAB_CANARY_EXECUTION
+            or result.get("production_authorization") != "NOT_GRANTED"
+            or result.get("lab_authorization") != "RESTORE_CAPABILITY_CONSUMED"
+        ):
+            return False
+        supplied = result.get("scope_digest")
+        expected = canonical_scope_digest(request.scope())
+        return isinstance(supplied, str) and hmac.compare_digest(supplied, expected)
+
+    def issue(self, request: RestoreRequest | dict[str, Any], *, eligibility_verification: dict[str, Any],
+              safety: Any, operator_approved: bool = False) -> dict[str, Any]:
+        try:
+            req = request if isinstance(request, RestoreRequest) else RestoreRequest.from_mapping(request)
+            if operator_approved is not True:
+                raise QuarantineContractError("explicit operator approval required")
+            if not self._eligibility_matches(req, eligibility_verification):
+                raise QuarantineContractError("restore eligibility verification invalid")
+            if not self._safety_attestation(req, safety):
+                raise QuarantineContractError("restore safety attestation unavailable")
+            with self._lock:
+                now = time.time()
+                self._tokens = {
+                    key: row for key, row in self._tokens.items()
+                    if float(row["expires_at"]) > now and not row["used"]
+                }
+                if len(self._tokens) >= self.max_outstanding:
+                    raise QuarantineContractError("restore capability budget exceeded")
+                capability_id = secrets.token_urlsafe(18)
+                expires_at = now + self.ttl_seconds
+                scope = req.scope()
+                scope_digest = canonical_scope_digest(scope)
+                mac = hmac.new(
+                    self._secret,
+                    f"{capability_id}|{scope_digest}|{expires_at:.6f}".encode(),
+                    hashlib.sha256,
+                ).hexdigest()
+                self._tokens[capability_id] = {
+                    "scope": scope, "scope_digest": scope_digest,
+                    "expires_at": expires_at, "mac": mac, "used": False,
+                }
+                self.issued += 1
+                return {
+                    "schema": "cd.quarantine.restore-capability.v1",
+                    "capability_id": capability_id,
+                    "action": "RESTORE",
+                    "authorization": "RESTORE_CAPABILITY",
+                    "mode": LAB_CANARY_EXECUTION,
+                    "scope": dict(scope),
+                    "scope_digest": scope_digest,
+                    "issued_at": now,
+                    "expires_at": expires_at,
+                    "single_use": True,
+                    "token_mac": mac,
+                }
+        except QuarantineContractError:
+            with self._lock:
+                self.denied += 1
+            raise
+
+    def consume(self, capability: Any, request: RestoreRequest | dict[str, Any]) -> dict[str, Any]:
+        req = request if isinstance(request, RestoreRequest) else RestoreRequest.from_mapping(request)
+        if not isinstance(capability, dict):
+            raise QuarantineContractError("restore capability required")
+        capability_id = _text(capability.get("capability_id"), "capability_id", 128)
+        supplied_mac = _text(capability.get("token_mac"), "token_mac", 128)
+        with self._lock:
+            row = self._tokens.get(capability_id)
+            if row is None or row.get("used"):
+                self.replays += 1
+                raise QuarantineContractError("restore capability unknown or replayed")
+            if time.time() >= float(row["expires_at"]):
+                self._tokens.pop(capability_id, None)
+                raise QuarantineContractError("restore capability expired")
+            expected = hmac.new(
+                self._secret,
+                f"{capability_id}|{row['scope_digest']}|{float(row['expires_at']):.6f}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(expected, str(row["mac"])) or not hmac.compare_digest(supplied_mac, str(row["mac"])):
+                raise QuarantineContractError("restore capability integrity failure")
+            if row["scope"] != req.scope():
+                raise QuarantineContractError("restore capability scope mismatch")
+            row["used"] = True
+            self._tokens.pop(capability_id, None)
+            self.consumed += 1
+            return {
+                "accepted": True,
+                "capability_id": capability_id,
+                "scope_digest": row["scope_digest"],
+                "mode": req.mode,
+            }
+
+    def health_check(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "component": "RestoreCapabilityIssuer", "version": self.VERSION,
+                "status": "HEALTHY", "issued": self.issued, "consumed": self.consumed,
+                "denied": self.denied, "replays": self.replays,
+                "outstanding": len(self._tokens), "fail_closed": True,
+                "secrets_exported": False,
             }

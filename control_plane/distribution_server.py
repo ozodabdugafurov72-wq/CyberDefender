@@ -15,7 +15,13 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from control_plane.distribution_repository import DistributionRepository
 from control_plane.fleet_protocol import FleetProtocolError, SlidingWindowLimiter, validate_token, verify_request
-from control_plane.xdr_compat import compatibility_status, device_inventory_events, validate_ingest_contract
+from control_plane.xdr_compat import (
+    CAPABILITY_RESPONSE_EVIDENCE,
+    compatibility_status,
+    device_inventory_events,
+    validate_ingest_contract,
+    validate_response_evidence,
+)
 
 
 HOST = os.getenv("CYBERDEFENDER_DISTRIBUTION_HOST", "127.0.0.1")
@@ -159,6 +165,27 @@ def _owner_snapshot(db_path: Path, *, online_after_seconds: float = 90.0) -> dic
             FROM fleet_endpoints ORDER BY last_seen DESC LIMIT 100
             """
         ).fetchall()
+        response_summary = conn.execute(
+            """
+            SELECT COUNT(*) responses_total,
+              SUM(CASE WHEN action_state='QUARANTINED' THEN 1 ELSE 0 END) responses_quarantined,
+              SUM(CASE WHEN action_state='RESTORED' THEN 1 ELSE 0 END) responses_restored,
+              MAX(response_latency_ms) response_latency_ms_max
+            FROM fleet_response_evidence
+            """
+        ).fetchone()
+        response_rows = conn.execute(
+            """
+            SELECT evidence_id, endpoint_id, incident_id, event_id, observed_at, received_at,
+                   target_name, target_sha256, detection_types_json, risk_score, risk_level,
+                   policy_outcome, policy_reason, verifier_outcome, action_state,
+                   verification_outcome, response_latency_ms, execution_latency_ms,
+                   detection_to_response_ms, restore_latency_ms, evidence_ref,
+                   production_authorization, lab_authorization, receipt_integrity,
+                   post_action_verification
+            FROM fleet_response_evidence ORDER BY received_at DESC LIMIT 100
+            """
+        ).fetchall()
     finally:
         conn.close()
     summary = {
@@ -181,6 +208,17 @@ def _owner_snapshot(db_path: Path, *, online_after_seconds: float = 90.0) -> dic
             )
         }
     )
+    summary.update(
+        {
+            key: int((response_summary[key] if response_summary else 0) or 0)
+            for key in ("responses_total", "responses_quarantined", "responses_restored")
+        }
+    )
+    summary["response_latency_ms_max"] = (
+        float(response_summary["response_latency_ms_max"])
+        if response_summary and response_summary["response_latency_ms_max"] is not None
+        else None
+    )
     endpoints = []
     for row in rows:
         item = dict(row)
@@ -190,10 +228,23 @@ def _owner_snapshot(db_path: Path, *, online_after_seconds: float = 90.0) -> dic
             capabilities = []
         item["capabilities"] = capabilities if isinstance(capabilities, list) else []
         endpoints.append(item)
+    responses = []
+    for row in response_rows:
+        item = dict(row)
+        try:
+            detections = json.loads(item.pop("detection_types_json", "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            detections = []
+        item["schema"] = "cyberdefender.response-evidence.v1"
+        item["detection_types"] = detections if isinstance(detections, list) else []
+        item["receipt_integrity"] = item.get("receipt_integrity") == 1
+        item["post_action_verification"] = item.get("post_action_verification") == 1
+        responses.append(item)
     return {
         "status": "HEALTHY",
         "summary": summary,
         "endpoints": endpoints,
+        "responses": responses,
         "read_only": True,
         "xdr": compatibility_status(),
     }
@@ -363,7 +414,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/api/v1/enrollment/register", "/api/v1/endpoints/heartbeat"}:
+        if parsed.path not in {
+            "/api/v1/enrollment/register",
+            "/api/v1/endpoints/heartbeat",
+            "/api/v1/endpoints/response-evidence",
+        }:
             self._json(404, {"error": "NOT_FOUND"})
             return
         if self.headers.get_content_type().lower() != "application/json":
@@ -389,6 +444,14 @@ class Handler(BaseHTTPRequestHandler):
                 _token(), method="POST", path=parsed.path, body=raw, headers=self.headers, now=time.time()
             )
             contract = validate_ingest_contract(body, signed_timestamp=verified.timestamp)
+            response_evidence = None
+            if parsed.path == "/api/v1/endpoints/response-evidence":
+                if CAPABILITY_RESPONSE_EVIDENCE not in contract["capabilities"]:
+                    raise ValueError("response evidence capability required")
+                response_evidence = validate_response_evidence(
+                    body.get("response_evidence"), endpoint_id=contract["endpoint_id"]
+                )
+                response_evidence.pop("endpoint_id", None)
         except FleetProtocolError as exc:
             code = "STALE_REQUEST" if exc.code == "TIMESTAMP_OUT_OF_RANGE" else "UNAUTHORIZED"
             self._json(401, {"error": code})
@@ -427,6 +490,14 @@ class Handler(BaseHTTPRequestHandler):
                     service_state=body.get("service_state", "REGISTERED"),
                 )
                 self._json(200, {"status": "REGISTERED"})
+                return
+            if parsed.path == "/api/v1/endpoints/response-evidence":
+                repository.record_response_evidence(
+                    response_evidence,
+                    endpoint_id=contract["endpoint_id"],
+                    observed_at=contract["observed_at"],
+                )
+                self._json(200, {"status": "EVIDENCE_ACCEPTED"})
                 return
             repository.heartbeat(
                 **common,

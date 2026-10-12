@@ -1,6 +1,15 @@
 "use strict";
 const byId=id=>document.getElementById(id);
 const set=(id,value)=>{const node=byId(id);if(node)node.textContent=value??"—"};
+const cell=(label,value)=>{const wrap=document.createElement("div"),name=document.createElement("span"),data=document.createElement("b");name.textContent=label;data.textContent=value??"—";wrap.append(name,data);return wrap};
+function renderResponses(items){
+  const root=byId("responseEvidence");if(!root)return;root.replaceChildren();
+  if(!Array.isArray(items)||items.length===0){const empty=document.createElement("p");empty.className="muted";empty.textContent="No signed endpoint response evidence received.";root.appendChild(empty);set("responseStatus","NO VERIFIED EVIDENCE");return}
+  items.slice(0,20).forEach(item=>{const row=document.createElement("article");row.className="response-row";
+    const detections=Array.isArray(item.detection_types)?item.detection_types.join(", "):"UNKNOWN";
+    row.append(cell("State",item.action_state),cell("Endpoint",item.endpoint_id),cell("Detection",detections),cell("Reason",item.policy_reason),cell("Risk",`${item.risk_level||"UNKNOWN"} · ${item.risk_score??"—"}`),cell("Measured response",`${Number(item.detection_to_response_ms).toFixed(3)} ms`),cell("Verification",item.verification_outcome),cell("SHA-256",item.target_sha256));root.appendChild(row)});
+  set("responseStatus","VERIFIED · READ ONLY");
+}
 async function loadState(){
   try{
     const response=await fetch("/api/v1/state",{credentials:"same-origin",headers:{"Accept":"application/json"}});
@@ -12,11 +21,13 @@ async function loadState(){
     set("xdrStatus",xdr.status||"UNAVAILABLE");set("xdrSchema",xdr.schema&&xdr.schema_version?xdr.schema+" "+xdr.schema_version:"UNAVAILABLE");
     set("xdrSigned",xdr.signed_ingest===true?"ENFORCED":"UNAVAILABLE");set("xdrReplay",xdr.replay_protection===true?"ENFORCED":"UNAVAILABLE");
     set("xdrValidation",xdr.runtime_contract_validation===true?"ENFORCED":"UNAVAILABLE");
+    set("responseTotal",summary.responses_total??0);set("responseQuarantined",summary.responses_quarantined??0);set("responseRestored",summary.responses_restored??0);
+    set("responseLatency",summary.response_latency_ms_max==null?"—":`${Number(summary.response_latency_ms_max).toFixed(3)} ms`);renderResponses(dist.responses||[]);
     set("authGate",security.authentication||"UNAVAILABLE");set("rbacGate",security.server_side_rbac||"UNAVAILABLE");
     set("csrfGate",security.csrf||"UNAVAILABLE");set("actionGate",security.privileged_actions||"UNAVAILABLE");
     set("trustGate",security.risk_is_authorization===false?"ENFORCED":"UNAVAILABLE");
     set("downloads",summary.downloads_completed);set("updated","Updated "+new Date().toLocaleTimeString());
-  }catch(_){set("distributionStatus","UNAVAILABLE");set("updated","Private API unavailable")}
+  }catch(_){set("distributionStatus","UNAVAILABLE");set("responseStatus","UNAVAILABLE");set("updated","Private API unavailable")}
 }
 async function loadAudit(){
   const root=document.querySelector(".dashboard");if(!root||root.dataset.role!=="OWNER")return;

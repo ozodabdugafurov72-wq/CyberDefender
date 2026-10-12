@@ -179,9 +179,13 @@ class LifecycleRegressionTests(unittest.TestCase):
         self.assertEqual(runner.exit_reason, "SERVICE_STOP_EVENT_SET")
 
     def test_eventlog_failure_is_isolated_from_runtime_lifecycle(self) -> None:
+        import sys
+        import types
         import agent.windows_service as host
         from unittest.mock import Mock, patch
 
+        if not hasattr(host.CyberDefenderWindowsService, "_run_attempt"):
+            self.skipTest("pywin32 service host is unavailable")
         service = object.__new__(host.CyberDefenderWindowsService)
         service._runner = None
         service._stop_event = threading.Event()
@@ -191,10 +195,14 @@ class LifecycleRegressionTests(unittest.TestCase):
         runtime.child_cleanup_verified = True
         guard = Mock(allow_optional=True)
         paths = {"fleet_token": Mock(), "endpoint_id": Mock()}
-        with patch.object(host, "configure_machine_environment", return_value=paths), \
-                patch("agent.main.build_managed_runtime", return_value=runtime), \
+        fake_main = types.ModuleType("agent.main")
+        fake_main.build_managed_runtime = Mock(return_value=runtime)
+        fake_service_manager = Mock()
+        fake_service_manager.LogInfoMsg.side_effect = RuntimeError("eventlog unavailable")
+        with patch.dict(sys.modules, {"agent.main": fake_main}), \
+                patch.object(host, "configure_machine_environment", return_value=paths), \
                 patch("agent.service_diagnostics.write_service_log"), \
-                patch.object(host.servicemanager, "LogInfoMsg", side_effect=RuntimeError("eventlog unavailable")):
+                patch.object(host, "servicemanager", fake_service_manager, create=True):
             service._run_attempt(guard)
         self.assertEqual(runtime.run_cycle.call_count, 1)
         self.assertTrue(service._runner.cleanup_verified)

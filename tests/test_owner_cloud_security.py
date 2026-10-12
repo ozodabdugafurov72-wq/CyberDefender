@@ -152,9 +152,19 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         for element_id in (
             "xdrStatus", "xdrSchema", "xdrSigned", "xdrReplay", "xdrValidation",
             "authGate", "rbacGate", "csrfGate", "actionGate", "trustGate",
+            "responseStatus", "responseTotal", "responseQuarantined", "responseRestored",
+            "responseLatency", "responseEvidence",
         ):
             self.assertIn(f'id="{element_id}"', html)
         self.assertNotIn('<span class="pass">PASS</span>', html)
+
+    def test_owner_runtime_image_includes_response_contract_dependencies(self):
+        dockerfile = Path("Dockerfile.owner-dashboard").read_text(encoding="utf-8")
+        self.assertIn("control_plane/fleet_protocol.py", dockerfile)
+        self.assertIn("control_plane/xdr_compat.py", dockerfile)
+        response_css = self.request("GET", "/static/response.css")
+        self.assertEqual(response_css.status, 200)
+        self.assertIn(b"response-row", response_css.body)
 
     def test_admin_rbac_and_privileged_action_are_server_side_denied(self):
         session_cookie, _ = self.login("admin", "Admin-Test-Password-42!")

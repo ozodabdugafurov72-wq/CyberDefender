@@ -13,10 +13,12 @@ from control_plane.fleet_protocol import PROTOCOL_VERSION, signature_headers, va
 from control_plane.xdr_compat import (
     CAPABILITY_DEVICE_INVENTORY,
     CAPABILITY_ENDPOINT_HEALTH,
+    CAPABILITY_RESPONSE_EVIDENCE,
     OCSF_DEVICE_INVENTORY_CLASS_UID,
     OCSF_SCHEMA_NAME,
     OCSF_SCHEMA_VERSION,
     validate_endpoint_id,
+    validate_response_evidence,
 )
 
 
@@ -138,6 +140,18 @@ class FleetTelemetryClient:
             "last_error": last_error,
         })
         return self._post("/api/v1/endpoints/heartbeat", payload)
+
+    def publish_response_evidence(self, evidence: dict[str, Any], *, runtime_version: str) -> bool:
+        """Publish one verified, bounded response record through signed ingest."""
+        endpoint_id = self.endpoint_id()
+        normalized = validate_response_evidence(evidence, endpoint_id=endpoint_id)
+        normalized.pop("endpoint_id", None)
+        payload = self._contract(runtime_version=runtime_version)
+        payload["capabilities"] = sorted(
+            set(payload["capabilities"]) | {CAPABILITY_RESPONSE_EVIDENCE}
+        )
+        payload["response_evidence"] = normalized
+        return self._post("/api/v1/endpoints/response-evidence", payload)
 
     def health_check(self) -> dict[str, Any]:
         return {"component":"FleetTelemetryClient","version":self.VERSION,

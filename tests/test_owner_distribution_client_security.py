@@ -25,8 +25,40 @@ def valid_state():
             "offline": 0,
             "degraded": 0,
             "critical": 0,
+            "responses_total": 1,
+            "responses_quarantined": 1,
+            "responses_restored": 0,
+            "response_latency_ms_max": 90.363,
         },
         "endpoints": [],
+        "responses": [{
+            "schema": "cyberdefender.response-evidence.v1",
+            "evidence_id": "qv2-response-001",
+            "endpoint_id": "endpoint-1",
+            "incident_id": "INC-RESPONSE-001",
+            "event_id": "event-response-001",
+            "observed_at": 1_900_000_000.0,
+            "received_at": 1_900_000_001.0,
+            "target_name": "harmless-canary.txt",
+            "target_sha256": "a" * 64,
+            "detection_types": ["HIGH_MEMORY_USAGE"],
+            "risk_score": 90,
+            "risk_level": "CRITICAL",
+            "policy_outcome": "REQUIRE_VERIFICATION",
+            "policy_reason": "critical risk requires independent verification",
+            "verifier_outcome": "VERIFIED",
+            "action_state": "QUARANTINED",
+            "verification_outcome": "QUARANTINED_VERIFIED",
+            "response_latency_ms": 90.363,
+            "execution_latency_ms": 65.681,
+            "detection_to_response_ms": 90.255,
+            "restore_latency_ms": None,
+            "evidence_ref": "evidence://INC-RESPONSE-001",
+            "production_authorization": "NOT_GRANTED",
+            "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+            "receipt_integrity": True,
+            "post_action_verification": True,
+        }],
         "xdr": {
             "status": "READY",
             "schema": "OCSF",
@@ -81,6 +113,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             value["xdr"]["signed_ingest"] = False
         if type(self).mode == "invalid-class":
             value["xdr"]["event_classes"] = [{"class_uid": 2005}]
+        if type(self).mode == "invalid-response":
+            value["responses"][0]["production_authorization"] = "GRANTED"
         raw = json.dumps(value).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -123,6 +157,7 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
         self.assertEqual(state["status"], "HEALTHY")
         self.assertTrue(state["read_only"])
         self.assertEqual(state["xdr"]["schema_version"], "1.9.0")
+        self.assertEqual(state["responses"][0]["verification_outcome"], "QUARANTINED_VERIFIED")
         self.assertEqual(state["transport"], "RAILWAY_PRIVATE_AUTHENTICATED")
 
         UpstreamHandler.mode = "invalid-xdr"
@@ -130,6 +165,10 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
         self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 
         UpstreamHandler.mode = "invalid-class"
+        rejected = self.client.state()
+        self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
+
+        UpstreamHandler.mode = "invalid-response"
         rejected = self.client.state()
         self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 

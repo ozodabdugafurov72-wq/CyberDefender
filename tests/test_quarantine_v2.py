@@ -349,7 +349,7 @@ class QuarantineV2Tests(unittest.TestCase):
         self.assertFalse(self.executor.restore("missing", authorized=False, policy_valid=True, clean_verified=True)["accepted"])
         restore = self.executor.restore("missing", authorized=True, policy_valid=True, clean_verified=True)
         self.assertFalse(restore["accepted"])
-        self.assertEqual(restore["reason"], "RESTORE_NOT_IMPLEMENTED_FAIL_CLOSED")
+        self.assertEqual(restore["reason"], "RESTORE_LEGACY_BOOLEAN_AUTHORIZATION_REJECTED")
         self.assertNotIn("token_mac", json.dumps(self.executor.health_check()))
 
     def test_dry_run_compatibility_has_no_filesystem_effect(self) -> None:

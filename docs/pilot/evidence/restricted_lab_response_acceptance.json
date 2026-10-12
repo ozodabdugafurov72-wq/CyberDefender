@@ -1,0 +1,91 @@
+{
+  "cloud_response_evidence": {
+    "action_state": "RESTORED",
+    "detection_to_response_ms": 117.278,
+    "detection_types": [
+      "HIGH_MEMORY_USAGE"
+    ],
+    "event_id": "acceptance-1233f3c37b8547379856bcc0e2399077",
+    "evidence_id": "qv2-8bef7e58653f4c0583b0f2839e2c1a5f-restored",
+    "evidence_ref": "evidence://acceptance-1233f3c37b8547379856bcc0e2399077",
+    "execution_latency_ms": 98.094,
+    "incident_id": "INC-54C8CCBEEC6152BD806C6F98BD567BFD",
+    "lab_authorization": "RESTORE_CAPABILITY_CONSUMED",
+    "policy_outcome": "REQUIRE_VERIFICATION",
+    "policy_reason": "PRIVILEGED_ACTION_REQUIRES_VERIFICATION",
+    "post_action_verification": true,
+    "production_authorization": "NOT_GRANTED",
+    "receipt_integrity": true,
+    "response_latency_ms": 116.74,
+    "restore_latency_ms": 51.486,
+    "risk_level": "CRITICAL",
+    "risk_score": 90,
+    "schema": "cyberdefender.response-evidence.v1",
+    "target_name": "harmless-response-canary.txt",
+    "target_sha256": "282dd98ec0cab3b8c630b36ca156c655c0cdd430f4c56f85f660170a22fc61a7",
+    "verification_outcome": "RESTORED_VERIFIED",
+    "verifier_outcome": "VERIFIED"
+  },
+  "event": {
+    "detection_types": [
+      "HIGH_MEMORY_USAGE"
+    ],
+    "endpoint_id": "restricted-lab-endpoint",
+    "event_id": "acceptance-1233f3c37b8547379856bcc0e2399077",
+    "policy_outcome": "REQUIRE_VERIFICATION",
+    "risk_level": "CRITICAL",
+    "risk_score": 90,
+    "tenant_id": "restricted-lab-tenant",
+    "verifier_outcome": "VERIFIED"
+  },
+  "evidence": {
+    "containment_state_before_restore": "QUARANTINED",
+    "containment_verification": "QUARANTINED_VERIFIED",
+    "final_state": "RESTORED",
+    "pipeline_trace": [
+      "TELEMETRY",
+      "DETECTION",
+      "CORRELATION",
+      "RISK",
+      "POLICY",
+      "INDEPENDENT_VERIFIER",
+      "SAFETY_CORE_LAB_AUTHORIZATION",
+      "CAPABILITY_ISSUER",
+      "BOUNDED_QUARANTINE_EXECUTOR",
+      "QUARANTINE_INDEPENDENT_VERIFIER"
+    ],
+    "quarantine_id": "qv2-8bef7e58653f4c0583b0f2839e2c1a5f",
+    "restore_verification": "RESTORED_VERIFIED",
+    "target_name": "harmless-response-canary.txt",
+    "target_sha256": "282dd98ec0cab3b8c630b36ca156c655c0cdd430f4c56f85f660170a22fc61a7"
+  },
+  "gates": {
+    "cloud_response_contract_valid": true,
+    "content_hash_preserved": true,
+    "owner_containment_evidence": true,
+    "owner_restore_evidence": true,
+    "production_authorization_absent": true,
+    "quarantine_receipt_integrity": true,
+    "real_detection_chain": true,
+    "response_slo": true,
+    "restore_receipt_integrity": true,
+    "restore_slo": true,
+    "secrets_not_exported": true,
+    "source_removed": true,
+    "verified_quarantine": true,
+    "verified_restore": true
+  },
+  "generated_at": "2026-10-12T12:15:50.162821+00:00",
+  "latency_ms": {
+    "detection_to_response": 117.278,
+    "filesystem_executor": 98.094,
+    "gate_pipeline": 116.74,
+    "response_slo": 1000.0,
+    "restore": 51.486,
+    "restore_slo": 1000.0
+  },
+  "production_authorization": "NOT_GRANTED",
+  "schema": "cyberdefender.restricted-lab-response-acceptance.v1",
+  "scope": "ONE_HARMLESS_TEMPORARY_LAB_FILE",
+  "status": "PASS"
+}

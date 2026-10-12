@@ -9,6 +9,7 @@ network, service, registry, firewall, or process operation is available.
 
 import hashlib
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from agent.quarantine.contracts import (
     QuarantineCapabilityIssuer,
     QuarantineContractError,
     QuarantineRequest,
+    RestoreCapabilityIssuer,
+    RestoreRequest,
 )
 from agent.quarantine.v2_vault import BoundedQuarantineVault, QuarantineVaultError
 from agent.quarantine.verifier import QuarantineIndependentVerifier
@@ -30,11 +33,13 @@ class BoundedQuarantineExecutor:
     FORBIDDEN_SUFFIXES = frozenset({".exe", ".dll", ".sys", ".drv", ".pyd", ".py", ".pyc", ".msi", ".bat", ".cmd", ".ps1", ".com"})
 
     def __init__(self, vault: BoundedQuarantineVault, issuer: QuarantineCapabilityIssuer,
-                 *, approved_root: str | Path, mode: str = LAB_CANARY_EXECUTION) -> None:
+                 *, approved_root: str | Path, mode: str = LAB_CANARY_EXECUTION,
+                 restore_issuer: RestoreCapabilityIssuer | None = None) -> None:
         if mode not in (LAB_CANARY_EXECUTION, DRY_RUN_ONLY):
             raise ValueError("unsupported executor mode")
         self.vault = vault
         self.issuer = issuer
+        self.restore_issuer = restore_issuer or RestoreCapabilityIssuer()
         self.approved_root = Path(approved_root).expanduser().resolve()
         self.mode = mode
         self.verifier = QuarantineIndependentVerifier(vault)
@@ -141,6 +146,8 @@ class BoundedQuarantineExecutor:
         return resolved, None
 
     def execute(self, request: QuarantineRequest | dict[str, Any], capability: Any = None) -> dict[str, Any]:
+        execution_started_at = time.time()
+        execution_started_ns = time.perf_counter_ns()
         try:
             req = request if isinstance(request, QuarantineRequest) else QuarantineRequest.from_mapping(request)
         except QuarantineContractError:
@@ -219,9 +226,14 @@ class BoundedQuarantineExecutor:
                                           quarantine_id=final["quarantine_id"], state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
                                           capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
             try:
+                execution_completed_at = time.time()
+                execution_latency_ms = (time.perf_counter_ns() - execution_started_ns) / 1_000_000.0
                 final = self.vault.mark_verified(
                     final["quarantine_id"],
                     verification_outcome=str(verification.get("verification_outcome") or "QUARANTINED_VERIFIED"),
+                    execution_started_at=execution_started_at,
+                    execution_completed_at=execution_completed_at,
+                    execution_latency_ms=execution_latency_ms,
                 )
             except (QuarantineVaultError, OSError, ValueError):
                 failed = self.vault.mark_after_effect_failure(final["quarantine_id"], "VERIFICATION_RECORD_WRITE_FAILURE")
@@ -236,6 +248,9 @@ class BoundedQuarantineExecutor:
                     "production_authorization": "NOT_GRANTED",
                     "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
                     "capability_id": consumed["capability_id"], "scope_digest": consumed["scope_digest"],
+                    "execution_started_at": execution_started_at,
+                    "execution_completed_at": execution_completed_at,
+                    "execution_latency_ms": round(execution_latency_ms, 3),
                     "real_world_effect": True, "fail_closed": True}
         except (QuarantineContractError, QuarantineVaultError, OSError, ValueError):
             if record is not None and target is not None and not target.exists():
@@ -244,11 +259,114 @@ class BoundedQuarantineExecutor:
                                           scope_digest=(consumed or {}).get("scope_digest"))
             return self._deny("QUARANTINE_DENIED")
 
-    def restore(self, quarantine_id: str, *, authorized: bool = False, policy_valid: bool = False,
-                clean_verified: bool = False) -> dict[str, Any]:
-        if not (authorized is True and policy_valid is True and clean_verified is True):
-            return self._deny("RESTORE_REQUIRES_AUTH_POLICY_REATTESTATION")
-        return self._deny("RESTORE_NOT_IMPLEMENTED_FAIL_CLOSED")
+    def _safe_restore_destination(self, request: RestoreRequest, record: dict[str, Any]) -> tuple[Path, str | None]:
+        root = self._resolved(request.approved_root)
+        target = self._resolved(request.target)
+        if root is None or root != self.approved_root:
+            return Path(), "RESTORE_ROOT_MISMATCH"
+        if target is None:
+            return Path(), "RESTORE_TARGET_UNRESOLVED"
+        try:
+            target.relative_to(root)
+            if target != Path(str(record.get("original_path", ""))).expanduser().resolve(strict=False):
+                return Path(), "RESTORE_ORIGINAL_PATH_MISMATCH"
+            if target.exists() or target.is_symlink():
+                return Path(), "RESTORE_DESTINATION_EXISTS"
+            if not target.parent.is_dir() or self.vault._has_reparse_component(target.parent):
+                return Path(), "RESTORE_PARENT_INVALID"
+        except (QuarantineVaultError, OSError, RuntimeError, ValueError):
+            return Path(), "RESTORE_DESTINATION_INVALID"
+        if not self._marker_valid():
+            return Path(), "DEDICATED_CANARY_ROOT_REQUIRED"
+        if self._protected_path(target):
+            return Path(), "PROTECTED_PATH_DENIED"
+        if target == root / CANARY_MARKER_FILENAME:
+            return Path(), "CANARY_MARKER_DENIED"
+        return target, None
+
+    def restore(self, request: RestoreRequest | dict[str, Any] | str, capability: Any = None, **legacy: Any) -> dict[str, Any]:
+        """Restore one verified lab canary through a single-use capability."""
+        if legacy:
+            return self._deny("RESTORE_LEGACY_BOOLEAN_AUTHORIZATION_REJECTED")
+        restore_started_at = time.time()
+        restore_started_ns = time.perf_counter_ns()
+        try:
+            req = request if isinstance(request, RestoreRequest) else RestoreRequest.from_mapping(request)
+        except QuarantineContractError:
+            return self._deny("INVALID_RESTORE_REQUEST")
+        if self.mode != LAB_CANARY_EXECUTION or capability is None:
+            return self._deny("RESTORE_CAPABILITY_REQUIRED")
+        try:
+            consumed = self.restore_issuer.consume(capability, req)
+            record = self.vault.get_verified_record(req.quarantine_id)
+            if not isinstance(record, dict) or record.get("state") != "QUARANTINED":
+                return self._deny("RESTORE_RECORD_NOT_QUARANTINED")
+            if (
+                record.get("incident_id") != req.incident_id
+                or record.get("target_sha256") != req.target_sha256
+                or req.idempotency_key != f"{req.quarantine_id}:restore"
+            ):
+                return self._deny("RESTORE_SCOPE_MISMATCH")
+            destination, failure = self._safe_restore_destination(req, record)
+            if failure:
+                return self._deny(failure)
+            restored = self.vault.restore(
+                record,
+                destination,
+                capability_id=consumed["capability_id"],
+                scope_digest=consumed["scope_digest"],
+                requester=req.requester,
+                restore_reason=req.restore_reason,
+            )
+            if restored.get("state") != "RESTORED":
+                if restored.get("state") == "UNKNOWN_AFTER_RESTORE":
+                    return self._after_effect(
+                        restored.get("failure_code", "RESTORE_POST_EFFECT_FAILURE"),
+                        quarantine_id=req.quarantine_id,
+                        state="UNKNOWN_AFTER_RESTORE",
+                        capability_id=consumed["capability_id"],
+                        scope_digest=consumed["scope_digest"],
+                    )
+                return self._deny(restored.get("failure_code", "RESTORE_FAILED"))
+            verification = self.verifier.verify_restore(
+                req.quarantine_id,
+                original_path=str(destination),
+                target_sha256=req.target_sha256,
+            )
+            if verification.get("verified") is not True:
+                failed = self.vault.mark_after_effect_failure(req.quarantine_id, "RESTORE_POST_ACTION_UNVERIFIED")
+                return self._after_effect(
+                    failed.get("failure_code", "RESTORE_POST_ACTION_UNVERIFIED"),
+                    quarantine_id=req.quarantine_id,
+                    state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
+                    capability_id=consumed["capability_id"],
+                    scope_digest=consumed["scope_digest"],
+                )
+            restore_completed_at = time.time()
+            restore_latency_ms = (time.perf_counter_ns() - restore_started_ns) / 1_000_000.0
+            self.vault.mark_restore_verified(
+                req.quarantine_id,
+                verification_outcome="RESTORED_VERIFIED",
+                restore_latency_ms=restore_latency_ms,
+            )
+            return {
+                "component": "BoundedQuarantineExecutor", "version": self.VERSION,
+                "accepted": True, "executed": True, "status": "RESTORED",
+                "quarantine_id": req.quarantine_id, "incident_id": req.incident_id,
+                "target": str(destination), "target_sha256": req.target_sha256,
+                "verification": verification,
+                "restore_started_at": restore_started_at,
+                "restore_completed_at": restore_completed_at,
+                "restore_latency_ms": round(restore_latency_ms, 3),
+                "production_authorization": "NOT_GRANTED",
+                "lab_authorization": "RESTORE_CAPABILITY_CONSUMED",
+                "capability_id": consumed["capability_id"],
+                "scope_digest": consumed["scope_digest"],
+                "real_world_effect": True, "recovery_required": False,
+                "fail_closed": True,
+            }
+        except (QuarantineContractError, QuarantineVaultError, OSError, RuntimeError, ValueError):
+            return self._deny("RESTORE_DENIED")
 
     def health_check(self) -> dict[str, Any]:
         vault_health = self.vault.health_check()
@@ -256,5 +374,6 @@ class BoundedQuarantineExecutor:
                 "status": "HEALTHY" if vault_health.get("status") == "HEALTHY" else "DEGRADED",
                 "mode": self.mode, "executions": self.executions, "rejected": self.rejected,
                 "real_world_effect_scope": "ONE_LAB_FILE_ONLY" if self.mode == LAB_CANARY_EXECUTION else "NONE",
-                "vault": vault_health, "verifier_process_separate": False,
+                "vault": vault_health, "restore_issuer": self.restore_issuer.health_check(),
+                "verifier_process_separate": False,
                 "fail_closed": True, "secrets_exported": False}

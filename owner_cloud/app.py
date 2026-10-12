@@ -115,7 +115,7 @@ class Application:
             except Exception:
                 healthy = False
             return self._json(200 if healthy else 503, {"status": "ok" if healthy else "unavailable"})
-        if method == "GET" and path in {"/static/app.css", "/static/app.js"}:
+        if method == "GET" and path in {"/static/app.css", "/static/response.css", "/static/app.js"}:
             return self._static(path)
         if method == "GET" and path == "/login":
             return self._login_page()
@@ -352,7 +352,7 @@ class Application:
             return self._json(401, {"error": "AUTHENTICATION_REQUIRED"})
         page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CyberDefender Owner Control</title><link rel="stylesheet" href="/static/app.css"></head>
+<title>CyberDefender Owner Control</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/response.css"></head>
 <body><header class="topbar"><div><span class="brand-mark small">CD</span><b>CyberDefender</b>
 <span class="badge">READ ONLY</span></div><div class="identity"><span>{html.escape(session["username"])}</span>
 <strong>{html.escape(session["role"])}</strong><form method="post" action="/logout">
@@ -372,6 +372,11 @@ class Application:
 <li><b>Compatibility</b><span id="xdrStatus">CHECKING</span></li><li><b>Schema</b><span id="xdrSchema">—</span></li>
 <li><b>Signed ingest</b><span id="xdrSigned">CHECKING</span></li><li><b>Replay protection</b><span id="xdrReplay">CHECKING</span></li>
 <li><b>Runtime contract</b><span id="xdrValidation">CHECKING</span></li></ul></section>
+<section class="panel"><div class="panel-title"><h2>Verified response evidence</h2><span id="responseStatus">AWAITING SIGNED EVIDENCE</span></div>
+<div class="grid compact"><article><span>Verified responses</span><b id="responseTotal">0</b></article>
+<article><span>Quarantined</span><b id="responseQuarantined">0</b></article><article><span>Restored</span><b id="responseRestored">0</b></article>
+<article><span>Max response</span><b id="responseLatency">—</b></article></div>
+<div id="responseEvidence" class="response-list"><p class="muted">No signed endpoint response evidence received.</p></div></section>
 <section class="panel"><h2>Security gates</h2><ul class="gates">
 <li><b>Authentication</b><span id="authGate">CHECKING</span></li><li><b>Server-side RBAC</b><span id="rbacGate">CHECKING</span></li>
 <li><b>CSRF</b><span id="csrfGate">CHECKING</span></li><li><b>Privileged actions</b><span id="actionGate">CHECKING</span></li>
@@ -413,7 +418,7 @@ class Application:
         )
 
     def _static(self, path: str) -> Response:
-        name = "app.css" if path.endswith(".css") else "app.js"
+        name = path.rsplit("/", 1)[-1]
         target = STATIC_ROOT / name
         try:
             body = target.read_bytes()

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.request
 from typing import Any
+
+from control_plane.xdr_compat import validate_response_evidence
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -32,11 +35,23 @@ class DistributionClient:
             "downloads_total", "downloads_completed", "downloads_failed",
             "endpoints_total", "installed", "pending", "install_failed",
             "revoked", "online", "offline", "degraded", "critical",
+            "responses_total", "responses_quarantined", "responses_restored",
         ):
             item = raw_summary.get(key, 0)
             if isinstance(item, bool) or not isinstance(item, int) or item < 0:
                 raise ValueError("invalid summary value")
             summary[key] = item
+        latency_max = raw_summary.get("response_latency_ms_max")
+        if latency_max is not None:
+            if (
+                isinstance(latency_max, bool)
+                or not isinstance(latency_max, (int, float))
+                or not math.isfinite(float(latency_max))
+                or latency_max < 0
+            ):
+                raise ValueError("invalid response latency summary")
+            latency_max = round(float(latency_max), 3)
+        summary["response_latency_ms_max"] = latency_max
         xdr = value.get("xdr")
         if not isinstance(xdr, dict):
             raise ValueError("XDR status required")
@@ -60,10 +75,36 @@ class DistributionClient:
         endpoints = value.get("endpoints")
         if not isinstance(endpoints, list) or len(endpoints) > 100:
             raise ValueError("invalid endpoint list")
+        raw_responses = value.get("responses")
+        if not isinstance(raw_responses, list) or len(raw_responses) > 100:
+            raise ValueError("invalid response evidence list")
+        responses = []
+        for raw in raw_responses:
+            if not isinstance(raw, dict):
+                raise ValueError("invalid response evidence")
+            endpoint_id = raw.get("endpoint_id")
+            evidence_fields = {
+                key: item
+                for key, item in raw.items()
+                if key not in {"endpoint_id", "observed_at", "received_at"}
+            }
+            normalized = validate_response_evidence(evidence_fields, endpoint_id=endpoint_id)
+            for timestamp_field in ("observed_at", "received_at"):
+                timestamp = raw.get(timestamp_field)
+                if (
+                    isinstance(timestamp, bool)
+                    or not isinstance(timestamp, (int, float))
+                    or not math.isfinite(float(timestamp))
+                    or timestamp < 0
+                ):
+                    raise ValueError("invalid response evidence timestamp")
+                normalized[timestamp_field] = float(timestamp)
+            responses.append(normalized)
         return {
             "status": "HEALTHY",
             "summary": summary,
             "endpoints": endpoints,
+            "responses": responses,
             "read_only": True,
             "xdr": xdr,
         }

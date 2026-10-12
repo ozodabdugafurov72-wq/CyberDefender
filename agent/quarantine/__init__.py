@@ -7,6 +7,8 @@ from .contracts import (
     QuarantineCapabilityIssuer,
     QuarantineContractError,
     QuarantineRequest,
+    RestoreCapabilityIssuer,
+    RestoreRequest,
     canonical_scope_digest,
 )
 from .executor import BoundedQuarantineExecutor
@@ -26,6 +28,8 @@ __all__ = [
     "QuarantineContractError",
     "QuarantineIndependentVerifier",
     "QuarantineRequest",
+    "RestoreCapabilityIssuer",
+    "RestoreRequest",
     "QuarantineVaultError",
     "canonical_scope_digest",
     "LabQuarantineCoordinator",

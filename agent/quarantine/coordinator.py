@@ -214,6 +214,7 @@ class LabQuarantineCoordinator:
     ) -> dict[str, Any]:
         """Process one marked telemetry event; every failure is fail-closed."""
         started = time.time()
+        started_ns = time.perf_counter_ns()
         self.runs += 1
         if operator_approved is not True:
             return self._failure("ADMISSION", "EXPLICIT_OPERATOR_APPROVAL_REQUIRED")
@@ -396,6 +397,28 @@ class LabQuarantineCoordinator:
             result = self.executor.execute(request, capability)
             if not isinstance(result, dict):
                 return self._failure("BOUNDED_QUARANTINE_EXECUTOR", "INVALID_EXECUTOR_RESULT", event_id=event_id, incident_id=incident_id, endpoint_id=endpoint_id, tenant_id=tenant_id)
+            completed = time.time()
+            response_latency_ms = (time.perf_counter_ns() - started_ns) / 1_000_000.0
+            event_timestamp = telemetry_event.get("timestamp")
+            detection_to_response_ms: float | None = None
+            if isinstance(event_timestamp, (int, float)) and not isinstance(event_timestamp, bool):
+                candidate = (completed - float(event_timestamp)) * 1000.0
+                if 0.0 <= candidate <= 86_400_000.0:
+                    detection_to_response_ms = candidate
+            latency_evidence_persisted = False
+            quarantine_id = result.get("quarantine_id")
+            if result.get("status") == "QUARANTINED" and isinstance(quarantine_id, str):
+                try:
+                    self.executor.vault.mark_response_metrics(
+                        quarantine_id,
+                        response_started_at=started,
+                        response_completed_at=completed,
+                        response_latency_ms=response_latency_ms,
+                        detection_to_response_ms=detection_to_response_ms,
+                    )
+                    latency_evidence_persisted = True
+                except Exception:
+                    latency_evidence_persisted = False
             verification_result = result.get("verification") if isinstance(result.get("verification"), dict) else {}
             output = {
                 "component": "LabQuarantineCoordinator",
@@ -432,7 +455,15 @@ class LabQuarantineCoordinator:
                 "recovery_required": result.get("recovery_required", False),
                 "pipeline_trace": list(self.TRACE),
                 "started_at": started,
-                "completed_at": time.time(),
+                "completed_at": completed,
+                "response_latency_ms": round(response_latency_ms, 3),
+                "execution_latency_ms": result.get("execution_latency_ms"),
+                "detection_to_response_ms": (
+                    round(detection_to_response_ms, 3)
+                    if detection_to_response_ms is not None
+                    else None
+                ),
+                "latency_evidence_persisted": latency_evidence_persisted,
                 "fail_closed": True,
             }
             if output["accepted"]:

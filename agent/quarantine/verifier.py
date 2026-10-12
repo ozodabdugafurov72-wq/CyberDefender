@@ -74,6 +74,86 @@ class QuarantineIndependentVerifier:
         except (QuarantineVaultError, OSError, TypeError, ValueError):
             return self._fail("VERIFICATION_ERROR")
 
+    def verify_restore_eligibility(self, quarantine_id: str) -> dict[str, Any]:
+        """Prove that one intact lab object is eligible for controlled reset."""
+        try:
+            record = self.vault.get_verified_record(quarantine_id)
+            if not isinstance(record, dict) or record.get("state") != "QUARANTINED":
+                return self._fail("RECORD_NOT_QUARANTINED")
+            original = Path(str(record.get("original_path", ""))).expanduser().resolve(strict=False)
+            root = Path(str(record.get("approved_root", ""))).expanduser().resolve(strict=True)
+            original.relative_to(root)
+            if original.exists() or original.is_symlink():
+                return self._fail("RESTORE_DESTINATION_NOT_EMPTY")
+            if self.vault._has_reparse_component(original.parent):
+                return self._fail("RESTORE_PARENT_REPARSE")
+            evidence_id = record.get("evidence_quarantine_id")
+            if not isinstance(evidence_id, str) or not self.vault.evidence_vault.verify_evidence(evidence_id):
+                return self._fail("EVIDENCE_NOT_VERIFIED")
+            if not self.vault.verify_object(record):
+                return self._fail("CONTAINED_OBJECT_NOT_VERIFIED")
+            if not self.vault.verify_receipt(quarantine_id, record):
+                return self._fail("RECEIPT_NOT_VERIFIED")
+            return {
+                "component": "QuarantineIndependentVerifier", "version": self.VERSION,
+                "accepted": True, "verified": True,
+                "verification_outcome": "RESTORE_ELIGIBLE_VERIFIED",
+                "quarantine_id": quarantine_id,
+                "incident_id": record.get("incident_id"),
+                "target": str(original),
+                "target_sha256": record.get("target_sha256"),
+                "production_authorization": "NOT_GRANTED",
+                "authorization": "NOT_GRANTED",
+                "real_world_effect_observed": False,
+                "fail_closed": True,
+            }
+        except (QuarantineVaultError, OSError, RuntimeError, TypeError, ValueError):
+            return self._fail("RESTORE_ELIGIBILITY_ERROR")
+
+    def verify_restore(self, quarantine_id: str, *, original_path: str, target_sha256: str) -> dict[str, Any]:
+        """Independently verify the exact target was restored and the vault copy removed."""
+        try:
+            record = self.vault.get_verified_record(quarantine_id)
+            if not isinstance(record, dict) or record.get("state") != "RESTORED":
+                return self._fail("RECORD_NOT_RESTORED")
+            if record.get("target_sha256") != target_sha256:
+                return self._fail("RESTORE_HASH_SCOPE_MISMATCH")
+            expected = Path(str(record.get("original_path", ""))).expanduser().resolve(strict=False)
+            supplied = Path(original_path).expanduser().resolve(strict=False)
+            if expected != supplied:
+                return self._fail("RESTORE_PATH_SCOPE_MISMATCH")
+            if self.vault._has_reparse_component(supplied):
+                return self._fail("RESTORED_TARGET_REPARSE")
+            if not self.vault.verify_restored_target(record):
+                return self._fail("RESTORED_TARGET_NOT_VERIFIED")
+            if Path(str(record.get("object_path", ""))).exists():
+                return self._fail("QUARANTINE_OBJECT_STILL_PRESENT")
+            if not self.vault.verify_receipt(quarantine_id, record):
+                return self._fail("CONTAINMENT_RECEIPT_NOT_VERIFIED")
+            if not self.vault.verify_restore_receipt(quarantine_id, record):
+                return self._fail("RESTORE_RECEIPT_NOT_VERIFIED")
+            evidence_id = record.get("evidence_quarantine_id")
+            if not isinstance(evidence_id, str) or not self.vault.evidence_vault.verify_evidence(evidence_id):
+                return self._fail("EVIDENCE_NOT_VERIFIED")
+            return {
+                "component": "QuarantineIndependentVerifier", "version": self.VERSION,
+                "accepted": True, "verified": True,
+                "verification_outcome": "RESTORED_VERIFIED",
+                "quarantine_id": quarantine_id,
+                "incident_id": record.get("incident_id"),
+                "target": str(supplied),
+                "target_sha256": target_sha256,
+                "restore_capability_id": record.get("restore_capability_id"),
+                "restore_scope_digest": record.get("restore_scope_digest"),
+                "production_authorization": "NOT_GRANTED",
+                "lab_authorization": "RESTORE_CAPABILITY_CONSUMED",
+                "authorization": "NOT_GRANTED",
+                "real_world_effect_observed": True,
+                "fail_closed": True,
+            }
+        except (QuarantineVaultError, OSError, RuntimeError, TypeError, ValueError):
+            return self._fail("RESTORE_VERIFICATION_ERROR")
+
     @staticmethod
     def _fail(reason: str) -> dict[str, Any]:
         return {

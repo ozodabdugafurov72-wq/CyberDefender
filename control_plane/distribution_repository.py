@@ -4,6 +4,7 @@ import sqlite3
 import time
 import uuid
 import math
+import json
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -16,6 +17,7 @@ from control_plane.xdr_compat import (
     validate_endpoint_id,
     validate_hostname,
     validate_runtime_version,
+    validate_response_evidence,
 )
 
 
@@ -27,8 +29,8 @@ class DistributionRepository:
     crypto admission, replay protection or durable event delivery.
     """
 
-    VERSION = "1.1"
-    SCHEMA_VERSION = 2
+    VERSION = "1.2"
+    SCHEMA_VERSION = 3
     VALID_INSTALL_STATES = {"PENDING", "INSTALLED", "FAILED", "REVOKED"}
     VALID_HEALTH_STATES = {"UNKNOWN", "HEALTHY", "DEGRADED", "CRITICAL", "OFFLINE"}
     VALID_SERVICE_STATES = {
@@ -127,6 +129,52 @@ class DistributionRepository:
                     )
                     self._conn.execute(
                         "INSERT INTO distribution_schema(version, applied_at) VALUES(2, ?)",
+                        (time.time(),),
+                    )
+                    current = 2
+                if int(current) < 3:
+                    self._conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS fleet_response_evidence (
+                            evidence_id TEXT PRIMARY KEY,
+                            endpoint_id TEXT NOT NULL,
+                            incident_id TEXT NOT NULL,
+                            event_id TEXT NOT NULL,
+                            observed_at REAL NOT NULL,
+                            received_at REAL NOT NULL,
+                            target_name TEXT NOT NULL,
+                            target_sha256 TEXT NOT NULL,
+                            detection_types_json TEXT NOT NULL,
+                            risk_score REAL NOT NULL,
+                            risk_level TEXT NOT NULL,
+                            policy_outcome TEXT NOT NULL,
+                            policy_reason TEXT NOT NULL,
+                            verifier_outcome TEXT NOT NULL,
+                            action_state TEXT NOT NULL,
+                            verification_outcome TEXT NOT NULL,
+                            response_latency_ms REAL NOT NULL,
+                            execution_latency_ms REAL NOT NULL,
+                            detection_to_response_ms REAL NOT NULL,
+                            restore_latency_ms REAL,
+                            evidence_ref TEXT NOT NULL,
+                            production_authorization TEXT NOT NULL,
+                            lab_authorization TEXT NOT NULL,
+                            receipt_integrity INTEGER NOT NULL,
+                            post_action_verification INTEGER NOT NULL,
+                            FOREIGN KEY(endpoint_id) REFERENCES fleet_endpoints(endpoint_id)
+                        )
+                        """
+                    )
+                    self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_response_evidence_received "
+                        "ON fleet_response_evidence(received_at DESC)"
+                    )
+                    self._conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_response_evidence_endpoint "
+                        "ON fleet_response_evidence(endpoint_id, received_at DESC)"
+                    )
+                    self._conn.execute(
+                        "INSERT INTO distribution_schema(version, applied_at) VALUES(3, ?)",
                         (time.time(),),
                     )
                 final = self._conn.execute("SELECT COALESCE(MAX(version),0) AS v FROM distribution_schema").fetchone()["v"]
@@ -294,6 +342,60 @@ class DistributionRepository:
                 self._conn.execute("ROLLBACK")
                 raise
 
+    def record_response_evidence(self, value: dict[str, Any], *, endpoint_id: str,
+                                 observed_at: float) -> dict[str, Any]:
+        evidence = validate_response_evidence(value, endpoint_id=endpoint_id)
+        observed = float(observed_at)
+        if not math.isfinite(observed):
+            raise ValueError("invalid observed_at")
+        received = time.time()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO fleet_response_evidence(
+                    evidence_id,endpoint_id,incident_id,event_id,observed_at,received_at,
+                    target_name,target_sha256,detection_types_json,risk_score,risk_level,
+                    policy_outcome,policy_reason,verifier_outcome,action_state,verification_outcome,
+                    response_latency_ms,execution_latency_ms,detection_to_response_ms,restore_latency_ms,
+                    evidence_ref,production_authorization,lab_authorization,receipt_integrity,
+                    post_action_verification
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    evidence["evidence_id"], evidence["endpoint_id"], evidence["incident_id"],
+                    evidence["event_id"], observed, received, evidence["target_name"],
+                    evidence["target_sha256"], json.dumps(evidence["detection_types"], separators=(",", ":")),
+                    evidence["risk_score"], evidence["risk_level"], evidence["policy_outcome"],
+                    evidence["policy_reason"], evidence["verifier_outcome"], evidence["action_state"],
+                    evidence["verification_outcome"], evidence["response_latency_ms"],
+                    evidence["execution_latency_ms"], evidence["detection_to_response_ms"],
+                    evidence["restore_latency_ms"], evidence["evidence_ref"],
+                    evidence["production_authorization"], evidence["lab_authorization"], 1, 1,
+                ),
+            )
+        return dict(evidence, observed_at=observed, received_at=received)
+
+    def recent_response_evidence(self, limit: int = 100) -> list[dict[str, Any]]:
+        bounded = max(1, min(int(limit), 100))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM fleet_response_evidence ORDER BY received_at DESC LIMIT ?",
+                (bounded,),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                detections = json.loads(item.pop("detection_types_json"))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                detections = []
+            item["schema"] = "cyberdefender.response-evidence.v1"
+            item["detection_types"] = detections if isinstance(detections, list) else []
+            item["receipt_integrity"] = item.get("receipt_integrity") == 1
+            item["post_action_verification"] = item.get("post_action_verification") == 1
+            result.append(item)
+        return result
+
     def summary(self, *, online_after_seconds: float = 90.0) -> dict[str, Any]:
         cutoff = time.time() - max(1.0, float(online_after_seconds))
         with self._lock:
@@ -317,8 +419,26 @@ class DistributionRepository:
                   SUM(CASE WHEN health_state='CRITICAL' THEN 1 ELSE 0 END) AS critical
                 FROM fleet_endpoints
             """, (cutoff, cutoff)).fetchone()
+            response = self._conn.execute(
+                """
+                SELECT COUNT(*) responses_total,
+                  SUM(CASE WHEN action_state='QUARANTINED' THEN 1 ELSE 0 END) responses_quarantined,
+                  SUM(CASE WHEN action_state='RESTORED' THEN 1 ELSE 0 END) responses_restored,
+                  MAX(response_latency_ms) response_latency_ms_max
+                FROM fleet_response_evidence
+                """
+            ).fetchone()
         result = {k: int((row[k] if row else 0) or 0) for k in ("downloads_total","downloads_completed","downloads_failed")}
         result.update({k: int((fleet[k] if fleet else 0) or 0) for k in ("endpoints_total","installed","pending","install_failed","revoked","online","offline","degraded","critical")})
+        result.update({
+            key: int((response[key] if response else 0) or 0)
+            for key in ("responses_total", "responses_quarantined", "responses_restored")
+        })
+        result["response_latency_ms_max"] = (
+            float(response["response_latency_ms_max"])
+            if response and response["response_latency_ms_max"] is not None
+            else None
+        )
         result.update({"status":"HEALTHY", "version":self.VERSION, "authoritative":False, "exact_download_events":True,
                        "people_identity_counted":False, "online_after_seconds":float(online_after_seconds)})
         return result

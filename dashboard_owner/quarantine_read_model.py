@@ -243,6 +243,32 @@ class QuarantineReadModel:
         )
         return bool(linked and attribution_linked)
 
+    def _verify_restore_receipt(self, root: Path, record: dict[str, Any]) -> bool:
+        quarantine_id = self._safe_text(record.get("quarantine_id"), 128)
+        if quarantine_id is None or Path(quarantine_id).name != quarantine_id:
+            return False
+        receipt = self._read_json(root / "v2-restore-receipts" / f"{quarantine_id}.json")
+        if not isinstance(receipt, dict):
+            return False
+        supplied = receipt.get("receipt_sha256")
+        unsigned = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+        return bool(
+            isinstance(supplied, str)
+            and hmac.compare_digest(supplied, self._sha256(self._canonical(unsigned)))
+            and receipt.get("state") == "RESTORED"
+            and receipt.get("quarantine_id") == record.get("quarantine_id")
+            and receipt.get("incident_id") == record.get("incident_id")
+            and receipt.get("target") == record.get("restored_path")
+            and receipt.get("target_sha256") == record.get("target_sha256")
+            and receipt.get("target_size") == record.get("target_size")
+            and receipt.get("restore_capability_id") == record.get("restore_capability_id")
+            and receipt.get("restore_scope_digest") == record.get("restore_scope_digest")
+            and receipt.get("restore_reason") == record.get("restore_reason")
+            and receipt.get("containment_receipt_sha256") == record.get("receipt_sha256")
+            and receipt.get("production_authorization") == "NOT_GRANTED"
+            and receipt.get("lab_authorization") == "RESTORE_CAPABILITY_CONSUMED"
+        )
+
     def _verify_object(self, root: Path, record: dict[str, Any]) -> bool:
         object_path_text = self._safe_text(record.get("object_path"), 1024)
         target_hash = self._safe_text(record.get("target_sha256"), 64)
@@ -258,8 +284,33 @@ class QuarantineReadModel:
         except (OSError, TypeError, ValueError):
             return False
 
+    def _verify_restored_target(self, root: Path, record: dict[str, Any]) -> bool:
+        path_text = self._safe_text(record.get("restored_path"), 1024)
+        expected_hash = self._safe_text(record.get("target_sha256"), 64)
+        object_path_text = self._safe_text(record.get("object_path"), 1024)
+        if path_text is None or expected_hash is None or object_path_text is None:
+            return False
+        target = Path(path_text).expanduser()
+        approved_root_text = self._safe_text(record.get("approved_root"), 1024)
+        if approved_root_text is None:
+            return False
+        approved_root = Path(approved_root_text).expanduser()
+        if not self._under(target, approved_root) or self._has_reparse_component(target):
+            return False
+        try:
+            raw = target.read_bytes()
+            return bool(
+                len(raw) <= self.MAX_ITEM_BYTES
+                and len(raw) == int(record.get("target_size"))
+                and hmac.compare_digest(self._sha256(raw), expected_hash)
+                and not Path(object_path_text).exists()
+            )
+        except (OSError, TypeError, ValueError):
+            return False
+
     def _project(self, record: dict[str, Any], *, detail: bool, receipt: dict[str, Any] | None,
-                 receipt_ok: bool, evidence_ok: bool, object_ok: bool, source_label: str) -> dict[str, Any]:
+                 receipt_ok: bool, restore_receipt_ok: bool, evidence_ok: bool,
+                 object_ok: bool, source_label: str) -> dict[str, Any]:
         provenance: dict[str, str] = {}
 
         def trusted(field: str) -> Any:
@@ -309,6 +360,30 @@ class QuarantineReadModel:
         policy_reason = text_value("policy_reason", 256)
         verifier_outcome = text_value("verifier_outcome", 64)
         state = self._safe_text(record.get("state"), 64) or "UNKNOWN"
+        response_latency_ms = record.get("response_latency_ms")
+        execution_latency_ms = record.get("execution_latency_ms")
+        detection_to_response_ms = record.get("detection_to_response_ms")
+        restore_latency_ms = record.get("restore_latency_ms")
+        for field, value in (
+            ("response_latency_ms", response_latency_ms),
+            ("execution_latency_ms", execution_latency_ms),
+            ("detection_to_response_ms", detection_to_response_ms),
+            ("restore_latency_ms", restore_latency_ms),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < 0:
+                if field == "response_latency_ms": response_latency_ms = None
+                elif field == "execution_latency_ms": execution_latency_ms = None
+                elif field == "detection_to_response_ms": detection_to_response_ms = None
+                else: restore_latency_ms = None
+        post_action_verified = bool(
+            (state == "QUARANTINED" and object_ok and receipt_ok and evidence_ok)
+            or (
+                state == "RESTORED"
+                and object_ok and receipt_ok and restore_receipt_ok and evidence_ok
+                and record.get("post_restore_verification") is True
+                and record.get("restore_verification_outcome") == "RESTORED_VERIFIED"
+            )
+        )
         item = {
             "quarantine_id": self._safe_text(record.get("quarantine_id"), 128),
             "incident_id": self._safe_text(record.get("incident_id"), 128),
@@ -340,9 +415,19 @@ class QuarantineReadModel:
             "object_integrity": object_ok,
             "evidence_integrity": evidence_ok,
             "receipt_integrity": receipt_ok,
-            "post_action_verification": bool(state == "QUARANTINED" and object_ok and receipt_ok and evidence_ok),
+            "restore_receipt_integrity": restore_receipt_ok if state == "RESTORED" else None,
+            "post_action_verification": post_action_verified,
+            "restore_verification_outcome": self._safe_text(record.get("restore_verification_outcome"), 64) or "NOT_APPLICABLE",
+            "response_latency_ms": response_latency_ms,
+            "execution_latency_ms": execution_latency_ms,
+            "detection_to_response_ms": detection_to_response_ms,
+            "restore_latency_ms": restore_latency_ms,
             "recovery_required": bool(record.get("recovery_required", False)),
-            "integrity_problem": not (evidence_ok and receipt_ok and (state != "QUARANTINED" or object_ok)),
+            "integrity_problem": not (
+                evidence_ok and receipt_ok
+                and (state not in {"QUARANTINED", "RESTORED"} or object_ok)
+                and (state != "RESTORED" or restore_receipt_ok)
+            ),
             "source_vault": source_label,
         }
         for display_field, record_field in (
@@ -368,6 +453,13 @@ class QuarantineReadModel:
                 "scope_digest": self._safe_text(record.get("scope_digest"), 64),
                 "created_at": self._safe_text(record.get("created_at"), 64),
                 "contained_at": self._safe_text(record.get("contained_at"), 64),
+                "restored_at": self._safe_text(record.get("restored_at"), 64),
+                "restored_path": self._safe_text(record.get("restored_path"), 512),
+                "restore_reason": self._safe_text(record.get("restore_reason"), 64),
+                "restore_capability_id": self._safe_text(record.get("restore_capability_id"), 128),
+                "restore_scope_digest": self._safe_text(record.get("restore_scope_digest"), 64),
+                "last_restore_failure_code": self._safe_text(record.get("last_restore_failure_code"), 128),
+                "last_restore_failed_at": self._safe_text(record.get("last_restore_failed_at"), 64),
                 "failure_code": self._safe_text(record.get("failure_code"), 128),
                 "requested_action": self._safe_text(record.get("requested_action"), 64),
                 "provenance": dict(provenance),
@@ -421,9 +513,19 @@ class QuarantineReadModel:
                 continue
             receipt = self._read_receipt(root, record)
             receipt_ok = self._verify_receipt(root, record)
+            restore_receipt_ok = self._verify_restore_receipt(root, record) if record.get("state") == "RESTORED" else True
             evidence_ok = self._verify_evidence(root, record)
-            object_ok = self._verify_object(root, record) if record.get("state") == "QUARANTINED" else True
-            row = self._project(record, detail=detail, receipt=receipt, receipt_ok=receipt_ok, evidence_ok=evidence_ok, object_ok=object_ok, source_label=label)
+            if record.get("state") == "QUARANTINED":
+                object_ok = self._verify_object(root, record)
+            elif record.get("state") == "RESTORED":
+                object_ok = self._verify_restored_target(root, record)
+            else:
+                object_ok = True
+            row = self._project(
+                record, detail=detail, receipt=receipt, receipt_ok=receipt_ok,
+                restore_receipt_ok=restore_receipt_ok, evidence_ok=evidence_ok,
+                object_ok=object_ok, source_label=label,
+            )
             # Absolute object paths and the record MAC differ when identical
             # evidence is copied into another approved vault. Normalize only
             # that vault-local path before comparing duplicate content.
@@ -449,7 +551,10 @@ class QuarantineReadModel:
         total = 0
         scanned = 0
         scan_limit = self.MAX_RECORDS * 8
-        for directory in (root / "v2-records", root / "v2-receipts", root / "v2-evidence", root / "v2-objects"):
+        for directory in (
+            root / "v2-records", root / "v2-receipts", root / "v2-restore-receipts",
+            root / "v2-evidence", root / "v2-objects",
+        ):
             try:
                 if not directory.is_dir():
                     continue
@@ -521,9 +626,16 @@ class QuarantineReadModel:
             status = "DEGRADED"
         else:
             status = "OPERATIONAL"
-        failed = sum(1 for row in rows if row.get("containment_state") in {"FAILED", "FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT"})
-        pending = sum(1 for row in rows if row.get("containment_state") not in {"QUARANTINED", "FAILED", "FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT"})
+        failed_states = {"FAILED", "FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT", "UNKNOWN_AFTER_RESTORE"}
+        terminal_states = {"QUARANTINED", "RESTORED", *failed_states}
+        failed = sum(1 for row in rows if row.get("containment_state") in failed_states)
+        pending = sum(1 for row in rows if row.get("containment_state") not in terminal_states)
         verified = sum(1 for row in rows if row.get("post_action_verification") is True)
+        restored = sum(
+            1 for row in rows
+            if row.get("containment_state") == "RESTORED"
+            and row.get("restore_verification_outcome") == "RESTORED_VERIFIED"
+        )
         recovery = sum(1 for row in rows if row.get("recovery_required") is True)
         evidence_verified = sum(1 for row in rows if row.get("evidence_integrity") is True)
         known_endpoints = {row.get("endpoint_id") for row in rows if row.get("endpoint_id") not in {None, "UNKNOWN"}}
@@ -536,7 +648,8 @@ class QuarantineReadModel:
             "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED" if any(row.get("lab_authorization") == "QUARANTINE_CAPABILITY_CONSUMED" for row in rows) else "NOT_GRANTED",
             "summary": {
                 "total_quarantined": sum(1 for row in rows if row.get("containment_state") == "QUARANTINED"),
-                "verified_quarantined": verified, "pending_verification": pending,
+                "verified_quarantined": sum(1 for row in rows if row.get("containment_state") == "QUARANTINED" and row.get("post_action_verification") is True),
+                "restored_verified": restored, "pending_verification": pending,
                 "failed_unknown": failed, "recovery_required": recovery,
                 "evidence_verified": evidence_verified,
                 "integrity_problems": integrity,
@@ -547,6 +660,15 @@ class QuarantineReadModel:
                 "affected_tenants": len(known_tenants),
                 "high_critical": sum(1 for row in rows if row.get("risk_level") in {"HIGH", "CRITICAL"}),
                 "containment_success_ratio": round(verified / len(rows), 4) if rows else None,
+                "response_latency_ms_max": max(
+                    (
+                        float(row["response_latency_ms"])
+                        for row in rows
+                        if isinstance(row.get("response_latency_ms"), (int, float))
+                        and not isinstance(row.get("response_latency_ms"), bool)
+                    ),
+                    default=None,
+                ),
             },
             "vault": {"root_configured": bool(self._roots), "records_scanned": total_records, "bytes_scanned": total_bytes, "bytes_used": usage, "max_records": self.MAX_TOTAL_RECORDS, "max_bytes": self.MAX_TOTAL_BYTES},
             "vaults": [{"name": item["label"], "status": item["state"], "records_scanned": item["scanned"], "bytes_scanned": item["bytes_scanned"], "bytes_used": item["usage"], "error_count": item["invalid"]} for item in loaded],

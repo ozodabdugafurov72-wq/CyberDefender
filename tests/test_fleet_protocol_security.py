@@ -54,6 +54,36 @@ def payload(endpoint_id: str = "endpoint-1", **updates):
     return value
 
 
+def response_evidence(**updates):
+    value = {
+        "schema": "cyberdefender.response-evidence.v1",
+        "evidence_id": "qv2-response-001",
+        "incident_id": "INC-RESPONSE-001",
+        "event_id": "event-response-001",
+        "target_name": "harmless-canary.txt",
+        "target_sha256": "a" * 64,
+        "detection_types": ["HIGH_MEMORY_USAGE"],
+        "risk_score": 90,
+        "risk_level": "CRITICAL",
+        "policy_outcome": "REQUIRE_VERIFICATION",
+        "policy_reason": "critical risk requires independent verification",
+        "verifier_outcome": "VERIFIED",
+        "action_state": "QUARANTINED",
+        "verification_outcome": "QUARANTINED_VERIFIED",
+        "response_latency_ms": 90.363,
+        "execution_latency_ms": 65.681,
+        "detection_to_response_ms": 90.255,
+        "restore_latency_ms": None,
+        "evidence_ref": "evidence://INC-RESPONSE-001",
+        "production_authorization": "NOT_GRANTED",
+        "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+        "receipt_integrity": True,
+        "post_action_verification": True,
+    }
+    value.update(updates)
+    return value
+
+
 class FleetProtocolUnitTests(unittest.TestCase):
     def test_rate_limiter_recovers_after_window(self):
         now = [1000.0]
@@ -170,7 +200,7 @@ class FleetProtocolUnitTests(unittest.TestCase):
             versions = repository._conn.execute(
                 "SELECT version FROM distribution_schema ORDER BY version"
             ).fetchall()
-            self.assertEqual([item["version"] for item in versions], [1, 2])
+            self.assertEqual([item["version"] for item in versions], [1, 2, 3])
             self.assertEqual(row["endpoint_id"], "legacy-1")
             self.assertEqual(row["telemetry_schema"], "legacy")
             self.assertEqual(row["capabilities_json"], "[]")
@@ -335,12 +365,16 @@ class FleetProtocolHttpTests(unittest.TestCase):
                 resource_state="NORMAL",
             )
         )
+        self.assertTrue(client.publish_response_evidence(response_evidence(), runtime_version="2.4"))
         status, _, body = self.get("/api/v1/owner/summary", private=True)
         self.assertEqual(status, 200)
         summary = json.loads(body)
         self.assertTrue(summary["xdr"]["signed_ingest"])
         self.assertTrue(summary["xdr"]["replay_protection"])
         self.assertEqual(summary["endpoints"][0]["telemetry_schema"], "ocsf")
+        self.assertEqual(summary["summary"]["responses_total"], 1)
+        self.assertEqual(summary["responses"][0]["verification_outcome"], "QUARANTINED_VERIFIED")
+        self.assertEqual(summary["responses"][0]["production_authorization"], "NOT_GRANTED")
         status, _, body = self.get("/api/v1/owner/xdr/ocsf/device-inventory", private=True)
         self.assertEqual(status, 200)
         export = json.loads(body)
@@ -348,6 +382,18 @@ class FleetProtocolHttpTests(unittest.TestCase):
         self.assertEqual(export["events"][0]["class_uid"], 5001)
         self.assertEqual(export["events"][0]["device"]["uid"], "endpoint-http")
         self.assertEqual(self.get("/api/v1/owner/xdr/ocsf/device-inventory")[0], 404)
+
+    def test_response_evidence_forgery_and_unverified_claims_are_rejected(self):
+        client = FleetTelemetryClient(self.base, self.token_file, self.endpoint_file)
+        self.assertTrue(client.register(runtime_version="2.4"))
+        with self.assertRaises(ValueError):
+            client.publish_response_evidence(
+                response_evidence(production_authorization="GRANTED"), runtime_version="2.4"
+            )
+        with self.assertRaises(ValueError):
+            client.publish_response_evidence(
+                response_evidence(receipt_integrity=False), runtime_version="2.4"
+            )
 
     def test_tamper_replay_unsigned_and_invalid_identity_are_rejected(self):
         path = "/api/v1/enrollment/register"
