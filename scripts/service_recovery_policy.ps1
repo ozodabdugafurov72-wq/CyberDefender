@@ -18,7 +18,7 @@ public static class CyberDefenderRecoveryPolicy {
     [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern bool QueryServiceConfig2(IntPtr service, uint level, IntPtr buffer, uint size, out uint needed);
     [DllImport("advapi32.dll")] static extern bool CloseServiceHandle(IntPtr handle);
-    public static uint[] ExpectedActions() { return new uint[] {1,5000,1,15000,1,60000,0,0}; }
+    public static uint[] ExpectedActions() { return new uint[] {1,5000,1,15000,1,60000}; }
     static void AssertKnownName(string name) {
         if (name != "CyberDefenderAgent" && name != "CyberDefenderControlPlane" && name != "CyberDefenderOwnerUI")
             throw new ArgumentException("Unknown service");
@@ -33,8 +33,10 @@ public static class CyberDefenderRecoveryPolicy {
             Failure actual=(Failure)Marshal.PtrToStructure(query,typeof(Failure));
             uint[] expected=ExpectedActions();
             int stride=Marshal.SizeOf(typeof(Action));
-            if(actual.Reset!=86400 || actual.Count!=4) throw new InvalidOperationException("Recovery verification failed");
-            for(int i=0;i<4;i++) {
+            // Windows persists only the three configured restart actions.
+            // Exhausting the action list is the terminal SC_ACTION_NONE state.
+            if(actual.Reset!=86400 || actual.Count!=3) throw new InvalidOperationException("Recovery verification failed");
+            for(int i=0;i<3;i++) {
                 Action a=(Action)Marshal.PtrToStructure(IntPtr.Add(actual.Actions,i*stride),typeof(Action));
                 if(a.Type!=expected[2*i] || a.Delay!=expected[2*i+1]) throw new InvalidOperationException("Recovery action mismatch");
             }
@@ -64,10 +66,10 @@ public static class CyberDefenderRecoveryPolicy {
             if(manager==IntPtr.Zero) throw new Win32Exception();
             service=OpenService(manager,name,3); // QUERY_CONFIG | CHANGE_CONFIG
             if(service==IntPtr.Zero) throw new Win32Exception();
-            int stride=Marshal.SizeOf(typeof(Action)); actions=Marshal.AllocHGlobal(4*stride);
+            int stride=Marshal.SizeOf(typeof(Action)); actions=Marshal.AllocHGlobal(3*stride);
             uint[] expected=ExpectedActions();
-            for(int i=0;i<4;i++) Marshal.StructureToPtr(new Action {Type=expected[2*i],Delay=expected[2*i+1]},IntPtr.Add(actions,i*stride),false);
-            Failure value=new Failure {Reset=86400,Count=4,Actions=actions};
+            for(int i=0;i<3;i++) Marshal.StructureToPtr(new Action {Type=expected[2*i],Delay=expected[2*i+1]},IntPtr.Add(actions,i*stride),false);
+            Failure value=new Failure {Reset=86400,Count=3,Actions=actions};
             if(!ChangeServiceConfig2(service,2,ref value)) throw new Win32Exception();
             VerifyHandle(service);
         } finally {

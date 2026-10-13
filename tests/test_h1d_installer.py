@@ -14,7 +14,7 @@ class InstallerTests(unittest.TestCase):
         command="Add-Type -TypeDefinition @'\n"+definition+"\n'@\n[CyberDefenderRecoveryPolicy]::ExpectedActions() -join ','"
         p=subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-Command",command],cwd=ROOT,capture_output=True,text=True)
         self.assertEqual(p.returncode,0,p.stderr)
-        self.assertEqual(p.stdout.strip(),"1,5000,1,15000,1,60000,0,0")
+        self.assertEqual(p.stdout.strip(),"1,5000,1,15000,1,60000")
 
     def test_recovery_definition_supports_read_only_existing_service_verify(self):
         source=(ROOT/"scripts/service_recovery_policy.ps1").read_text()
