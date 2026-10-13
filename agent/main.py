@@ -4046,7 +4046,10 @@ class CyberDefenderRuntime:
                     if isinstance(prior_state, dict)
                     else None
                 )
-                if not isinstance(tenant_id, str) or not tenant_id.strip():
+                if tenant_id is not None and (
+                    not isinstance(tenant_id, str)
+                    or not tenant_id.strip()
+                ):
                     self.recovery_failures += 1
                     self.component_failures += 1
                     self.degraded = True
@@ -4058,7 +4061,13 @@ class CyberDefenderRuntime:
                     value=0,
                     source="EventState",
                     message=f"{event_type} holati tiklandi.",
-                    tenant_id=tenant_id.strip(),
+                    # LOCAL_STANDALONE events intentionally have no tenant
+                    # identity.  CorrelationAdapter places their incident
+                    # outbox records in its bounded local-endpoint namespace;
+                    # writing that namespace into SecurityEvent.tenant_id
+                    # would manufacture tenant membership.  Legacy state
+                    # without tenant_id therefore remains tenantless here.
+                    tenant_id=(tenant_id.strip() if tenant_id is not None else None),
                 )
             except Exception as exc:
                 self.component_failures += 1
