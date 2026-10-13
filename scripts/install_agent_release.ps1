@@ -295,11 +295,12 @@ if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
 }
 Run-Checked $Python @($Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 Verify-Others $otherBaseline
-Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
 if(-not $Apply) {
+    Write-Host 'PLAN_PASS_READ_ONLY: pinned release and companions verified; installation NOT performed.' -ForegroundColor Green
     Write-Host 'PLAN_ONLY: no release files or service settings changed.'
     exit 0
 }
+Write-Host 'APPLY_PRECHECK_PASS: entering explicitly authorized Agent-only transaction.' -ForegroundColor Cyan
 
 Require ($HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED') 'HOST_ACKNOWLEDGEMENT_REQUIRED'
 Require-Administrator
