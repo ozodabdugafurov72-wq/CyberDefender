@@ -47,6 +47,7 @@ class CorrelationAdapter:
         ] = None,
         *,
         incident_outbox: Any | None = None,
+        standalone_scope_id: str | None = None,
     ):
         if engine is None:
             raise ValueError(
@@ -66,9 +67,22 @@ class CorrelationAdapter:
                 "ack_callback callable bo'lishi kerak"
             )
 
+        if standalone_scope_id is not None:
+            if (
+                not isinstance(standalone_scope_id, str)
+                or not standalone_scope_id.strip().startswith("local-endpoint:")
+                or len(standalone_scope_id.strip()) > 255
+            ):
+                raise ValueError("standalone_scope_id must be a bounded local-endpoint scope")
+            standalone_scope_id = standalone_scope_id.strip()
+
         self.engine = engine
         self.event_bus = event_bus
         self.incident_outbox = incident_outbox
+        # This is an outbox isolation namespace for an unenrolled standalone
+        # endpoint.  It is deliberately not written into SecurityEvent.tenant_id
+        # and therefore cannot manufacture tenant membership or authorization.
+        self.standalone_scope_id = standalone_scope_id
         self.ack_callback = ack_callback
 
         self._received = 0
@@ -109,6 +123,7 @@ class CorrelationAdapter:
             "ack_enabled": (
                 self.ack_callback is not None
             ),
+            "standalone_scope_enabled": self.standalone_scope_id is not None,
             "outbox": outbox_health,
         }
 
@@ -135,10 +150,13 @@ class CorrelationAdapter:
             data = event.get("data")
             if isinstance(data, dict):
                 tenant_id = data.get("tenant_id")
-            if self.incident_outbox is not None and (
-                not isinstance(tenant_id, str) or not tenant_id.strip()
-            ):
-                raise ValueError("tenant identity required for durable incident outbox")
+            outbox_scope_id = (
+                tenant_id.strip()
+                if isinstance(tenant_id, str) and tenant_id.strip()
+                else self.standalone_scope_id
+            )
+            if self.incident_outbox is not None and not outbox_scope_id:
+                raise ValueError("tenant or standalone scope required for durable incident outbox")
 
             published_before = self._published
             source_event_id = event_id.strip()
@@ -148,7 +166,7 @@ class CorrelationAdapter:
                 publish=(
                     lambda candidate: self._persist_then_publish(
                         candidate,
-                        tenant_id=tenant_id,
+                        tenant_id=outbox_scope_id,
                         source_event_id=source_event_id,
                     )
                     if self.incident_outbox is not None
@@ -163,7 +181,7 @@ class CorrelationAdapter:
                 raise RuntimeError("unknown correlation result")
             if incident is None and self.incident_outbox is not None:
                 if not self._confirm_replay_outbox(
-                    tenant_id=tenant_id,
+                    tenant_id=outbox_scope_id,
                     source_event_id=source_event_id,
                 ):
                     raise RuntimeError("durable incident outbox replay not confirmed")

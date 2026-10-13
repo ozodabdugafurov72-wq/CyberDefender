@@ -1472,6 +1472,10 @@ class CyberDefenderRuntime:
                 engine=self.correlation_engine,
                 event_bus=self.event_bus,
                 incident_outbox=self.incident_outbox,
+                standalone_scope_id=(
+                    "local-endpoint:"
+                    f"{self._local_endpoint_id()}"
+                ),
             )
         )
 

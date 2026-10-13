@@ -16,6 +16,12 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr)
         self.assertEqual(p.stdout.strip(),"1,5000,1,15000,1,60000,0,0")
 
+    def test_recovery_definition_supports_read_only_existing_service_verify(self):
+        source=(ROOT/"scripts/service_recovery_policy.ps1").read_text()
+        self.assertIn("public static void Verify(string name)",source)
+        self.assertIn("OpenService(manager,name,1)",source)
+        self.assertIn("VerifyHandle(service)",source)
+
     def test_installer_provisions_separate_protected_store(self):
         text=(ROOT/"scripts/install_machine.ps1").read_text()
         for token in ("CyberDefenderCrashGuard","SetAccessRuleProtection($true,$false)","CrashGuard existing owner rejected",
@@ -35,6 +41,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Rollback restored previous application and service state",text)
         self.assertLess(text.index(stop_banner),text.index("Move-Item -Force $InstallRoot $PreviousRoot"))
         self.assertLess(text.index("Move-Item -Force $PreviousRoot $InstallRoot"),text.index("throw $InstallError"))
+        self.assertIn("[CyberDefenderRecoveryPolicy]::Verify($name)",text)
+        self.assertIn("Set-Location $env:TEMP",text)
 
     def test_remote_fleet_credential_is_isolated_from_local_control_plane(self):
         text=(ROOT/"scripts/install_machine.ps1").read_text()

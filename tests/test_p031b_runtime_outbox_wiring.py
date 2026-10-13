@@ -34,12 +34,13 @@ def detection(event_id="evt-1", tenant_id="tenant-a"):
     }
 
 
-def build_adapter(outbox, *, ack=None, engine=None, bus=None):
+def build_adapter(outbox, *, ack=None, engine=None, bus=None, standalone_scope_id=None):
     return CorrelationAdapter(
         engine or CorrelationEngine(),
         bus or EventBus(32),
         incident_outbox=outbox,
         ack_callback=ack,
+        standalone_scope_id=standalone_scope_id,
     )
 
 
@@ -130,6 +131,28 @@ class RuntimeOutboxWiringTests(unittest.TestCase):
             )
             self.assertFalse(adapter.handle_event(detection(tenant_id=None)))
             self.assertEqual([], acks)
+
+    def test_tenantless_standalone_event_uses_local_outbox_namespace_and_acks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            acks = []
+            adapter = build_adapter(
+                DurableIncidentOutbox(directory, KEY),
+                ack=lambda event_id: acks.append(event_id) or True,
+                standalone_scope_id="local-endpoint:endpoint-1",
+            )
+            self.assertTrue(adapter.handle_event(detection(tenant_id=None)))
+            self.assertEqual(["evt-1"], acks)
+            record = adapter.incident_outbox.scan()[0]
+            self.assertEqual("local-endpoint:endpoint-1", record["tenant_id"])
+            self.assertIsNone(record["incident_payload"]["tenant_id"])
+
+    def test_standalone_scope_cannot_impersonate_a_tenant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                build_adapter(
+                    DurableIncidentOutbox(directory, KEY),
+                    standalone_scope_id="tenant-a",
+                )
 
     def test_event_state_preserves_tenant_for_recovery(self):
         from agent.event import SecurityEvent

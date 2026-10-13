@@ -56,6 +56,39 @@ class AgentReleaseRuntimePreflightTests(unittest.TestCase):
                         "pipeline",
                     ):
                         self.assertEqual(health[component]["status"], "HEALTHY")
+
+                    # Installed endpoints begin in LOCAL_STANDALONE scope. A
+                    # normal tenantless observation must still complete the
+                    # durable correlation/outbox/ACK path without claiming
+                    # tenant membership.
+                    self.assertTrue(runtime.resource_delivery_gate.bind_cycle(0))
+                    self.assertTrue(
+                        runtime.resource_safety_plane.commit_resource_snapshot(
+                            {"state": "NORMAL"}, cycle_id=0
+                        )
+                    )
+                    event = runtime._build_event(
+                        {
+                            "type": "RELEASE_PREFLIGHT_OBSERVATION",
+                            "severity": "INFO",
+                            "value": 1,
+                            "message": "standalone durable pipeline preflight",
+                            "host_id": "release-preflight-endpoint",
+                        },
+                        "ReleasePreflight",
+                    )
+                    self.assertIsNone(event.tenant_id)
+                    admitted = runtime.admit_event(event)
+                    self.assertTrue(admitted.accepted)
+                    self.assertGreaterEqual(runtime.event_bus.dispatch_all(), 1)
+                    self.assertEqual(1, runtime.events_acked)
+                    self.assertEqual(0, runtime.component_failures)
+                    outbox_record = runtime.incident_outbox.scan()[0]
+                    self.assertEqual(
+                        "local-endpoint:release-preflight-endpoint",
+                        outbox_record["tenant_id"],
+                    )
+                    self.assertIsNone(outbox_record["incident_payload"]["tenant_id"])
                 finally:
                     runtime.close()
 

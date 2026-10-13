@@ -210,6 +210,7 @@ try {
     $VenvPython = Join-Path $InstallRoot '.venv\Scripts\python.exe'
     Invoke-NativeChecked $VenvPython @('-m','pip','install','--upgrade','pip')
     Invoke-NativeChecked $VenvPython @('-m','pip','install','-r','requirements.txt')
+    Set-Location $SourceRoot
 
     # H1D trusted state is separate from broadly inherited runtime state/logs.
     # Reject substituted paths before provisioning; never adopt user-owned state.
@@ -288,9 +289,19 @@ try {
     }
     . (Join-Path $PSScriptRoot 'service_recovery_policy.ps1')
     foreach($name in $Services){
-        # Finite recovery: 5s, 15s, 60s, then SC_ACTION_NONE; read back via SCM API.
-        [CyberDefenderRecoveryPolicy]::Configure($name)
-        Invoke-NativeChecked 'sc.exe' @('failureflag',$name,'1')
+        if($PreexistingServices[$name]) {
+            # Existing service DACLs may intentionally deny mutation. Verify the
+            # already-installed finite policy with QUERY_CONFIG only.
+            [CyberDefenderRecoveryPolicy]::Verify($name)
+            $failureFlag = (& sc.exe qfailureflag $name | Out-String)
+            if($LASTEXITCODE -ne 0 -or $failureFlag -notmatch '(?im)\bTRUE\b') {
+                throw "Existing non-crash recovery flag verification failed: $name"
+            }
+        } else {
+            # New service: finite recovery is 5s, 15s, 60s, then SC_ACTION_NONE.
+            [CyberDefenderRecoveryPolicy]::Configure($name)
+            Invoke-NativeChecked 'sc.exe' @('failureflag',$name,'1')
+        }
     }
 
     Write-Host "[9/10] Service start + health verification..."
@@ -343,6 +354,7 @@ try {
     Write-Host "Owner UI: http://127.0.0.1:8775/owner"
 } catch {
     $InstallError=$_.Exception
+    Set-Location $env:TEMP
     Write-Host ""
     Write-Host "CyberDefender machine install FAILED: $($InstallError.Message)" -ForegroundColor Red
     Show-ServiceDiagnostics $Base
