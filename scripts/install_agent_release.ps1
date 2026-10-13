@@ -113,9 +113,19 @@ function Inspect-NoReparse([string]$Path) {
 function Inspect-ProtectedPath([string]$Path) {
     $acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
     $broad=@('S-1-1-0','S-1-5-11','S-1-5-32-545','S-1-5-4','S-1-5-2')
-    $writeBits=[int][Security.AccessControl.FileSystemRights]::Write -bor
-        [int][Security.AccessControl.FileSystemRights]::Modify -bor
-        [int][Security.AccessControl.FileSystemRights]::FullControl
+    # Check only rights capable of changing the protected content or ACL.
+    # Write/Modify/FullControl are COMPOSITE flags containing read bits; OR-ing
+    # them and testing overlap incorrectly rejects ordinary ReadAndExecute ACEs.
+    # Keep generic WRITE/ALL ACEs denied as well (0x40000000 / 0x10000000).
+    $writeBits=[int][Security.AccessControl.FileSystemRights]::WriteData -bor
+        [int][Security.AccessControl.FileSystemRights]::AppendData -bor
+        [int][Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+        [int][Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [int][Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [int][Security.AccessControl.FileSystemRights]::Delete -bor
+        [int][Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [int][Security.AccessControl.FileSystemRights]::TakeOwnership -bor
+        0x50000000
     foreach($entry in $acl.Access) {
         if($entry.AccessControlType -ne 'Allow'){ continue }
         try { $sid=$entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
