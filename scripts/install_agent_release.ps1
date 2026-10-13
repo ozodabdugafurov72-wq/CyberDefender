@@ -238,7 +238,7 @@ function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='
     return [int]$service.ProcessId
 }
 
-function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$NewBin) {
+function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentProcessId,[string]$NewBin) {
     if(-not (Test-Path -LiteralPath $ReceiptDir)){ New-Item -ItemType Directory -Path $ReceiptDir | Out-Null }
     Inspect-NoReparse $ReceiptDir
     $receipt=[ordered]@{
@@ -248,7 +248,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
         release_path=$NewRoot
         zip_sha256=$ApprovedZipSHA256.ToLowerInvariant()
         completed_at=(Get-Date).ToUniversalTime().ToString('o')
-        agent_pid=$Pid
+        agent_pid=$AgentProcessId
         agent_binpath=$NewBin
         original_agent_state=$Original.State
         original_agent_binpath=$Original.PathName
@@ -257,7 +257,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
     }
     $target=Join-Path $ReceiptDir ('agent-release-' + $Revision.Substring(0,8) + '.json')
     $temporary=$target + '.pending'
-    $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding utf8NoBOM
+    [System.IO.File]::WriteAllText($temporary, ($receipt | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $temporary -Destination $target -Force
     return $target
 }
@@ -326,7 +326,7 @@ try {
     Set-AgentBinary $newBin
     Start-Agent
     $candidateStarted=$true
-    $pid=Verify-AgentProcess $newBin $NewRoot
+    $agentProcessId=Verify-AgentProcess $newBin $NewRoot
     $runtimeEvidence=Await-HealthyRuntime $startedAt 240
     Verify-Others $otherBaseline
     Verify-LocalCompanions
@@ -334,7 +334,7 @@ try {
     Require ($agentAfter.StartMode -eq $agentBaseline.StartMode) 'AGENT_STARTMODE_CHANGED'
     Require ($agentAfter.StartName -eq $agentBaseline.StartName) 'AGENT_IDENTITY_CHANGED'
     Require ($agentAfter.Recovery -eq $agentBaseline.Recovery) 'AGENT_RECOVERY_CHANGED'
-    $receipt=Write-Receipt $agentBaseline $otherBaseline $runtimeEvidence $pid $newBin
+    $receipt=Write-Receipt $agentBaseline $otherBaseline $runtimeEvidence $agentProcessId $newBin
     Write-Host ('AGENT_RELEASE_PASS: ' + $receipt) -ForegroundColor Green
     exit 0
 } catch {
