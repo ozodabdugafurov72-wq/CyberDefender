@@ -350,18 +350,19 @@ class DistributionRepository:
             raise ValueError("invalid observed_at")
         received = time.time()
         with self._lock:
-            self._conn.execute(
-                """
-                INSERT INTO fleet_response_evidence(
+            try:
+                self._conn.execute(
+                    """
+                    INSERT INTO fleet_response_evidence(
                     evidence_id,endpoint_id,incident_id,event_id,observed_at,received_at,
                     target_name,target_sha256,detection_types_json,risk_score,risk_level,
                     policy_outcome,policy_reason,verifier_outcome,action_state,verification_outcome,
                     response_latency_ms,execution_latency_ms,detection_to_response_ms,restore_latency_ms,
                     evidence_ref,production_authorization,lab_authorization,receipt_integrity,
                     post_action_verification
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
                     evidence["evidence_id"], evidence["endpoint_id"], evidence["incident_id"],
                     evidence["event_id"], observed, received, evidence["target_name"],
                     evidence["target_sha256"], json.dumps(evidence["detection_types"], separators=(",", ":")),
@@ -371,8 +372,57 @@ class DistributionRepository:
                     evidence["execution_latency_ms"], evidence["detection_to_response_ms"],
                     evidence["restore_latency_ms"], evidence["evidence_ref"],
                     evidence["production_authorization"], evidence["lab_authorization"], 1, 1,
-                ),
-            )
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                # A client can lose the 200 response after the durable commit.
+                # Accept only an exact retry of the same evidence identity;
+                # conflicting reuse remains fail-closed.
+                row = self._conn.execute(
+                    "SELECT * FROM fleet_response_evidence WHERE evidence_id=?",
+                    (evidence["evidence_id"],),
+                ).fetchone()
+                if row is None:
+                    raise
+                existing = dict(row)
+                try:
+                    existing_detections = json.loads(existing["detection_types_json"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raise ValueError("stored response evidence is invalid") from None
+                comparable = {
+                    "evidence_id": existing["evidence_id"],
+                    "endpoint_id": existing["endpoint_id"],
+                    "incident_id": existing["incident_id"],
+                    "event_id": existing["event_id"],
+                    "target_name": existing["target_name"],
+                    "target_sha256": existing["target_sha256"],
+                    "detection_types": existing_detections,
+                    "risk_score": existing["risk_score"],
+                    "risk_level": existing["risk_level"],
+                    "policy_outcome": existing["policy_outcome"],
+                    "policy_reason": existing["policy_reason"],
+                    "verifier_outcome": existing["verifier_outcome"],
+                    "action_state": existing["action_state"],
+                    "verification_outcome": existing["verification_outcome"],
+                    "response_latency_ms": existing["response_latency_ms"],
+                    "execution_latency_ms": existing["execution_latency_ms"],
+                    "detection_to_response_ms": existing["detection_to_response_ms"],
+                    "restore_latency_ms": existing["restore_latency_ms"],
+                    "evidence_ref": existing["evidence_ref"],
+                    "production_authorization": existing["production_authorization"],
+                    "lab_authorization": existing["lab_authorization"],
+                    "receipt_integrity": existing["receipt_integrity"] == 1,
+                    "post_action_verification": existing["post_action_verification"] == 1,
+                }
+                expected = {key: evidence[key] for key in comparable}
+                if comparable != expected:
+                    raise ValueError("conflicting response evidence identity")
+                return dict(
+                    evidence,
+                    observed_at=float(existing["observed_at"]),
+                    received_at=float(existing["received_at"]),
+                    idempotent_reuse=True,
+                )
         return dict(evidence, observed_at=observed, received_at=received)
 
     def recent_response_evidence(self, limit: int = 100) -> list[dict[str, Any]]:

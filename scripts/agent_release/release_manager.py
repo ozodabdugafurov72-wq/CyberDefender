@@ -14,7 +14,6 @@ import shutil
 import sys
 import zipfile
 
-COMMIT = '1c5970e41877af4283cfe534b9441f0289b4e0e9'
 SCHEMA = 'cyberdefender.pinned-review-source.v1'
 REQUIRED = frozenset({'agent/windows_service.py','agent/main.py','agent/service_lifecycle.py',
     'agent/service_crash_guard.py','agent/service_crash_store.py','agent/service_watchdog.py',
@@ -66,7 +65,10 @@ def _load_snapshot(package: Path, approved_sha: str) -> bytes:
         raise ValueError('ZIP SHA256 mismatch')
     return payload
 
-def _verify_snapshot(payload: bytes, approved_sha: str) -> dict:
+def _verify_snapshot(payload: bytes, approved_sha: str, approved_commit: str) -> dict:
+    if not re.fullmatch(r'[0-9a-fA-F]{40}', approved_commit):
+        raise ValueError('approved Git commit must be 40 hex digits')
+    approved_commit = approved_commit.lower()
     with zipfile.ZipFile(io.BytesIO(payload)) as z:
         entries = z.infolist()
         if len(entries) > FILE_LIMIT + 1:
@@ -79,7 +81,7 @@ def _verify_snapshot(payload: bytes, approved_sha: str) -> dict:
         if z.getinfo('PINNED_MANIFEST.json').file_size > 1 << 20:
             raise ValueError('oversized manifest')
         meta = json.loads(z.read('PINNED_MANIFEST.json'))
-        if meta.get('schema') != SCHEMA or meta.get('commit') != COMMIT:
+        if meta.get('schema') != SCHEMA or meta.get('commit') != approved_commit:
             raise ValueError('wrong release identity')
         manifest = meta.get('files')
         if not isinstance(manifest, list) or not 0 < len(manifest) <= FILE_LIMIT:
@@ -124,22 +126,23 @@ def _verify_snapshot(payload: bytes, approved_sha: str) -> dict:
             raise ValueError('manifest total mismatch')
         if not REQUIRED.issubset(verified):
             raise ValueError('required modules missing')
-    return {'status':'PINNED_ZIP_VERIFIED','commit':COMMIT,'files':len(verified),'bytes':size_total,
+    return {'status':'PINNED_ZIP_VERIFIED','commit':approved_commit,'files':len(verified),'bytes':size_total,
             'sha256':approved_sha.lower(),'services_untouched':True,'secrets_untouched':True}
 
-def verify(package: Path, approved_sha: str) -> dict:
-    return _verify_snapshot(_load_snapshot(package, approved_sha), approved_sha)
+def verify(package: Path, approved_sha: str, approved_commit: str) -> dict:
+    return _verify_snapshot(_load_snapshot(package, approved_sha), approved_sha, approved_commit)
 
-def unpack(package: Path, dest: Path, approved_sha: str, bootstrap: Path) -> dict:
+def unpack(package: Path, dest: Path, approved_sha: str, approved_commit: str, bootstrap: Path) -> dict:
     payload = _load_snapshot(package,approved_sha)
-    result = _verify_snapshot(payload,approved_sha)
+    approved_commit = approved_commit.lower()
+    result = _verify_snapshot(payload,approved_sha,approved_commit)
     if not bootstrap.is_file() or bootstrap.name != 'agent_service_bootstrap.py':
         raise ValueError('bootstrap unavailable')
     if dest.exists():
         raise FileExistsError('refusing to overwrite existing release directory')
     # Parent must be pre-created by a privileged operator, never be reparse/symlink.
     parent = dest.parent
-    if not parent.is_dir() or parent.is_symlink() or dest.name != COMMIT:
+    if not parent.is_dir() or parent.is_symlink() or dest.name != approved_commit:
         raise ValueError('unexpected destination parent or revision')
     made = False
     try:
@@ -159,7 +162,7 @@ def unpack(package: Path, dest: Path, approved_sha: str, bootstrap: Path) -> dic
         with (dest / 'agent_service_bootstrap.py').open('xb') as f:
             f.write(bootstrap.read_bytes())
         # These are audit records, not deployment authority.
-        (dest / 'source_commit.txt').write_text(COMMIT+'\n', encoding='ascii')
+        (dest / 'source_commit.txt').write_text(approved_commit+'\n', encoding='ascii')
         result['release_path'] = str(dest)
         result['status'] = 'RELEASE_EXTRACTED_NO_SERVICE_CHANGE'
         return result
@@ -174,14 +177,15 @@ def main() -> int:
     parser.add_argument('mode',choices=['verify','extract'])
     parser.add_argument('--zip',type=Path,required=True)
     parser.add_argument('--sha256',required=True)
+    parser.add_argument('--commit',required=True)
     parser.add_argument('--dest',type=Path)
     parser.add_argument('--bootstrap',type=Path)
     a=parser.parse_args()
     try:
-        if a.mode=='verify': result=verify(a.zip,a.sha256)
+        if a.mode=='verify': result=verify(a.zip,a.sha256,a.commit)
         else:
             if a.dest is None or a.bootstrap is None: raise ValueError('destination and bootstrap required')
-            result=unpack(a.zip,a.dest,a.sha256,a.bootstrap)
+            result=unpack(a.zip,a.dest,a.sha256,a.commit,a.bootstrap)
         print(json.dumps(result,sort_keys=True))
         return 0
     except Exception as exc:

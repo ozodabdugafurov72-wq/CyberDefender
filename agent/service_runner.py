@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Any
 
 
@@ -28,6 +29,10 @@ class ServiceRunner:
         self.last_error: str | None = None
         self.telemetry_failures = 0
         self.last_telemetry_error: str | None = None
+        self.response_evidence_sent = 0
+        self.response_evidence_failures = 0
+        self.last_response_evidence_error: str | None = None
+        self._published_response_ids: set[str] = set()
         self._telemetry_lock = threading.Lock()
         self._cycle_lock = threading.Lock()
         self._cycle_in_progress = False
@@ -153,6 +158,75 @@ class ServiceRunner:
             if in_progress:
                 self._emit_heartbeat(runtime, client)
 
+    @staticmethod
+    def _response_evidence(runtime: Any) -> dict[str, Any] | None:
+        """Build one bounded proof from a real verified runtime action."""
+        result = getattr(runtime, "last_lab_quarantine_result", None)
+        if (
+            not isinstance(result, dict)
+            or result.get("accepted") is not True
+            or result.get("status") != "VERIFIED_QUARANTINED"
+            or result.get("receipt_integrity") is not True
+            or result.get("post_action_verification") is not True
+        ):
+            return None
+        quarantine_id = str(result.get("quarantine_id") or "")
+        target = str(result.get("target") or "")
+        if not quarantine_id or not target:
+            return None
+        from control_plane.xdr_compat import RESPONSE_EVIDENCE_SCHEMA
+
+        return {
+            "schema": RESPONSE_EVIDENCE_SCHEMA,
+            "evidence_id": quarantine_id + "-quarantined",
+            "incident_id": result.get("incident_id"),
+            "event_id": result.get("event_id"),
+            "target_name": str(result.get("target_name") or Path(target).name),
+            "target_sha256": result.get("target_sha256"),
+            "detection_types": result.get("detection_types"),
+            "risk_score": result.get("risk_score"),
+            "risk_level": result.get("risk_level"),
+            "policy_outcome": result.get("policy_outcome"),
+            "policy_reason": result.get("policy_reason"),
+            "verifier_outcome": result.get("verifier_outcome"),
+            "action_state": "QUARANTINED",
+            "verification_outcome": result.get("verification_outcome"),
+            "response_latency_ms": result.get("response_latency_ms"),
+            "execution_latency_ms": result.get("execution_latency_ms"),
+            "detection_to_response_ms": result.get("detection_to_response_ms"),
+            "restore_latency_ms": None,
+            "evidence_ref": result.get("evidence_ref"),
+            "production_authorization": result.get("production_authorization"),
+            "lab_authorization": result.get("lab_authorization"),
+            "receipt_integrity": True,
+            "post_action_verification": True,
+        }
+
+    def _publish_response_evidence(self, runtime: Any, client: Any) -> None:
+        try:
+            evidence = self._response_evidence(runtime)
+            if evidence is None:
+                return
+            evidence_id = str(evidence["evidence_id"])
+            if evidence_id in self._published_response_ids:
+                return
+            with self._telemetry_lock:
+                accepted = client.publish_response_evidence(
+                    evidence,
+                    runtime_version=str(getattr(runtime, "VERSION", "")),
+                )
+            if accepted is True:
+                self._published_response_ids.add(evidence_id)
+                self.response_evidence_sent += 1
+                self.last_response_evidence_error = None
+                self._record_primary_reachability(True, source="response-evidence")
+                return
+            self._record_primary_reachability(False, source="response-evidence")
+            raise RuntimeError("fleet response evidence rejected")
+        except Exception as exc:
+            self.response_evidence_failures += 1
+            self.last_response_evidence_error = type(exc).__name__
+
     def run(self, *, max_cycles: int | None = None) -> None:
         runtime = None
         self.exit_reason = "RUNNING"
@@ -254,6 +328,7 @@ class ServiceRunner:
 
                 if client is not None:
                     self._emit_heartbeat(runtime, client)
+                    self._publish_response_evidence(runtime, client)
 
                 if max_cycles is not None and self.cycles >= max_cycles:
                     self.exit_reason = "TEST_CYCLE_LIMIT"

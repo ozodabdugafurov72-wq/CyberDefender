@@ -12,6 +12,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "scripts" / "agent_release"
 INSTALLER = ROOT / "scripts" / "install_agent_release.ps1"
+COMMIT = "1c5970e41877af4283cfe534b9441f0289b4e0e9"
 SPEC = importlib.util.spec_from_file_location(
     "agent_release_manager", TOOLS / "release_manager.py"
 )
@@ -25,7 +26,7 @@ def make_release(path: Path, files: dict[str, bytes] | None = None) -> str:
         files = {name: b"VALUE=1\n" for name in release_manager.REQUIRED}
     manifest = {
         "schema": release_manager.SCHEMA,
-        "commit": release_manager.COMMIT,
+        "commit": COMMIT,
         "files": [
             {
                 "path": name,
@@ -52,14 +53,14 @@ class ReleaseManagerTests(unittest.TestCase):
             digest = make_release(package)
             releases = base / "agent-releases"
             releases.mkdir()
-            destination = releases / release_manager.COMMIT
+            destination = releases / COMMIT
             bootstrap = base / "agent_service_bootstrap.py"
             bootstrap.write_text("pass\n", encoding="utf-8")
-            report = release_manager.unpack(package, destination, digest, bootstrap)
+            report = release_manager.unpack(package, destination, digest, COMMIT, bootstrap)
             self.assertEqual(report["status"], "RELEASE_EXTRACTED_NO_SERVICE_CHANGE")
             self.assertTrue((destination / "agent" / "main.py").is_file())
             with self.assertRaises(FileExistsError):
-                release_manager.unpack(package, destination, digest, bootstrap)
+                release_manager.unpack(package, destination, digest, COMMIT, bootstrap)
 
     def test_archive_boundary_rejects_windows_and_escape_names(self) -> None:
         unsafe = (
@@ -82,7 +83,7 @@ class ReleaseManagerTests(unittest.TestCase):
             with package.open("ab") as stream:
                 stream.write(b"tamper")
             with self.assertRaisesRegex(ValueError, "SHA256"):
-                release_manager.verify(package, digest)
+                release_manager.verify(package, digest, COMMIT)
 
 
 class InstallerContractTests(unittest.TestCase):
@@ -108,6 +109,7 @@ class InstallerContractTests(unittest.TestCase):
         for required in (
             "$RecoverStoppedAgent.IsPresent",
             "$AuthorizeRecoveryProbe",
+            "$Revision=$ApprovedCommit.ToLowerInvariant()",
             "'agent.service_crash_store','authorize-probe','--service',$AgentName",
             "HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED'",
         ):

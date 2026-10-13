@@ -4,6 +4,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$ReleaseZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedZipSHA256,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ApprovedCommit,
     [switch]$Apply,
     [ValidateSet('','AGENT_ONLY_AUTHORIZED')][string]$HostAcknowledgement='',
     [switch]$RecoverStoppedAgent,
@@ -12,7 +13,7 @@ param(
 
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$Revision='1c5970e41877af4283cfe534b9441f0289b4e0e9'
+$Revision=$ApprovedCommit.ToLowerInvariant()
 $AgentName='CyberDefenderAgent'
 $OtherServices=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $ScriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -292,7 +293,7 @@ if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
         Inspect-ProtectedPath (Split-Path $RemoteToken -Parent)
     }
 }
-Run-Checked $Python @($Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256)
+Run-Checked $Python @($Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 Verify-Others $otherBaseline
 Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
 if(-not $Apply) {
@@ -306,7 +307,7 @@ Require (-not (Test-Path -LiteralPath $NewRoot)) 'VERSION_ALREADY_STAGED_REFUSE_
 New-Item -ItemType Directory -Path $Releases -Force | Out-Null
 Inspect-NoReparse $Releases
 Inspect-ProtectedPath $Releases
-Run-Checked $Python @($Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
+Run-Checked $Python @($Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
 Inspect-NoReparse $NewRoot
 Inspect-ProtectedPath $NewRoot
 Run-Checked $Python @($Probe,$NewRoot,'--runtime')

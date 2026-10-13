@@ -366,6 +366,15 @@ class FleetProtocolHttpTests(unittest.TestCase):
             )
         )
         self.assertTrue(client.publish_response_evidence(response_evidence(), runtime_version="2.4"))
+        # A lost HTTP response may cause an authenticated client to retry with
+        # a fresh nonce. The same evidence identity is idempotent, while
+        # conflicting reuse remains rejected.
+        self.assertTrue(client.publish_response_evidence(response_evidence(), runtime_version="2.4"))
+        self.assertFalse(
+            client.publish_response_evidence(
+                response_evidence(target_sha256="b" * 64), runtime_version="2.4"
+            )
+        )
         status, _, body = self.get("/api/v1/owner/summary", private=True)
         self.assertEqual(status, 200)
         summary = json.loads(body)

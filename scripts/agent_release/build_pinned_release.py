@@ -10,11 +10,11 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import sys
 import zipfile
 
-PINNED_COMMIT = "1c5970e41877af4283cfe534b9441f0289b4e0e9"
 DEFAULT_REPO_NAME = "CyberDefender-secure-owner-cloud-20261009"
 MAX_FILE_BYTES = 30 * 1024 * 1024
 MAX_TOTAL_BYTES = 150 * 1024 * 1024
@@ -51,16 +51,17 @@ def safe_relative_path(raw: bytes) -> str:
     return name
 
 
-def make_payload(repo: Path, commit: str | None = None) -> tuple[list[tuple[str, bytes]], dict]:
-    if commit is None:
-        commit = PINNED_COMMIT
+def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict]:
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+        raise ValueError("commit must be a full 40-character Git SHA")
+    commit = commit.lower()
     try:
         resolved = git(repo, "rev-parse", "--verify", commit + "^{commit}")
     except subprocess.CalledProcessError as exc:
         raise ValueError("pinned Git commit not present locally") from exc
-    if resolved != PINNED_COMMIT:
-        raise ValueError("local Git commit differs from pinned reviewed revision")
-    listing = git(repo, "ls-tree", "-r", "-z", "--full-tree", PINNED_COMMIT, binary=True)
+    if resolved != commit:
+        raise ValueError("local Git commit differs from requested reviewed revision")
+    listing = git(repo, "ls-tree", "-r", "-z", "--full-tree", commit, binary=True)
     files: list[tuple[str, bytes]] = []
     manifest: list[dict] = []
     total = 0
@@ -91,14 +92,14 @@ def make_payload(repo: Path, commit: str | None = None) -> tuple[list[tuple[str,
                 "control_plane/xdr_compat.py", "requirements.txt"}
     if not required.issubset({name for name, _ in files}):
         raise ValueError("critical Agent dependencies missing")
-    meta = {"schema": "cyberdefender.pinned-review-source.v1", "commit": PINNED_COMMIT,
+    meta = {"schema": "cyberdefender.pinned-review-source.v1", "commit": commit,
             "files": manifest, "total_bytes": total, "file_count": len(files),
             "purpose": "REVIEW_AND_PREFLIGHT_ONLY_NOT_AN_INSTALLER"}
     return files, meta
 
 
-def build(repo: Path, target: Path) -> dict:
-    files, meta = make_payload(repo)
+def build(repo: Path, target: Path, commit: str) -> dict:
+    files, meta = make_payload(repo, commit)
     if target.exists():
         raise FileExistsError("Refusing to overwrite an existing candidate ZIP: " + str(target))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -107,7 +108,7 @@ def build(repo: Path, target: Path) -> dict:
         for name, data in files:
             z.writestr("release/" + name, data)
         z.writestr("PINNED_MANIFEST.json", json.dumps(meta, sort_keys=True, indent=2) + "\n")
-    return {"status": "PINNED_SOURCE_PREPARED_NO_DEPLOYMENT", "commit": PINNED_COMMIT,
+    return {"status": "PINNED_SOURCE_PREPARED_NO_DEPLOYMENT", "commit": meta["commit"],
             "files": len(files), "bytes": meta["total_bytes"],
             "zip_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
             "zip_path": str(target), "services_untouched": True,
@@ -117,10 +118,11 @@ def build(repo: Path, target: Path) -> dict:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--repo", type=Path, default=Path(os.environ.get("TEMP", str(Path.home()))) / DEFAULT_REPO_NAME)
-    p.add_argument("--out", type=Path, default=Path.home() / "Downloads" / "CD_AGENT_PINNED_REVIEW_1c5970e.zip")
+    p.add_argument("--commit", required=True)
+    p.add_argument("--out", type=Path, required=True)
     a = p.parse_args()
     try:
-        result = build(a.repo.resolve(), a.out.resolve())
+        result = build(a.repo.resolve(), a.out.resolve(), a.commit)
     except Exception as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)[:250],
                           "installed_untouched": True}, indent=2))
