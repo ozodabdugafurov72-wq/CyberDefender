@@ -190,6 +190,11 @@ class DurableEventSpool:
         self._last_admission_reason: str | None = None
         self._last_capacity_status = "NORMAL"
         self._terminal_state_safe = True
+        # ACK commit may durably reach max_terminal_records + 1 immediately
+        # before pending-file compaction prunes the oldest tombstone.  A crash
+        # in that narrow window is recoverable only by compacting pending
+        # evidence first; the extra tombstone must never be dropped first.
+        self._terminal_repair_required = False
         self._terminal_compactions = 0
         self._terminal_compaction_failures = 0
 
@@ -242,6 +247,11 @@ class DurableEventSpool:
 
         self._load_state()
         self._rebuild_pending_index()
+        if self._terminal_repair_required:
+            if self._pending_index_ready and self.compact():
+                self._terminal_repair_required = False
+            else:
+                self._terminal_state_safe = False
 
         # Initial Vault reconciliation is limited to bounded pending ids.
         self._sync_vault_quarantines()
@@ -750,14 +760,22 @@ class DurableEventSpool:
                 if isinstance(state, dict):
                     ids = state.get("acked_ids", [])
                     if isinstance(ids, list):
-                        if len(ids) > max(1, int(self.policy.max_terminal_records)):
+                        limit = max(1, int(self.policy.max_terminal_records))
+                        if len(ids) > limit + 1:
                             self._terminal_state_safe = False
                             return set()
+                        normalized: list[str] = []
                         for event_id in ids:
-                            if isinstance(event_id, str):
-                                event_id = event_id.strip()
-                                if event_id:
-                                    snapshot_ids.add(event_id)
+                            if not isinstance(event_id, str) or not event_id.strip():
+                                self._terminal_state_safe = False
+                                return set()
+                            normalized.append(event_id.strip())
+                        if len(set(normalized)) != len(normalized):
+                            self._terminal_state_safe = False
+                            return set()
+                        snapshot_ids.update(normalized)
+                        if len(normalized) == limit + 1:
+                            self._terminal_repair_required = True
                         self._acked_order = sorted(snapshot_ids)
                         return snapshot_ids
             except Exception:
