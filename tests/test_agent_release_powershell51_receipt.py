@@ -39,6 +39,9 @@ class AgentInstallerPS51ReceiptTests(unittest.TestCase):
     def test_plan_is_explicitly_non_mutating(self) -> None:
         self.assertIn("if(-not $Apply) {", self.source)
         self.assertIn("PLAN_ONLY: no release files or service settings changed.", self.source)
+        self.assertIn("PLAN_PASS_READ_ONLY:", self.source)
+        self.assertIn("APPLY_PRECHECK_PASS:", self.source)
+        self.assertNotIn("Write-Host 'PLAN_PASS:", self.source)
         self.assertIn("HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED'", self.source)
         self.assertIn("Require-Administrator", self.source)
 
