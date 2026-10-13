@@ -1,0 +1,52 @@
+name: Agent installer PS5.1 review
+
+on:
+  push:
+    branches:
+      - codex/p0-agent-installer-ps51-review-20261013
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-compatibility:
+    name: Windows PowerShell 5.1 syntax and source contract
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout immutable review source
+        uses: actions/checkout@v4
+
+      - name: Verify installer parses on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            throw "Windows PowerShell 5.x expected"
+          }
+          $tokens = $null
+          $parseErrors = $null
+          $installer = Join-Path $PWD 'scripts\install_agent_release.ps1'
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $installer, [ref]$tokens, [ref]$parseErrors
+          )
+          if (@($parseErrors).Count -ne 0) {
+            $parseErrors | Format-List
+            throw "INSTALLER_PARSE_FAILED"
+          }
+          Write-Host "INSTALLER_PS51_PARSE_PASS"
+
+      - name: Run focused contract tests without SCM changes
+        shell: powershell
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_release_powershell51_receipt.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'REGRESSION_FAILED' }
+
+      - name: Confirm git diff contains no release archives
+        shell: powershell
+        run: |
+          $archives = @(git ls-files | Where-Object { $_ -match '(?i)\.(zip|pfx|p12|pem|key)$' })
+          if ($archives.Count -gt 0) {
+            $archives | Write-Host
+            throw 'ARCHIVE_OR_SECRET_PATH_TRACKED'
+          }
