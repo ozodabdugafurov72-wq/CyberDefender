@@ -24,5 +24,28 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("restart/5000/restart/15000/restart/60000",text)
         self.assertLess(text.index("'provision'"),text.index("Start-Service 'CyberDefenderControlPlane'"))
 
+    def test_upgrade_preserves_registration_and_rolls_back_previous_app(self):
+        text=(ROOT/"scripts/install_machine.ps1").read_text()
+        stop_banner="Existing services safely stopped; registrations preserved for rollback"
+        self.assertIn(stop_banner,text)
+        self.assertIn("$PreexistingServices",text)
+        self.assertIn("$PreviouslyRunningServices",text)
+        self.assertIn("$ApplicationSnapshotCreated",text)
+        self.assertIn("Move-Item -Force $PreviousRoot $InstallRoot",text)
+        self.assertIn("Rollback restored previous application and service state",text)
+        self.assertLess(text.index(stop_banner),text.index("Move-Item -Force $InstallRoot $PreviousRoot"))
+        self.assertLess(text.index("Move-Item -Force $PreviousRoot $InstallRoot"),text.index("throw $InstallError"))
+
+    def test_remote_fleet_credential_is_isolated_from_local_control_plane(self):
+        text=(ROOT/"scripts/install_machine.ps1").read_text()
+        self.assertIn('remote_fleet_token.txt',text)
+        self.assertIn('$AgentFleetToken = if($IsLoopback){$FleetToken}else{$RemoteFleetToken}',text)
+        self.assertIn('local control-plane token is never reused',text)
+        agent_preflight=text.index("@('-m','agent.windows_service','--preflight')")
+        local_reset=text.index('$env:CYBERDEFENDER_FLEET_TOKEN_FILE=$FleetToken',agent_preflight)
+        control_preflight=text.index("@('-m','control_plane.windows_service','--preflight')")
+        self.assertLess(agent_preflight,local_reset)
+        self.assertLess(local_reset,control_preflight)
+
 
 if __name__ == "__main__": unittest.main()

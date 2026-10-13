@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 SERVICE_NAME = "CyberDefenderAgent"
 DISPLAY_NAME = "CyberDefender Endpoint Protection"
@@ -29,6 +30,7 @@ def _machine_paths() -> dict[str, Path]:
         "secrets": program_data / "secrets",
         "key": program_data / "secrets" / "storage_key.b64",
         "fleet_token": program_data / "secrets" / "fleet_token.txt",
+        "remote_fleet_token": program_data / "secrets" / "remote_fleet_token.txt",
         "endpoint_id": program_data / "identity" / "endpoint_id.txt",
         "distribution_url": program_data / "identity" / "distribution_url.txt",
         "distribution_db": program_data / "control-plane" / "distribution.db",
@@ -49,6 +51,24 @@ def configure_machine_environment() -> dict[str, Path]:
         value = distribution_url.read_text(encoding="ascii").strip()
         if not value or len(value) > 2048:
             raise ValueError("invalid persisted distribution URL")
+        parsed = urlparse(value.rstrip("/"))
+        hostname = (parsed.hostname or "").lower()
+        loopback = hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or not hostname
+            or parsed.path not in {"", "/"}
+            or parsed.scheme not in ({"http", "https"} if loopback else {"https"})
+        ):
+            raise ValueError("invalid persisted distribution URL")
+        if not loopback:
+            remote_token = paths["remote_fleet_token"]
+            if not remote_token.is_file():
+                raise ValueError("remote fleet token missing")
+            os.environ["CYBERDEFENDER_FLEET_TOKEN_FILE"] = str(remote_token)
         os.environ["CYBERDEFENDER_DISTRIBUTION_URL"] = value
     # Clear lab-only toggles before evaluating the fixed marker contract so a
     # recycled service process cannot retain a stale enablement decision.
@@ -134,8 +154,9 @@ if PYWIN32_AVAILABLE:
                 base_url = os.environ.get("CYBERDEFENDER_DISTRIBUTION_URL", "http://127.0.0.1:8785")
                 try:
                     from agent.fleet.client import FleetTelemetryClient
-                    if paths["fleet_token"].is_file() and paths["endpoint_id"].is_file():
-                        client = FleetTelemetryClient(base_url, paths["fleet_token"], paths["endpoint_id"])
+                    token_path = Path(os.environ["CYBERDEFENDER_FLEET_TOKEN_FILE"])
+                    if token_path.is_file() and paths["endpoint_id"].is_file():
+                        client = FleetTelemetryClient(base_url, token_path, paths["endpoint_id"])
                 except Exception:
                     write_service_log(SERVICE_NAME,"TELEMETRY_UNAVAILABLE")
                 factory = lambda: build_managed_runtime(allow_optional_sensors=guard.allow_optional)

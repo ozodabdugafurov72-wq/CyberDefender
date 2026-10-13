@@ -47,6 +47,13 @@ function Remove-ServiceSafe([string]$Name) {
     if (Test-ServiceExists $Name) { throw "Service removal timed out: $Name" }
 }
 
+function Stop-ServiceSafe([string]$Name) {
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $svc -or $svc.Status -eq 'Stopped') { return }
+    Stop-Service -Name $Name -Force -ErrorAction Stop
+    (Get-Service -Name $Name).WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))
+}
+
 function Wait-ServiceRunning([string]$Name,[int]$TimeoutSeconds=30) {
     $deadline=(Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -132,15 +139,28 @@ $CrashGuardDir = Join-Path $env:ProgramData 'CyberDefenderCrashGuard'
 $DistributionArtifact = Join-Path $DistributionDir "CyberDefenderPackage.zip"
 $KeyFile = Join-Path $SecretDir "storage_key.b64"
 $FleetToken = Join-Path $SecretDir "fleet_token.txt"
+$RemoteFleetToken = Join-Path $SecretDir "remote_fleet_token.txt"
 $EndpointIdFile = Join-Path $IdentityDir "endpoint_id.txt"
 $DistributionUrlFile = Join-Path $IdentityDir "distribution_url.txt"
 $DistributionDb = Join-Path $ControlPlaneDir "distribution.db"
 $Services=@('CyberDefenderAgent','CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $InstallStarted=Get-Date
+$PreexistingServices=@{}
+$PreviouslyRunningServices=@{}
+$ApplicationSnapshotCreated=$false
+foreach($name in $Services){
+    $svc=Get-Service -Name $name -ErrorAction SilentlyContinue
+    $PreexistingServices[$name]=($null -ne $svc)
+    $PreviouslyRunningServices[$name]=($null -ne $svc -and $svc.Status -eq 'Running')
+}
+if(-not $IsLoopback -and -not (Test-Path $RemoteFleetToken)) {
+    throw 'Remote DistributionUrl requires protected secrets\remote_fleet_token.txt; local control-plane token is never reused.'
+}
+$AgentFleetToken = if($IsLoopback){$FleetToken}else{$RemoteFleetToken}
 
 try {
-    Write-Host "[1/10] Existing services safely stopped/removed..."
-    foreach($name in $Services){ Remove-ServiceSafe $name }
+    Write-Host "[1/10] Existing services safely stopped; registrations preserved for rollback..."
+    foreach($name in $Services){ Stop-ServiceSafe $name }
 
     if(-not (Test-PortAvailable 8775)){ throw "Port 8775 is already in use. Close the old Owner Dashboard/process before install." }
     if(-not (Test-PortAvailable 8785)){ throw "Port 8785 is already in use. Close the old Distribution process before install." }
@@ -150,7 +170,10 @@ try {
 
     Write-Host "[3/10] Previous application snapshot + clean copy..."
     if(Test-Path $PreviousRoot){ Remove-Item -Recurse -Force $PreviousRoot }
-    if(Test-Path $InstallRoot){ Move-Item -Force $InstallRoot $PreviousRoot }
+    if(Test-Path $InstallRoot){
+        Move-Item -Force $InstallRoot $PreviousRoot
+        $ApplicationSnapshotCreated=$true
+    }
     New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
     $copyArgs=@($SourceRoot,$InstallRoot,'/E','/PURGE','/XD','.venv','__pycache__','state','logs','evidence','_backup_before_*','.git','.pytest_cache','.mypy_cache','.ruff_cache','node_modules','tests','/XF','*.pyc','*.pyo','*.db','*.db-wal','*.db-shm','test_*.py','*_test.py')
     & robocopy.exe @copyArgs | Out-Null
@@ -240,11 +263,12 @@ try {
     $env:CYBERDEFENDER_ENDPOINT_ID=(Get-Content -Raw $EndpointIdFile).Trim()
     $env:CYBERDEFENDER_DISTRIBUTION_URL=$DistributionUrl
     $env:CYBERDEFENDER_DISTRIBUTION_DB=$DistributionDb
-    $env:CYBERDEFENDER_FLEET_TOKEN_FILE=$FleetToken
+    $env:CYBERDEFENDER_FLEET_TOKEN_FILE=$AgentFleetToken
     $env:CYBERDEFENDER_INSTALLER_PATH=$DistributionArtifact
 
     Invoke-NativeChecked $VenvPython @('-c',"import win32service,servicemanager; from agent.quarantine.vault import SecureQuarantineVault; from agent.main import CyberDefenderRuntime; print('Runtime',CyberDefenderRuntime.VERSION,'| pywin32 direct host OK | quarantine OK')")
     Invoke-NativeChecked $VenvPython @('-m','agent.windows_service','--preflight')
+    $env:CYBERDEFENDER_FLEET_TOKEN_FILE=$FleetToken
     Invoke-NativeChecked $VenvPython @('-m','control_plane.windows_service','--preflight')
     Invoke-NativeChecked $VenvPython @('-m','dashboard_owner.windows_service','--preflight')
 
@@ -253,9 +277,15 @@ try {
     $controlBin='"' + $VenvPython + '" -m control_plane.windows_service --service-run'
     $ownerBin='"' + $VenvPython + '" -m dashboard_owner.windows_service --service-run'
 
-    New-Service -Name 'CyberDefenderAgent' -BinaryPathName $agentBin -DisplayName 'CyberDefender Endpoint Protection' -Description 'CyberDefender security-first endpoint runtime service' -StartupType Automatic | Out-Null
-    New-Service -Name 'CyberDefenderControlPlane' -BinaryPathName $controlBin -DisplayName 'CyberDefender Distribution Telemetry' -Description 'CyberDefender local distribution and fleet telemetry control plane' -StartupType Automatic | Out-Null
-    New-Service -Name 'CyberDefenderOwnerUI' -BinaryPathName $ownerBin -DisplayName 'CyberDefender Owner Master Control' -Description 'CyberDefender loopback Owner Master Control dashboard' -StartupType Automatic | Out-Null
+    if(-not (Test-ServiceExists 'CyberDefenderAgent')) {
+        New-Service -Name 'CyberDefenderAgent' -BinaryPathName $agentBin -DisplayName 'CyberDefender Endpoint Protection' -Description 'CyberDefender security-first endpoint runtime service' -StartupType Automatic | Out-Null
+    }
+    if(-not (Test-ServiceExists 'CyberDefenderControlPlane')) {
+        New-Service -Name 'CyberDefenderControlPlane' -BinaryPathName $controlBin -DisplayName 'CyberDefender Distribution Telemetry' -Description 'CyberDefender local distribution and fleet telemetry control plane' -StartupType Automatic | Out-Null
+    }
+    if(-not (Test-ServiceExists 'CyberDefenderOwnerUI')) {
+        New-Service -Name 'CyberDefenderOwnerUI' -BinaryPathName $ownerBin -DisplayName 'CyberDefender Owner Master Control' -Description 'CyberDefender loopback Owner Master Control dashboard' -StartupType Automatic | Out-Null
+    }
     . (Join-Path $PSScriptRoot 'service_recovery_policy.ps1')
     foreach($name in $Services){
         # Finite recovery: 5s, 15s, 60s, then SC_ACTION_NONE; read back via SCM API.
@@ -312,10 +342,39 @@ try {
     Write-Host "Local download URL: http://127.0.0.1:8785/download/cyberdefender"
     Write-Host "Owner UI: http://127.0.0.1:8775/owner"
 } catch {
+    $InstallError=$_.Exception
     Write-Host ""
-    Write-Host "CyberDefender machine install FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "CyberDefender machine install FAILED: $($InstallError.Message)" -ForegroundColor Red
     Show-ServiceDiagnostics $Base
-    foreach($name in $Services){ try { Remove-ServiceSafe $name } catch { } }
-    # Preserve failed application tree + previous version for diagnosis/recovery.
-    throw
+    $RollbackErrors=@()
+    foreach($name in $Services){
+        if(-not $PreexistingServices[$name]) {
+            try { Remove-ServiceSafe $name } catch { $RollbackErrors += "remove-new-service:$name" }
+        } else {
+            try { Stop-ServiceSafe $name } catch { $RollbackErrors += "stop-for-rollback:$name" }
+        }
+    }
+    if($ApplicationSnapshotCreated -and (Test-Path $PreviousRoot)) {
+        try {
+            $FailedRoot = Join-Path $AppParent ("app.failed." + (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss'))
+            if(Test-Path $InstallRoot){ Move-Item -Force $InstallRoot $FailedRoot }
+            Move-Item -Force $PreviousRoot $InstallRoot
+        } catch { $RollbackErrors += 'restore-previous-application' }
+    } elseif($ApplicationSnapshotCreated) {
+        $RollbackErrors += 'previous-application-unavailable'
+    }
+    foreach($name in $Services){
+        if($PreexistingServices[$name] -and $PreviouslyRunningServices[$name]) {
+            try {
+                Start-Service $name
+                Wait-ServiceRunning $name 30
+            } catch { $RollbackErrors += "restart-previous-service:$name" }
+        }
+    }
+    if($RollbackErrors.Count -eq 0) {
+        Write-Host 'Rollback restored previous application and service state.' -ForegroundColor Yellow
+    } else {
+        Write-Host ("Rollback incomplete: " + ($RollbackErrors -join ',')) -ForegroundColor Red
+    }
+    throw $InstallError
 }
