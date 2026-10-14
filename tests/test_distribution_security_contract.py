@@ -12,6 +12,18 @@ from control_plane.distribution_repository import DistributionRepository
 
 
 class DistributionSecurityContractTests(unittest.TestCase):
+    def test_distribution_manifest_contains_production_quarantine_import_closure(self):
+        names = set(
+            (Path(__file__).resolve().parents[1] / "distribution-files.txt")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        self.assertTrue({
+            "agent/quarantine/autonomous_pipeline.py",
+            "agent/quarantine/crypto_vault.py",
+            "agent/quarantine/production_gate.py",
+        }.issubset(names))
+
     def test_manifest_matches_artifact_and_cache_invalidates(self):
         test_root = Path(".test-tmp").resolve()
         test_root.mkdir(parents=True, exist_ok=True)

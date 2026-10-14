@@ -80,9 +80,12 @@ agent/observer.py
 agent/policy_engine.py
 agent/post_action_verifier.py
 agent/quarantine/__init__.py
+agent/quarantine/autonomous_pipeline.py
 agent/quarantine/contracts.py
 agent/quarantine/coordinator.py
+agent/quarantine/crypto_vault.py
 agent/quarantine/executor.py
+agent/quarantine/production_gate.py
 agent/quarantine/v2_vault.py
 agent/quarantine/vault.py
 agent/quarantine/verifier.py
