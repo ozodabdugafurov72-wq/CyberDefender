@@ -1,0 +1,54 @@
+name: P0 Git ZIP provenance review
+
+on:
+  push:
+    branches:
+      - codex/agent-only-release-provenance-review-20261014
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    name: Git-to-ZIP byte provenance and Windows installer parse
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact review revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Windows PowerShell 5.1 installer parse
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts\install_agent_release.ps1'),
+            [ref]$tokens, [ref]$parseErrors
+          )
+          if (@($parseErrors).Count -ne 0) {
+            $parseErrors | Format-List
+            throw 'INSTALLER_PARSER_FAILURE'
+          }
+          Write-Host 'INSTALLER_PS51_PARSER_PASS'
+
+      - name: Provenance regression tests (offline)
+        shell: powershell
+        run: |
+          python -m unittest discover -s tests -p 'test_git_zip_provenance.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'PROVENANCE_TESTS_FAILED' }
+
+      - name: Build own immutable review artifact and verify every Git file
+        shell: powershell
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          $zip = Join-Path $env:RUNNER_TEMP 'CD_PINNED_REVIEW.zip'
+          python scripts/agent_release/build_pinned_release.py --repo . --commit $commit --out $zip
+          if ($LASTEXITCODE -ne 0) { throw 'RELEASE_BUILD_FAILED' }
+          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python scripts/agent_release/verify_git_zip_provenance.py --repo . --commit $commit --zip $zip --sha256 $sha
+          if ($LASTEXITCODE -ne 0) { throw 'GIT_ZIP_PROVENANCE_FAILED' }
+          Write-Host 'GIT_ZIP_BYTE_PROVENANCE_PASS'
