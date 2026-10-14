@@ -19,6 +19,8 @@ $OtherServices=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $ScriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolsRoot=Join-Path $ScriptRoot 'agent_release'
 $Manager=Join-Path $ToolsRoot 'release_manager.py'
+$Provenance=Join-Path $ToolsRoot 'verify_git_zip_provenance.py'
+$SourceRoot=Split-Path -Parent $ScriptRoot
 $Bootstrap=Join-Path $ToolsRoot 'agent_service_bootstrap.py'
 $Probe=Join-Path $ToolsRoot 'isolated_import_probe.py'
 $AclVerifier=Join-Path $ScriptRoot 'verify_windows_acl.py'
@@ -254,7 +256,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
 }
 
 # Consolidated read-only precheck.
-foreach($required in ($Python,$Manager,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$LocalToken)) {
+foreach($required in ($Python,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$LocalToken)) {
     Require (Test-Path -LiteralPath $required -PathType Leaf) ('REQUIRED_FILE_MISSING:' + $required)
     Inspect-NoReparse $required
 }
@@ -285,6 +287,7 @@ if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
     }
 }
 Run-Checked $Python @($Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+Run-Checked $Python @($Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 Verify-Others $otherBaseline
 Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
 if(-not $Apply) {
@@ -299,6 +302,7 @@ New-Item -ItemType Directory -Path $Releases -Force | Out-Null
 Inspect-NoReparse $Releases
 Inspect-ProtectedPath $Releases
 Run-Checked $Python @($Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
+Run-Checked $Python @($Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
 Inspect-NoReparse $NewRoot
 Inspect-ProtectedPath $NewRoot
 Run-Checked $Python @($Probe,$NewRoot,'--runtime')
