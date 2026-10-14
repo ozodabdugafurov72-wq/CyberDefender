@@ -1,0 +1,6 @@
+{"paths": [{"aces_checked": 13, "broad_write_blocked": true, "owner_sid": "S-1-5-32-544", "path": "C:\\Program Files\\CyberDefender", "principal_resolution": "SID_NATIVE", "status": "PASS"}], "status": "PASS"}
+{"paths": [{"aces_checked": 2, "broad_write_blocked": true, "owner_sid": "S-1-5-32-544", "path": "C:\\ProgramData\\CyberDefender\\secrets", "principal_resolution": "SID_NATIVE", "status": "PASS"}], "status": "PASS"}
+{"bytes": 15148732, "commit": "c7cfd0403108cb795479b3dd4eaf8e49ce63dc81", "files": 580, "secrets_untouched": true, "services_untouched": true, "sha256": "9358abb94448c5f282d6c7c97387a69959080f2413fcde8351392fff55e88c1a", "status": "PINNED_ZIP_VERIFIED"}
+{"bytes_verified": 15148732, "commit": "c7cfd0403108cb795479b3dd4eaf8e49ce63dc81", "credentials_untouched": true, "files_verified": 580, "services_untouched": true, "status": "GIT_ZIP_BYTE_PROVENANCE_PASS", "zip_sha256": "9358abb94448c5f282d6c7c97387a69959080f2413fcde8351392fff55e88c1a"}
+PLAN_PASS: pinned release, Agent baseline and companion services verified.
+PLAN_ONLY: no release files or service settings changed.

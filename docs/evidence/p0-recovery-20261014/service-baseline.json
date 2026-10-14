@@ -1,0 +1,26 @@
+[
+  {
+    "Name": "CyberDefenderAgent",
+    "State": "Stopped",
+    "ProcessId": 0,
+    "PathName": "\"C:\\Program Files\\CyberDefender\\app\\.venv\\Scripts\\python.exe\" -m agent.windows_service --service-run",
+    "StartMode": "Auto",
+    "StartName": "LocalSystem"
+  },
+  {
+    "Name": "CyberDefenderControlPlane",
+    "State": "Running",
+    "ProcessId": 12408,
+    "PathName": "\"C:\\Program Files\\CyberDefender\\app\\.venv\\Scripts\\python.exe\" -m control_plane.windows_service --service-run",
+    "StartMode": "Auto",
+    "StartName": "LocalSystem"
+  },
+  {
+    "Name": "CyberDefenderOwnerUI",
+    "State": "Running",
+    "ProcessId": 24912,
+    "PathName": "\"C:\\Program Files\\CyberDefender\\app\\.venv\\Scripts\\python.exe\" -m dashboard_owner.windows_service --service-run",
+    "StartMode": "Auto",
+    "StartName": "LocalSystem"
+  }
+]

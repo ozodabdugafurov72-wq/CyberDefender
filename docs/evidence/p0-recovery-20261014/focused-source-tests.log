@@ -1,0 +1,60 @@
+test_authorized_probe_can_reach_stable_running (tests.test_h1d_crash_guard.GuardTests.test_authorized_probe_can_reach_stable_running) ... ok
+test_bounded_history (tests.test_h1d_crash_guard.GuardTests.test_bounded_history) ... ok
+test_consumed_probe_clean_stop_remains_latched_across_restart (tests.test_h1d_crash_guard.GuardTests.test_consumed_probe_clean_stop_remains_latched_across_restart) ... ok
+test_legacy_stopped_probe_is_normalized_to_latched (tests.test_h1d_crash_guard.GuardTests.test_legacy_stopped_probe_is_normalized_to_latched) ... ok
+test_optional_sensors_recover_after_validated_clean_restart (tests.test_h1d_crash_guard.GuardTests.test_optional_sensors_recover_after_validated_clean_restart) ... ok
+test_replacements_debit_and_latch (tests.test_h1d_crash_guard.GuardTests.test_replacements_debit_and_latch) ... ok
+test_stable_recovery_preserves_evidence (tests.test_h1d_crash_guard.GuardTests.test_stable_recovery_preserves_evidence) ... ok
+test_stop_start_not_reset_and_no_parallel_admission (tests.test_h1d_crash_guard.GuardTests.test_stop_start_not_reset_and_no_parallel_admission) ... ok
+test_store_failure_never_allows_factory (tests.test_h1d_crash_guard.GuardTests.test_store_failure_never_allows_factory) ... ok
+test_unhealthy_and_monotonic_rollback_earn_no_stability (tests.test_h1d_crash_guard.GuardTests.test_unhealthy_and_monotonic_rollback_earn_no_stability) ... ok
+test_acl_denial_is_not_empty_state (tests.test_h1d_crash_store.StoreTests.test_acl_denial_is_not_empty_state) ... ok
+test_actual_unprotected_test_directory_is_rejected (tests.test_h1d_crash_store.StoreTests.test_actual_unprotected_test_directory_is_rejected) ... ok
+test_close_waits_for_inflight_write (tests.test_h1d_crash_store.StoreTests.test_close_waits_for_inflight_write) ... ok
+test_closed_store_cannot_write_without_ownership (tests.test_h1d_crash_store.StoreTests.test_closed_store_cannot_write_without_ownership) ... ok
+test_committed_debit_is_readback_verified (tests.test_h1d_crash_store.StoreTests.test_committed_debit_is_readback_verified) ... ok
+test_durable_boot_transition_and_stop_abuse (tests.test_h1d_crash_store.StoreTests.test_durable_boot_transition_and_stop_abuse) ... ok
+test_every_runtime_failure_reason_survives_authenticated_commit (tests.test_h1d_crash_store.StoreTests.test_every_runtime_failure_reason_survives_authenticated_commit) ... ok
+test_exclusive_lock_and_separate_services (tests.test_h1d_crash_store.StoreTests.test_exclusive_lock_and_separate_services) ... ok
+test_interrupted_anchor_commit_keeps_old_transaction (tests.test_h1d_crash_store.StoreTests.test_interrupted_anchor_commit_keeps_old_transaction) ... ok
+test_marker_deletion_rejected (tests.test_h1d_crash_store.StoreTests.test_marker_deletion_rejected) ... ok
+test_missing_corrupt_truncated_oversized_tampered (tests.test_h1d_crash_store.StoreTests.test_missing_corrupt_truncated_oversized_tampered) ... ok
+test_no_auto_reprovision_after_deletion (tests.test_h1d_crash_store.StoreTests.test_no_auto_reprovision_after_deletion) ... ok
+test_repair_grants_one_probe_without_erasing_interrupted_attempt (tests.test_h1d_crash_store.StoreTests.test_repair_grants_one_probe_without_erasing_interrupted_attempt) ... ok
+test_reparse_attribute_rejected (tests.test_h1d_crash_store.StoreTests.test_reparse_attribute_rejected) ... ok
+test_resource_size_remains_bounded_under_repeated_failures (tests.test_h1d_crash_store.StoreTests.test_resource_size_remains_bounded_under_repeated_failures) ... ok
+test_same_object_concurrent_writers_reject_stale_revision (tests.test_h1d_crash_store.StoreTests.test_same_object_concurrent_writers_reject_stale_revision) ... ok
+test_slot_replay_and_wrong_service_rejected (tests.test_h1d_crash_store.StoreTests.test_slot_replay_and_wrong_service_rejected) ... ok
+test_write_failure_keeps_last_committed_state (tests.test_h1d_crash_store.StoreTests.test_write_failure_keeps_last_committed_state) ... ok
+test_any_failed_invariant_resets_the_consecutive_streak (tests.test_service_runner_production_health_gate.ProductionHealthGateTests.test_any_failed_invariant_resets_the_consecutive_streak) ... ok
+test_three_completed_cycles_are_required_before_healthy_running (tests.test_service_runner_production_health_gate.ProductionHealthGateTests.test_three_completed_cycles_are_required_before_healthy_running) ... ok
+test_exited (tests.test_owned_lifecycle_identity.IdentityTests.test_exited) ... ok
+test_match (tests.test_owned_lifecycle_identity.IdentityTests.test_match) ... ok
+test_wrong_created (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_created) ... ok
+test_wrong_executable (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_executable) ... ok
+test_wrong_parent (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_parent) ... ok
+test_wrong_pid (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_pid) ... ok
+test_wrong_run (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_run) ... ok
+test_wrong_session (tests.test_owned_lifecycle_identity.IdentityTests.test_wrong_session) ... ok
+
+----------------------------------------------------------------------
+Ran 38 tests in 12.963s
+
+OK
+RESOURCE_STORE files=12 bytes=7188 failure_commits=100 seconds=3.915
+PASS | ServiceRunner owns runtime lifecycle
+PASS | graceful stop/close is deterministic
+PASS | non-authoritative fleet telemetry is emitted
+RESULT: PASS
+PASS | non-authoritative telemetry outage does not stop core service loop
+PASS | telemetry failures are observable
+PASS | telemetry failure is not counted as core cycle failure
+PASS | authoritative health_snapshot path is supported
+PASS | managed lifecycle exits cleanly
+RESULT: PASS
+PASS | three Windows service contracts exist
+PASS | direct venv-python SCM hosts are configured
+PASS | auto-start and restart recovery are configured
+PASS | Owner UI can be opened without a PowerShell command
+RESULT: PASS
+FOCUSED_SOURCE_GATE=PASS unit_tests=38 script_suites=3 utc=2026-10-14T14:34:15.2490806Z

@@ -1,83 +1,26 @@
-# CyberDefender production response Go / No-Go gate
+# CyberDefender production Go / No-Go evidence
 
-Date: 2026-10-14  
-Scope: Endpoint Agent autonomous quarantine and signed XDR evidence  
-Current decision: **NO-GO for broad production activation; GO for staged pilot validation**
-
-The code now contains a production authorization boundary, encrypted quarantine
-storage, immutable source capture, a three-cycle health admission gate, durable
-spool crash-window repair, SID-native ACL verification, and signed-ingest replay
-tests. Broad production activation remains blocked until the installed Agent and
-Owner evidence path pass the host and staging checks below.
-
-## Mandatory code gates
-
-- [x] Default deny: production mode requires an offline Ed25519-signed policy.
-- [x] Policy is bounded by ID, issue/expiry times, approved roots, risk,
-  detection count, confidence, and executable authorization.
-- [x] A production response requires risk >= policy threshold, at least two
-  distinct detections, independent verifier `VERIFIED`, and policy outcome
-  `AUTHORIZED_AUTONOMOUS_QUARANTINE`.
-- [x] `HEALTHY/RUNNING` fleet state requires three consecutive completed cycles
-  with `running=true`, `component_failures=0`, and resource state `NORMAL`.
-- [x] Quarantine objects and evidence use AES-256-GCM; SHA-256 links plaintext
-  identity while ciphertext SHA-256 and the AEAD tag detect disk tampering.
-- [x] Windows source capture holds a no-write/no-delete-share handle and deletes
-  the opened object by handle. POSIX uses descriptor identity before unlink.
-- [x] Restore uses exclusive create, exact SHA-256 verification, a one-time
-  capability, a durable receipt, and refuses overwrite or replay.
-- [x] CrashGuard PROBE/LATCHED state accepts every allowlisted service exit code
-  in its authenticated store; history remains bounded and is never reset by a
-  repair probe.
-- [x] Durable spool repairs the exact 16,385 tombstone crash window only after
-  pending evidence is compacted; larger states remain fail-closed.
-- [x] ACL verification consumes Windows SID objects directly, rejects broad
-  write/delete/owner/DACL control, rejects unsupported ACE types, and requires a
-  privileged owner.
-- [x] Local and remote fleet tokens remain separate files. Static analysis fails
-  on token/secret/password/private-key variables passed to print or log sinks.
-- [x] Exact signed request replay returns HTTP 409 for registration, heartbeat,
-  and response-evidence endpoints.
-- [x] Production response evidence carries `authorization_policy_id` and the
-  consumed production capability state into the Owner read model.
-
-## Staged host gates before production authorization
-
-- [ ] Install the pinned candidate Agent and obtain a committed release receipt.
-- [ ] Confirm Windows SCM reports `Running`, `Automatic`, `LocalSystem`, expected
-  binary path, and unchanged recovery actions.
-- [ ] Confirm ControlPlane and OwnerUI PIDs/configuration remain unchanged.
-- [ ] Capture three fresh runtime snapshots with advancing cycle count,
-  `component_failures=0`, `running=true`, resource `NORMAL`, crypto/replay/spool
-  `HEALTHY`, and no unbounded deferred growth.
-- [ ] Simulate network loss and restart; prove every pre-outage pending event is
-  recovered or terminally ACKed without duplication or loss.
-- [ ] Run the fixed-root harmless lab canary: detect, quarantine, independently
-  verify, publish signed evidence, restore once, and reject restore replay.
-- [ ] Confirm encrypted object/evidence bytes do not contain fixture plaintext;
-  tampering must fail AEAD/SHA verification.
-- [ ] Confirm Owner protected API shows the matching endpoint, incident, policy
-  ID, SHA-256, latency, `QUARANTINED_VERIFIED`, and later `RESTORED_VERIFIED`.
-- [ ] Run the SID-native ACL verifier on product, release, state, vault, receipt,
-  identity, and both secret directories.
-- [ ] Run repository secret and sensitive-log-sink scan with zero findings.
-
-## Limited production pilot gates
-
-- [ ] Use a newly generated offline signing key. Keep the private key outside
-  endpoints; deploy only the public key to the Agent.
-- [ ] Sign a short-lived policy for one pilot endpoint and explicit user-writable
-  roots. Do not authorize Windows, Program Files, ProgramData, boot, recovery,
-  or CyberDefender paths.
-- [ ] Use harmless executable fixtures only. Prove low confidence, one-signal,
-  stale policy, bad signature, out-of-root, reparse, hash mismatch, unhealthy
-  runtime, and capability replay all produce zero filesystem effect.
-- [ ] Prove an authorized fixture is removed by exact file identity, stored only
-  as authenticated ciphertext, and visible through signed Owner evidence.
-- [ ] Complete a controlled restore and rollback drill.
-- [ ] Complete a 24-hour soak with no Agent crash loop, no spool loss, no ACL
-  regression, bounded CPU/RAM/disk, and stable signed heartbeats.
-
-Broad production activation is **GO** only when every unchecked item has linked
-evidence and an explicit change record. A failed or missing item keeps the
-decision **NO-GO** and does not weaken local observation or signed telemetry.
+| Claim | Label | Evidence file/path | UTC time |
+|---|---|---|---|
+| Reviewed deployable code commit is `c7cfd0403108cb795479b3dd4eaf8e49ce63dc81` on `codex/agent-only-release`; evidence/report commits follow it and current branch HEAD must be read with `git rev-parse HEAD`. | PATCHED | `git log --oneline -3`; `agent/service_crash_guard.py`; `tests/test_h1d_crash_guard.py` | 2026-10-14T14:33:26Z |
+| Pre-repair authenticated Agent CrashStore record was revision 210, state `PROBE`, generation 13, attempts 1, probes used 1, active attempt false, clean stop true, cumulative failures 0. | VERIFIED | `docs/evidence/p0-recovery-20261014/crashguard-before.json` | 2026-10-14T14:26:22Z |
+| Crash policy values are attempts 3, cooldown 60 seconds, probes 1, stable checks 3, stable duration 60 seconds. | VERIFIED | `agent/service_crash_guard.py`; `docs/evidence/p0-recovery-20261014/crashguard-before.json` | 2026-10-14T14:26:22Z |
+| Root cause: a consumed `PROBE` stopped before stable `RUNNING` remained `PROBE`; a later process admitted it as `STARTING` after cooldown and bypassed the one-probe boundary. | PATCHED | `agent/service_crash_guard.py`; `tests/test_h1d_crash_guard.py` | 2026-10-14T14:30:00Z |
+| Incomplete or legacy stopped probes normalize durably to `LATCHED`; stable `RUNNING` remains the only path that resets probe use. | TESTED | `docs/evidence/p0-recovery-20261014/focused-source-tests.log` | 2026-10-14T14:34:56Z |
+| Valid recovery, premature recovery rejection, repeated-failure latch, corrupt/locked CrashStore fail-closed, interrupted startup, and three-cycle health admission passed focused tests. | TESTED | `docs/evidence/p0-recovery-20261014/focused-source-tests.log` | 2026-10-14T14:34:56Z |
+| Task A source gate passed 38 unit tests and 3 focused script suites. | TESTED | `docs/evidence/p0-recovery-20261014/focused-source-tests.log` | 2026-10-14T14:34:56Z |
+| Candidate commit and pinned package are `c7cfd0403108cb795479b3dd4eaf8e49ce63dc81` and SHA-256 `9358abb94448c5f282d6c7c97387a69959080f2413fcde8351392fff55e88c1a`. | VERIFIED | `docs/evidence/p0-recovery-20261014/candidate-plan.json`; `C:\Users\HP\Downloads\CD_AGENT_PINNED_c7cfd04_v2.zip` | 2026-10-14T14:33:00Z |
+| Candidate manifest verification and immutable Git-to-ZIP byte provenance passed for 580 files and 15,148,732 bytes. | VERIFIED | `docs/evidence/p0-recovery-20261014/installer-plan-preflight.log` | 2026-10-14T14:32:52Z |
+| PowerShell 5.1 transactional installer PLAN passed ProductRoot ACL, secrets-directory ACL, companion health, package identity, and provenance without changing services. | VERIFIED | `docs/evidence/p0-recovery-20261014/installer-plan-preflight.log` | 2026-10-14T14:32:52Z |
+| Current Agent SCM baseline is Stopped, PID 0, Automatic, LocalSystem, using the original `app` Python module binPath. | VERIFIED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| ControlPlane is Running at PID 12408 and OwnerUI is Running at PID 24912; both retain original binPath, identity, and start mode. | VERIFIED | `docs/evidence/p0-recovery-20261014/service-baseline.json`; `docs/evidence/p0-recovery-20261014/installer-plan-preflight.log` | 2026-10-14T14:33:26Z |
+| Previous `e0933a7` failed candidate restored the exact original Agent state and binPath; companion invariants passed. | VERIFIED | `C:\Users\HP\AppData\Local\Temp\cyberdefender-agent-install-e0933a7.log`; `C:\Users\HP\AppData\Local\Temp\cyberdefender-agent-install-e0933a7-completion.json` | 2026-10-14T14:44:16Z |
+| Candidate APPLY and installed CrashGuard after-state are awaiting explicit operator/UAC approval. | BLOCKED | `docs/evidence/p0-recovery-20261014/candidate-plan.json` | 2026-10-14T14:33:26Z |
+| Installed Agent SCM Running, valid PID/binPath, and approved pinned release loaded are not yet proven for `c7cfd04`. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| Three fresh installed-Agent HEALTHY snapshots at least 60 seconds apart are not yet captured. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| Fifteen-minute sustained installed-Agent observation with no unexpected exit is not yet complete. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| Installed-Agent signed staging heartbeat and persisted endpoint record are not yet verified. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| LAB canary quarantine, encrypted vault receipt, single-use restore, and recovered SHA-256 equality are not yet verified through the installed Agent. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| Owner Dashboard matching endpoint/quarantine/recovery evidence is not yet verified. | BLOCKED | `docs/evidence/p0-recovery-20261014/service-baseline.json` | 2026-10-14T14:33:26Z |
+| Open P0 items: P0-001 installed deployment, P0-002 installed CrashGuard recovery, P0-003 signed heartbeat, P0-004 real-time quarantine, P0-005 Railway-to-LAB-to-Owner chain, P0-006 rollout authorization. | BLOCKED | `docs/PRODUCTION_GO_NO_GO.md` | 2026-10-14T14:33:26Z |
+| Thirty-PC university rollout decision remains NO-GO until installed stability, golden-path evidence, device scope, data handling, rollback, and written university authorization pass. | BLOCKED | `docs/PRODUCTION_GO_NO_GO.md` | 2026-10-14T14:33:26Z |

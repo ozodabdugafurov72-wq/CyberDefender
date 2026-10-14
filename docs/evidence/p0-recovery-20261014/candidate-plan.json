@@ -1,0 +1,10 @@
+{
+  "utc": "2026-10-14T14:33:58.9132400Z",
+  "zip": "C:\\Users\\HP\\Downloads\\CD_AGENT_PINNED_c7cfd04_v2.zip",
+  "manifest_files": 580,
+  "deployment_authorized": false,
+  "manifest_bytes": 15148732,
+  "plan": "PASS",
+  "sha256": "9358abb94448c5f282d6c7c97387a69959080f2413fcde8351392fff55e88c1a",
+  "commit": "c7cfd0403108cb795479b3dd4eaf8e49ce63dc81"
+}

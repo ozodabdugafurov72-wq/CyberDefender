@@ -1,0 +1,23 @@
+{
+  "anchor_revision": 210,
+  "authenticated": true,
+  "record": {
+    "active_attempt": false,
+    "attempts_since_stable": 1,
+    "boot": "573e726d8df911efb2a26c0b5e1cb935",
+    "clean_stop": true,
+    "cumulative_failures": 0,
+    "generation": 13,
+    "last_progress": 116695.3531316,
+    "probes_used": 1,
+    "progress_count": 28,
+    "recent_failures": [],
+    "repair_count": 10,
+    "revision": 210,
+    "schema": "cd.service-crash.v1",
+    "service": "CyberDefenderAgent",
+    "session": "e29d5f91b802430a63b358abef8c3e97",
+    "state": "PROBE"
+  },
+  "status": "PASS"
+}
