@@ -3,6 +3,7 @@ name: P0 Git ZIP provenance review
 on:
   push:
     branches:
+      - codex/agent-only-release
       - codex/agent-only-release-provenance-review-20261014
   workflow_dispatch:
 
