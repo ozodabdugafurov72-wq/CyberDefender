@@ -69,5 +69,40 @@ class GuardTests(unittest.TestCase):
         g=self.guard(); self.assertTrue(g.allow_optional)
         self.assertEqual(g.record["cumulative_failures"],1)
 
+    def test_consumed_probe_clean_stop_remains_latched_across_restart(self):
+        self.store.record.update(
+            state="LATCHED", attempts_since_stable=1, probes_used=0,
+            clean_stop=True, active_attempt=False,
+        )
+        g=self.guard(); self.tick=5
+        self.assertTrue(g.admit()); self.assertEqual(g.record["state"],"PROBE")
+        g.stop()
+        self.assertEqual(g.record["state"],"LATCHED")
+        restarted=self.guard("boot-b"); self.tick=100
+        self.assertFalse(restarted.admit())
+        self.assertEqual(restarted.record["probes_used"],1)
+
+    def test_legacy_stopped_probe_is_normalized_to_latched(self):
+        self.store.record.update(
+            state="PROBE", attempts_since_stable=1, probes_used=1,
+            clean_stop=True, active_attempt=False,
+        )
+        g=self.guard(); self.assertEqual(g.record["state"],"LATCHED")
+        self.tick=100
+        self.assertFalse(g.admit())
+
+    def test_authorized_probe_can_reach_stable_running(self):
+        self.store.record.update(
+            state="LATCHED", attempts_since_stable=1, probes_used=0,
+            clean_stop=True, active_attempt=False,
+        )
+        g=self.guard(); self.assertFalse(g.admit())
+        self.tick=5; self.assertTrue(g.admit())
+        g.progress(healthy=True); self.tick=10; g.progress(healthy=True)
+        self.tick=15; g.progress(healthy=True)
+        self.assertEqual(g.record["state"],"RUNNING")
+        self.assertEqual(g.record["attempts_since_stable"],0)
+        self.assertEqual(g.record["probes_used"],0)
+
 
 if __name__ == "__main__": unittest.main()

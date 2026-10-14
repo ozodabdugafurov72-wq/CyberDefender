@@ -73,6 +73,11 @@ class CrashGuard:
         self.watchdog = None
         if self.record["active_attempt"]:
             self._failure("PREVIOUS_ATTEMPT_INTERRUPTED")
+        elif self.record["state"] == "PROBE":
+            # A probe is a single durable admission, not a restart budget.  A
+            # previous host can stop cleanly before the probe earns RUNNING;
+            # keep the consumed probe latched across that process boundary.
+            self.record["state"] = "LATCHED"
         self.record.update(boot=boot, session=secrets.token_hex(16), clean_stop=False, active_attempt=False)
         self._commit()
 
@@ -161,6 +166,11 @@ class CrashGuard:
 
     def stop(self):
         with self.lock:
+            if self.record["state"] == "PROBE":
+                # Preserve the one-probe authorization boundary when SCM asks
+                # a still-unproven probe to stop.  Only stable progress resets
+                # probes_used and moves the record to RUNNING.
+                self.record["state"] = "LATCHED"
             self.record["clean_stop"] = True; self.record["active_attempt"] = False
             if self.watchdog is not None: self.watchdog.unavailable()
             self._commit()  # Preserve all counts, including short healthy starts.
