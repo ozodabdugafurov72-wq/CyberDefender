@@ -19,6 +19,9 @@ DEFAULT_REPO_NAME = "CyberDefender-secure-owner-cloud-20261009"
 MAX_FILE_BYTES = 30 * 1024 * 1024
 MAX_TOTAL_BYTES = 150 * 1024 * 1024
 MAX_FILES = 1500
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+ZIP_COMPRESSION = zipfile.ZIP_DEFLATED
+ZIP_COMPRESSION_LEVEL = 7
 EXCLUDED = frozenset({
     "scripts/install_machine.ps1",  # legacy all-three-services installer
     "cyberdefender_connect_staging.ps1",  # TEMP-only privileged wrapper
@@ -129,6 +132,8 @@ def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict
         if len(entries) > MAX_FILES:
             raise ValueError("too many source files")
 
+    entries.sort(key=lambda item: item[0])
+
     blobs = git_blobs(repo, list(dict.fromkeys(object_id for _, object_id in entries)))
     files: list[tuple[str, bytes]] = []
     manifest: list[dict] = []
@@ -155,16 +160,36 @@ def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict
     return files, meta
 
 
+def _zip_info(name: str) -> zipfile.ZipInfo:
+    info = zipfile.ZipInfo(name, date_time=ZIP_TIMESTAMP)
+    info.compress_type = ZIP_COMPRESSION
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    return info
+
+
 def build(repo: Path, target: Path, commit: str) -> dict:
     files, meta = make_payload(repo, commit)
     if target.exists():
         raise FileExistsError("Refusing to overwrite an existing candidate ZIP: " + str(target))
     target.parent.mkdir(parents=True, exist_ok=True)
     # ZIP is constructed from commit blobs, NOT from dirty working-tree files.
-    with zipfile.ZipFile(target, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=7) as z:
+    with zipfile.ZipFile(
+        target, "x", compression=ZIP_COMPRESSION,
+        compresslevel=ZIP_COMPRESSION_LEVEL,
+    ) as z:
         for name, data in files:
-            z.writestr("release/" + name, data)
-        z.writestr("PINNED_MANIFEST.json", json.dumps(meta, sort_keys=True, indent=2) + "\n")
+            z.writestr(
+                _zip_info("release/" + name), data,
+                compress_type=ZIP_COMPRESSION,
+                compresslevel=ZIP_COMPRESSION_LEVEL,
+            )
+        z.writestr(
+            _zip_info("PINNED_MANIFEST.json"),
+            json.dumps(meta, sort_keys=True, indent=2) + "\n",
+            compress_type=ZIP_COMPRESSION,
+            compresslevel=ZIP_COMPRESSION_LEVEL,
+        )
     return {"status": "PINNED_SOURCE_PREPARED_NO_DEPLOYMENT", "commit": meta["commit"],
             "files": len(files), "bytes": meta["total_bytes"],
             "zip_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),

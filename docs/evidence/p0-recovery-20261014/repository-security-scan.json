@@ -1,0 +1,11 @@
+{
+  "device_secrets_present": false,
+  "evidence_files_scanned": 11,
+  "forbidden_key_or_anchor_filenames": [],
+  "github_repository": "ozodabdugafurov72-wq/CyberDefender",
+  "github_visibility": "public",
+  "hmac_key_material_present": false,
+  "private_confirmed": false,
+  "private_key_or_token_value_hits": [],
+  "utc": "2026-10-14T14:48:38.685064+00:00"
+}

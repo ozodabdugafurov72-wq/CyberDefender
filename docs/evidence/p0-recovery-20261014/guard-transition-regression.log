@@ -1,0 +1,3 @@
+test_installer_authorized_non_probe_stop_does_not_latch ... PASS
+test_consumed_probe_clean_stop_remains_latched_across_restart ... PASS
+Ran 2 tests; result PASS

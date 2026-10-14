@@ -1,0 +1,39 @@
+{
+  "candidate": "e0933a7897d4f5d7a50f5926b59cb9a5404d6e90",
+  "completion_utc": "2026-10-14T10:53:02.799387Z",
+  "current_agent_readback": {
+    "binpath": "C:\\Program Files\\CyberDefender\\app\\.venv\\Scripts\\python.exe -m agent.windows_service --service-run",
+    "pid": 0,
+    "state": "Stopped"
+  },
+  "installer_result": "RUNTIME_HEALTH_GATE_TIMEOUT; exact rollback PASS; exit 1",
+  "log_creation_utc": "2026-10-14T09:39:35.5998621Z",
+  "rollback_readback": {
+    "fields": [
+      "binpath",
+      "start_type",
+      "start_name",
+      "recovery",
+      "state"
+    ],
+    "performed": true,
+    "result": "PASS"
+  },
+  "root_cause": "Durable spool terminal-state compaction failed at 16,385 ACK records over max_terminal_records=16,384; terminal_state_safe=false caused SpoolError: terminal state unavailable, 12 ACK failures and runtime DEGRADED.",
+  "runtime_evidence": {
+    "acked_terminal_records": 16385,
+    "capacity_status": "TERMINAL_STATE_UNSAFE",
+    "component_failures": 12,
+    "cycle_count": 10,
+    "last_error": "SpoolError: terminal state unavailable",
+    "last_error_component": "spool_recovery",
+    "max_terminal_records": 16384,
+    "pending": 28,
+    "pipeline_ack_failed": 12,
+    "spool_status": "DEGRADED",
+    "terminal_compatibility_failures": 4
+  },
+  "runtime_file_write_utc": "2026-10-14T09:44:15.5719627Z",
+  "timestamp_explanation": "temporary Python installer used time.strftime local Asia/Tashkent time and appended literal Z; 14:44Z text is actually 09:44 UTC. The 14:33 UTC baseline was captured later, so the labels are not comparable as UTC.",
+  "utc": "2026-10-14T14:47:55.263403+00:00"
+}

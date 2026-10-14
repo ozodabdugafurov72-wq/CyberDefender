@@ -82,6 +82,18 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(restarted.admit())
         self.assertEqual(restarted.record["probes_used"],1)
 
+    def test_installer_authorized_non_probe_stop_does_not_latch(self):
+        g=self.guard(); self.assertTrue(g.admit())
+        self.assertEqual(g.record["state"],"STARTING")
+        g.stop()
+        self.assertEqual(g.record["state"],"STARTING")
+        self.assertTrue(g.record["clean_stop"])
+        restarted=self.guard("boot-b")
+        self.assertFalse(restarted.admit())
+        self.tick=5
+        self.assertTrue(restarted.admit())
+        self.assertEqual(restarted.record["state"],"STARTING")
+
     def test_legacy_stopped_probe_is_normalized_to_latched(self):
         self.store.record.update(
             state="PROBE", attempts_since_stable=1, probes_used=1,

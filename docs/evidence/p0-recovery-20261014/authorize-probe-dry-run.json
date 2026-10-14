@@ -1,0 +1,53 @@
+{
+  "admit_after_60_seconds": true,
+  "admitted_probe": {
+    "active_attempt": true,
+    "attempts_since_stable": 2,
+    "cumulative_failures": 0,
+    "generation": 14,
+    "probes_used": 1,
+    "repair_count": 11,
+    "revision": 213,
+    "state": "PROBE"
+  },
+  "after_authorize": {
+    "active_attempt": false,
+    "attempts_since_stable": 1,
+    "cumulative_failures": 0,
+    "generation": 13,
+    "probes_used": 0,
+    "recent_failures": [],
+    "repair_count": 11,
+    "revision": 211,
+    "state": "LATCHED"
+  },
+  "before": {
+    "attempts_since_stable": 1,
+    "cumulative_failures": 0,
+    "generation": 13,
+    "probes_used": 1,
+    "recent_failures": [],
+    "repair_count": 10,
+    "state": "LATCHED"
+  },
+  "failed_apply_rollback": {
+    "active_attempt": false,
+    "attempts_since_stable": 2,
+    "clean_stop": true,
+    "cumulative_failures": 0,
+    "generation": 14,
+    "probes_used": 1,
+    "repair_count": 11,
+    "revision": 214,
+    "state": "LATCHED"
+  },
+  "history_preserved": true,
+  "immediate_admit": false,
+  "installer_failure_reporting": "AGENT_RELEASE_FAIL_ROLLBACK_PASS:<cause>; exit 1; never AGENT_RELEASE_PASS",
+  "live_store_touched": false,
+  "operation": "python.exe -m agent.service_crash_store authorize-probe --service CyberDefenderAgent",
+  "operator_gate": "-Apply -HostAcknowledgement AGENT_ONLY_AUTHORIZED -AuthorizeRecoveryProbe under Administrator UAC",
+  "second_admit_while_active": false,
+  "source": "authenticated sanitized evidence copy",
+  "utc": "2026-10-14T14:47:55.263403+00:00"
+}
