@@ -91,6 +91,23 @@ class GitZipProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ProvenanceError, "GIT_INSTALLED_BYTE_MISMATCH"):
             verify_provenance(self.repo, self.archive, self.commit, self.sha, dest)
 
+    def test_extracted_release_reparse_point_is_rejected_without_traversal(self):
+        parent = self.root / "agent-releases"
+        parent.mkdir()
+        dest = parent / self.commit
+        bootstrap = self.root / "agent_service_bootstrap.py"
+        bootstrap.write_bytes(b"# bootstrap only\n")
+        release_manager.unpack(self.archive, dest, self.sha, self.commit, bootstrap)
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "untrusted.py").write_text("raise SystemExit\n", encoding="utf-8")
+        try:
+            (dest / "linked-outside").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlink creation is unavailable")
+        with self.assertRaisesRegex(ProvenanceError, "REPARSE_POINT"):
+            verify_provenance(self.repo, self.archive, self.commit, self.sha, dest)
+
     def test_wrong_commit_blocks(self):
         wrong = "0" * 40
         with self.assertRaises(ValueError):
