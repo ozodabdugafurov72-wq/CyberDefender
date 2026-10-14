@@ -84,6 +84,8 @@ class DurableIncidentOutbox:
         self._scan_limit_exceeded = 0
         self._integrity_rejected = 0
         self._last_error = None
+        self._verified_cache: list[dict[str, Any]] | None = None
+        self._verified_cache_signature: tuple[int, int, int, int] | None = None
 
     @staticmethod
     def _validate_policy(policy: IncidentOutboxPolicy) -> None:
@@ -156,8 +158,17 @@ class DurableIncidentOutbox:
         if len(encoded) > self.policy.max_record_bytes:
             raise IncidentOutboxCapacityError("RECORD_LIMIT_EXCEEDED")
         with self._lock:
+            signature_before = self._journal_signature()
+            cache_current = (
+                self._verified_cache is not None
+                and self._verified_cache_signature == signature_before
+            )
             current_bytes = self.journal_path.stat().st_size if self.journal_path.exists() else 0
-            current_records = self._physical_record_count()
+            current_records = (
+                len(self._verified_cache)
+                if cache_current
+                else self._physical_record_count()
+            )
             if current_records >= self.policy.max_records or current_bytes + len(encoded) > self.policy.max_bytes:
                 raise IncidentOutboxCapacityError("OUTBOX_CAPACITY_EXHAUSTED")
             self.outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -165,10 +176,33 @@ class DurableIncidentOutbox:
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if cache_current:
+                self._verified_cache.append(dict(record))
+                self._verified_cache_signature = self._journal_signature()
+            else:
+                self._verified_cache = None
+                self._verified_cache_signature = None
+
+    def _journal_signature(self) -> tuple[int, int, int, int] | None:
+        if not self.journal_path.exists():
+            return None
+        stat_result = self.journal_path.stat()
+        return (
+            int(stat_result.st_dev),
+            int(stat_result.st_ino),
+            int(stat_result.st_size),
+            int(stat_result.st_mtime_ns),
+        )
 
     def _physical_record_count(self) -> int:
         if not self.journal_path.exists():
             return 0
+        signature = self._journal_signature()
+        if (
+            self._verified_cache is not None
+            and self._verified_cache_signature == signature
+        ):
+            return len(self._verified_cache)
         count = 0
         scanned_bytes = 0
         with self.journal_path.open("rb") as handle:
@@ -182,14 +216,23 @@ class DurableIncidentOutbox:
     def _scan(self, *, max_records: int | None = None, max_bytes: int | None = None) -> list[dict[str, Any]]:
         record_limit = min(max_records or self.policy.max_scan_records, self.policy.max_scan_records)
         byte_limit = min(max_bytes or self.policy.max_scan_bytes, self.policy.max_scan_bytes)
-        if not self.journal_path.exists():
+        use_default_bounds = max_records is None and max_bytes is None
+        signature = self._journal_signature()
+        if use_default_bounds and self._verified_cache is not None and self._verified_cache_signature == signature:
+            return list(self._verified_cache)
+        if signature is None:
+            if use_default_bounds:
+                self._verified_cache = []
+                self._verified_cache_signature = None
             return []
-        if self.journal_path.stat().st_size > self.policy.max_bytes:
+        if signature[2] > self.policy.max_bytes:
             self._scan_limit_exceeded += 1
             raise IncidentOutboxCapacityError("OUTBOX_BYTES_LIMIT_EXCEEDED")
         result: list[dict[str, Any]] = []
         scanned = 0
         scanned_bytes = 0
+        corruption_before = self._corrupt_records
+        integrity_before = self._integrity_rejected
         with self.journal_path.open("rb") as handle:
             for raw in handle:
                 scanned += 1
@@ -205,6 +248,17 @@ class DurableIncidentOutbox:
                 except (ValueError, UnicodeError, json.JSONDecodeError, IncidentOutboxIntegrityError):
                     self._corrupt_records += 1
                     self._integrity_rejected += 1
+        if (
+            use_default_bounds
+            and self._corrupt_records == corruption_before
+            and self._integrity_rejected == integrity_before
+            and self._journal_signature() == signature
+        ):
+            self._verified_cache = list(result)
+            self._verified_cache_signature = signature
+        else:
+            self._verified_cache = None
+            self._verified_cache_signature = None
         return result
 
     @staticmethod

@@ -106,6 +106,21 @@ class RuntimeOutboxWiringTests(unittest.TestCase):
             self.assertEqual(["evt-replay"], acks)
             self.assertEqual(2, reopened.health_snapshot()["physical_records"])
 
+    def test_distinct_semantic_duplicate_is_acked_without_extra_outbox_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DurableIncidentOutbox(directory, KEY)
+            acks = []
+            adapter = build_adapter(
+                outbox,
+                ack=lambda event_id: acks.append(event_id) or True,
+            )
+            self.assertTrue(adapter.handle_event(detection("evt-original")))
+            self.assertTrue(
+                adapter.handle_event(detection("evt-semantic-duplicate", timestamp=1700000001.0))
+            )
+            self.assertEqual(["evt-original", "evt-semantic-duplicate"], acks)
+            self.assertEqual(1, outbox.health_snapshot()["physical_records"])
+
     def test_conflicting_existing_row_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             outbox = DurableIncidentOutbox(directory, KEY)

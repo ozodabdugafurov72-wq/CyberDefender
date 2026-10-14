@@ -192,13 +192,10 @@ class CorrelationAdapter:
                 or self._published != published_before + 1
             ):
                 raise RuntimeError("unknown correlation result")
-            if incident is None and self.incident_outbox is not None:
-                if not self._confirm_replay_outbox(
-                    tenant_id=outbox_scope_id,
-                    source_event_id=source_event_id,
-                ):
-                    raise RuntimeError("durable incident outbox replay not confirmed")
-            # In strict mode None means an existing duplicate, never an error.
+            # The authenticated post-commit replay case was handled before
+            # ingest.  In strict mode, every invalid/error path raises; None
+            # therefore means a distinct source event was safely suppressed
+            # as a semantic duplicate in this live correlation window.
             return self._ack_event(event_id)
         except Exception:
             self._failed += 1

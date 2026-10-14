@@ -151,6 +151,35 @@ class IncidentOutboxTests(unittest.TestCase):
             self.assertEqual(9, len(reopened.scan()))
             self.assertEqual("HEALTHY", reopened.health_snapshot()["status"])
 
+    def test_verified_cache_avoids_revalidating_unchanged_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = self.make_outbox(directory)
+            self.put(outbox)
+            outbox = self.make_outbox(directory)
+            calls = 0
+            verify = outbox._verify
+
+            def counted(record):
+                nonlocal calls
+                calls += 1
+                return verify(record)
+
+            outbox._verify = counted
+            self.assertEqual(1, len(outbox.scan()))
+            first_calls = calls
+            self.assertEqual(1, first_calls)
+            self.assertEqual(1, len(outbox.scan()))
+            self.assertEqual(first_calls, calls)
+
+            self.put(outbox, source="evt-2", incident="inc-2", idem="idem-2")
+            self.assertEqual(2, len(outbox.scan()))
+            self.assertEqual(first_calls, calls)
+
+            with outbox.journal_path.open("ab") as handle:
+                handle.write(b"{external-change}\n")
+            self.assertEqual(2, len(outbox.scan()))
+            self.assertGreater(outbox.health_snapshot()["integrity_rejected"], 0)
+
     def test_lease_expiry_allows_bounded_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             clock = FakeClock()
