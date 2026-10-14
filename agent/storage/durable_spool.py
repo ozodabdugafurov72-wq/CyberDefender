@@ -770,27 +770,36 @@ class DurableEventSpool:
                     return set()
                 raw = self.acked_state_path.read_bytes()
                 state = json.loads(raw.decode("utf-8"))
-                if isinstance(state, dict):
-                    ids = state.get("acked_ids", [])
-                    if isinstance(ids, list):
-                        limit = max(1, int(self.policy.max_terminal_records))
-                        if len(ids) > limit + 1:
-                            self._terminal_state_safe = False
-                            return set()
-                        normalized: list[str] = []
-                        for event_id in ids:
-                            if not isinstance(event_id, str) or not event_id.strip():
-                                self._terminal_state_safe = False
-                                return set()
-                            normalized.append(event_id.strip())
-                        if len(set(normalized)) != len(normalized):
-                            self._terminal_state_safe = False
-                            return set()
-                        snapshot_ids.update(normalized)
-                        if len(normalized) == limit + 1:
-                            self._terminal_repair_required = True
-                        self._acked_order = sorted(snapshot_ids)
-                        return snapshot_ids
+                required = {"schema_version", "status", "acked_ids"}
+                if (
+                    not isinstance(state, dict)
+                    or set(state) != required
+                    or state.get("schema_version") != "1"
+                    or state.get("status") != "ACKED"
+                    or not isinstance(state.get("acked_ids"), list)
+                ):
+                    self._corrupted += 1
+                    self._terminal_state_safe = False
+                    return set()
+                ids = state["acked_ids"]
+                limit = max(1, int(self.policy.max_terminal_records))
+                if len(ids) > limit + 1:
+                    self._terminal_state_safe = False
+                    return set()
+                normalized: list[str] = []
+                for event_id in ids:
+                    if not isinstance(event_id, str) or not event_id.strip():
+                        self._terminal_state_safe = False
+                        return set()
+                    normalized.append(event_id.strip())
+                if len(set(normalized)) != len(normalized):
+                    self._terminal_state_safe = False
+                    return set()
+                snapshot_ids.update(normalized)
+                if len(normalized) == limit + 1:
+                    self._terminal_repair_required = True
+                self._acked_order = sorted(snapshot_ids)
+                return snapshot_ids
             except Exception:
                 self._corrupted += 1
                 self._terminal_state_safe = False
