@@ -115,7 +115,7 @@ def validate_response_evidence(value: Any, *, endpoint_id: Any) -> dict[str, Any
         "verifier_outcome", "action_state", "verification_outcome", "response_latency_ms",
         "execution_latency_ms", "detection_to_response_ms", "restore_latency_ms", "evidence_ref",
         "production_authorization", "lab_authorization", "receipt_integrity",
-        "post_action_verification",
+        "post_action_verification", "authorization_policy_id",
     }
     if set(evidence) - allowed:
         raise ValueError("unsupported response evidence field")
@@ -149,7 +149,7 @@ def validate_response_evidence(value: Any, *, endpoint_id: Any) -> dict[str, Any
     if risk_level not in _OCSF_SEVERITY_IDS:
         raise ValueError("invalid risk_level")
     policy_outcome = _required_text(evidence.get("policy_outcome"), "policy_outcome", 64)
-    if policy_outcome != "REQUIRE_VERIFICATION":
+    if policy_outcome not in {"REQUIRE_VERIFICATION", "AUTHORIZED_AUTONOMOUS_QUARANTINE"}:
         raise ValueError("invalid policy_outcome")
     policy_reason = _required_text(evidence.get("policy_reason"), "policy_reason", 256)
     verifier_outcome = _required_text(evidence.get("verifier_outcome"), "verifier_outcome", 64)
@@ -184,14 +184,24 @@ def validate_response_evidence(value: Any, *, endpoint_id: Any) -> dict[str, Any
         raise ValueError("restore latency required")
     evidence_ref = _required_text(evidence.get("evidence_ref"), "evidence_ref", 256)
     production_authorization = _required_text(
-        evidence.get("production_authorization"), "production_authorization", 32
+        evidence.get("production_authorization"), "production_authorization", 64
     )
-    if production_authorization != "NOT_GRANTED":
-        raise ValueError("production authorization claim rejected")
     lab_authorization = _required_text(evidence.get("lab_authorization"), "lab_authorization", 96)
     expected_lab = "RESTORE_CAPABILITY_CONSUMED" if action_state == "RESTORED" else "QUARANTINE_CAPABILITY_CONSUMED"
-    if lab_authorization != expected_lab:
-        raise ValueError("invalid lab authorization")
+    authorization_policy_id = None
+    if production_authorization == "NOT_GRANTED":
+        if lab_authorization != expected_lab or policy_outcome != "REQUIRE_VERIFICATION":
+            raise ValueError("invalid lab authorization")
+    elif production_authorization == "SIGNED_POLICY_CAPABILITY_CONSUMED":
+        if action_state != "QUARANTINED" or lab_authorization != "NOT_APPLICABLE":
+            raise ValueError("invalid production authorization")
+        if policy_outcome != "AUTHORIZED_AUTONOMOUS_QUARANTINE":
+            raise ValueError("production policy outcome mismatch")
+        authorization_policy_id = _required_text(
+            evidence.get("authorization_policy_id"), "authorization_policy_id", 128
+        )
+    else:
+        raise ValueError("production authorization claim rejected")
     if evidence.get("receipt_integrity") is not True or evidence.get("post_action_verification") is not True:
         raise ValueError("unverified response evidence")
     return {
@@ -217,6 +227,7 @@ def validate_response_evidence(value: Any, *, endpoint_id: Any) -> dict[str, Any
         "evidence_ref": evidence_ref,
         "production_authorization": production_authorization,
         "lab_authorization": lab_authorization,
+        "authorization_policy_id": authorization_policy_id,
         "receipt_integrity": True,
         "post_action_verification": True,
     }

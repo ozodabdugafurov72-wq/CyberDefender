@@ -14,6 +14,17 @@ import time
 SERVICES = ("CyberDefenderAgent", "CyberDefenderControlPlane", "CyberDefenderOwnerUI")
 SCHEMA = "cd.service-crash.v1"
 HISTORY_LIMIT = 32
+FAILURE_CODES = frozenset({
+    "PREVIOUS_ATTEMPT_INTERRUPTED",
+    "ATTEMPT_FAILED",
+    "WORK_UNHEALTHY",
+    "CLEANUP_UNVERIFIED",
+    "RUNTIME_RETURNED",
+    "UNHANDLED_EXCEPTION",
+    "RESOURCE_GUARD_TERMINATION",
+    "COLLECTOR_FAILURE",
+    "UNKNOWN_EXIT",
+})
 
 
 @dataclass(frozen=True)
@@ -142,11 +153,7 @@ class CrashGuard:
     def failed(self, code="ATTEMPT_FAILED"):
         with self.lock:
             # Allowlisted reason codes only: never accept an exception string.
-            if code not in {
-                "ATTEMPT_FAILED", "WORK_UNHEALTHY", "CLEANUP_UNVERIFIED",
-                "RUNTIME_RETURNED", "UNHANDLED_EXCEPTION", "RESOURCE_GUARD_TERMINATION",
-                "COLLECTOR_FAILURE", "UNKNOWN_EXIT",
-            }: code = "ATTEMPT_FAILED"
+            if code not in FAILURE_CODES: code = "ATTEMPT_FAILED"
             self._failure(code)
             if self.watchdog is not None: self.watchdog.unavailable()
             if code == "CLEANUP_UNVERIFIED": self.record["state"] = "UNAVAILABLE"

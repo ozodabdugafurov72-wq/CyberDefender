@@ -29,8 +29,8 @@ class DistributionRepository:
     crypto admission, replay protection or durable event delivery.
     """
 
-    VERSION = "1.2"
-    SCHEMA_VERSION = 3
+    VERSION = "1.3"
+    SCHEMA_VERSION = 4
     VALID_INSTALL_STATES = {"PENDING", "INSTALLED", "FAILED", "REVOKED"}
     VALID_HEALTH_STATES = {"UNKNOWN", "HEALTHY", "DEGRADED", "CRITICAL", "OFFLINE"}
     VALID_SERVICE_STATES = {
@@ -175,6 +175,20 @@ class DistributionRepository:
                     )
                     self._conn.execute(
                         "INSERT INTO distribution_schema(version, applied_at) VALUES(3, ?)",
+                        (time.time(),),
+                    )
+                    current = 3
+                if int(current) < 4:
+                    columns = {
+                        row["name"]
+                        for row in self._conn.execute("PRAGMA table_info(fleet_response_evidence)").fetchall()
+                    }
+                    if "authorization_policy_id" not in columns:
+                        self._conn.execute(
+                            "ALTER TABLE fleet_response_evidence ADD COLUMN authorization_policy_id TEXT"
+                        )
+                    self._conn.execute(
+                        "INSERT INTO distribution_schema(version, applied_at) VALUES(4, ?)",
                         (time.time(),),
                     )
                 final = self._conn.execute("SELECT COALESCE(MAX(version),0) AS v FROM distribution_schema").fetchone()["v"]
@@ -358,9 +372,9 @@ class DistributionRepository:
                     target_name,target_sha256,detection_types_json,risk_score,risk_level,
                     policy_outcome,policy_reason,verifier_outcome,action_state,verification_outcome,
                     response_latency_ms,execution_latency_ms,detection_to_response_ms,restore_latency_ms,
-                    evidence_ref,production_authorization,lab_authorization,receipt_integrity,
+                    evidence_ref,production_authorization,lab_authorization,authorization_policy_id,receipt_integrity,
                     post_action_verification
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                     evidence["evidence_id"], evidence["endpoint_id"], evidence["incident_id"],
@@ -371,7 +385,8 @@ class DistributionRepository:
                     evidence["verification_outcome"], evidence["response_latency_ms"],
                     evidence["execution_latency_ms"], evidence["detection_to_response_ms"],
                     evidence["restore_latency_ms"], evidence["evidence_ref"],
-                    evidence["production_authorization"], evidence["lab_authorization"], 1, 1,
+                    evidence["production_authorization"], evidence["lab_authorization"],
+                    evidence.get("authorization_policy_id"), 1, 1,
                     ),
                 )
             except sqlite3.IntegrityError:
@@ -411,6 +426,7 @@ class DistributionRepository:
                     "evidence_ref": existing["evidence_ref"],
                     "production_authorization": existing["production_authorization"],
                     "lab_authorization": existing["lab_authorization"],
+                    "authorization_policy_id": existing["authorization_policy_id"],
                     "receipt_integrity": existing["receipt_integrity"] == 1,
                     "post_action_verification": existing["post_action_verification"] == 1,
                 }

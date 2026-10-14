@@ -19,6 +19,8 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from agent.quarantine.crypto_vault import VaultCipher, VaultCipherError
+
 
 class QuarantineReadModel:
     VERSION = "1.1"
@@ -196,7 +198,19 @@ class QuarantineReadModel:
         if not self._under(evidence_path, evidence_root) or self._has_reparse_component(evidence_path):
             return None
         try:
-            raw = evidence_path.read_bytes()
+            stored = evidence_path.read_bytes()
+            if metadata.get("encryption") == "AES-256-GCM":
+                if not hmac.compare_digest(
+                    self._sha256(stored), str(metadata.get("ciphertext_sha256") or "")
+                ):
+                    return None
+                cipher = VaultCipher(evidence_root, key_name=".evidence-aes256.key", create=False)
+                aad = (str(evidence_id) + ":" + str(expected)).encode("ascii")
+                raw = cipher.decrypt(stored, aad=aad)
+            elif metadata.get("encryption") in (None, "NONE"):
+                raw = stored
+            else:
+                return None
             if len(raw) > self.MAX_ITEM_BYTES or not hmac.compare_digest(self._sha256(raw), expected):
                 return None
             # Metadata is integrity-linked by the raw hash above.  Expose only
@@ -207,7 +221,7 @@ class QuarantineReadModel:
                            "detection_confidence", "risk_score", "risk_level", "policy_outcome",
                            "policy_reason", "verifier_outcome", "verification_outcome", "verified_at"}
             }
-        except (OSError, ValueError):
+        except (OSError, ValueError, VaultCipherError):
             return None
 
     def _read_receipt(self, root: Path, record: dict[str, Any]) -> dict[str, Any] | None:
@@ -230,6 +244,7 @@ class QuarantineReadModel:
             and all(receipt.get(key) == record.get(key) for key in (
                 "incident_id", "requested_action", "evidence_ref", "decision_digest",
                 "capability_id", "scope_digest", "production_authorization", "lab_authorization",
+                "object_encryption", "object_ciphertext_sha256", "authorization_policy_id",
             ))
         )
         attribution_linked = all(
@@ -265,6 +280,8 @@ class QuarantineReadModel:
             and receipt.get("restore_scope_digest") == record.get("restore_scope_digest")
             and receipt.get("restore_reason") == record.get("restore_reason")
             and receipt.get("containment_receipt_sha256") == record.get("receipt_sha256")
+            and receipt.get("object_encryption") == record.get("object_encryption", "NONE")
+            and receipt.get("object_ciphertext_sha256") == record.get("object_ciphertext_sha256")
             and receipt.get("production_authorization") == "NOT_GRANTED"
             and receipt.get("lab_authorization") == "RESTORE_CAPABILITY_CONSUMED"
         )
@@ -279,9 +296,23 @@ class QuarantineReadModel:
         if not self._under(object_path, objects_root) or self._has_reparse_component(object_path):
             return False
         try:
-            raw = object_path.read_bytes()
+            stored = object_path.read_bytes()
+            if record.get("object_encryption") == "AES-256-GCM":
+                if not hmac.compare_digest(
+                    self._sha256(stored), str(record.get("object_ciphertext_sha256") or "")
+                ):
+                    return False
+                cipher = VaultCipher(root, key_name=".objects-aes256.key", create=False)
+                aad = (
+                    str(record.get("quarantine_id")) + ":" + str(target_hash)
+                ).encode("ascii")
+                raw = cipher.decrypt(stored, aad=aad)
+            elif record.get("object_encryption") in (None, "NONE"):
+                raw = stored
+            else:
+                return False
             return len(raw) <= self.MAX_ITEM_BYTES and len(raw) == int(record.get("target_size")) and hmac.compare_digest(self._sha256(raw), target_hash)
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, VaultCipherError):
             return False
 
     def _verify_restored_target(self, root: Path, record: dict[str, Any]) -> bool:
@@ -406,6 +437,8 @@ class QuarantineReadModel:
             "verifier_outcome": verifier_outcome or "UNKNOWN",
             "production_authorization": self._safe_text(record.get("production_authorization"), 64) or "NOT_GRANTED",
             "lab_authorization": self._safe_text(record.get("lab_authorization"), 96) or "NOT_GRANTED",
+            "authorization_policy_id": self._safe_text(record.get("authorization_policy_id"), 128),
+            "object_encryption": self._safe_text(record.get("object_encryption"), 64) or "NONE",
             "containment_state": state,
             # A read-model integrity check is kept separate from the
             # persisted verifier outcome; legacy rows without that field stay
@@ -437,6 +470,7 @@ class QuarantineReadModel:
             ("lab_authorization", "lab_authorization"), ("evidence_ref", "evidence_ref"),
             ("decision_digest", "decision_digest"), ("capability_id", "capability_id"),
             ("scope_digest", "scope_digest"),
+            ("authorization_policy_id", "authorization_policy_id"),
         ):
             if record.get(record_field) is not None:
                 provenance[display_field] = "record"
@@ -450,6 +484,8 @@ class QuarantineReadModel:
                 "evidence_ref": self._safe_text(record.get("evidence_ref"), 256),
                 "decision_digest": self._safe_text(record.get("decision_digest"), 64),
                 "capability_id": self._safe_text(record.get("capability_id"), 128),
+                "authorization_policy_id": self._safe_text(record.get("authorization_policy_id"), 128),
+                "object_encryption": self._safe_text(record.get("object_encryption"), 64) or "NONE",
                 "scope_digest": self._safe_text(record.get("scope_digest"), 64),
                 "created_at": self._safe_text(record.get("created_at"), 64),
                 "contained_at": self._safe_text(record.get("contained_at"), 64),

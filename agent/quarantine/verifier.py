@@ -32,10 +32,19 @@ class QuarantineIndependentVerifier:
                 return self._fail("CAPABILITY_AUDIT_MISSING")
             if not isinstance(record.get("scope_digest"), str) or len(record["scope_digest"]) != 64:
                 return self._fail("CAPABILITY_SCOPE_AUDIT_MISSING")
-            if record.get("production_authorization") != "NOT_GRANTED":
-                return self._fail("PRODUCTION_AUTHORIZATION_INVALID")
-            if record.get("lab_authorization") != "QUARANTINE_CAPABILITY_CONSUMED":
-                return self._fail("LAB_AUTHORIZATION_AUDIT_INVALID")
+            authorization_pair = (
+                record.get("production_authorization"), record.get("lab_authorization")
+            )
+            if authorization_pair not in {
+                ("NOT_GRANTED", "QUARANTINE_CAPABILITY_CONSUMED"),
+                ("SIGNED_POLICY_CAPABILITY_CONSUMED", "NOT_APPLICABLE"),
+            }:
+                return self._fail("AUTHORIZATION_AUDIT_INVALID")
+            if (
+                authorization_pair[0] == "SIGNED_POLICY_CAPABILITY_CONSUMED"
+                and not isinstance(record.get("authorization_policy_id"), str)
+            ):
+                return self._fail("AUTHORIZATION_POLICY_AUDIT_MISSING")
             if Path(record.get("original_path", "")).expanduser().resolve() != Path(original_path).expanduser().resolve():
                 return self._fail("ORIGINAL_PATH_MISMATCH")
             if Path(record.get("approved_root", "")).expanduser().resolve() != Path(approved_root).expanduser().resolve():
@@ -58,9 +67,14 @@ class QuarantineIndependentVerifier:
                 "requested_action": record["requested_action"],
                 "evidence_ref": record["evidence_ref"], "decision_digest": record["decision_digest"],
                 "capability_id": record["capability_id"], "scope_digest": record["scope_digest"],
-                "production_authorization": "NOT_GRANTED",
-                "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
-                "authorization": "NOT_GRANTED",
+                "production_authorization": record.get("production_authorization"),
+                "lab_authorization": record.get("lab_authorization"),
+                "authorization_policy_id": record.get("authorization_policy_id"),
+                "authorization": (
+                    "SIGNED_POLICY_CAPABILITY_CONSUMED"
+                    if record.get("production_authorization") == "SIGNED_POLICY_CAPABILITY_CONSUMED"
+                    else "NOT_GRANTED"
+                ),
                 "real_world_effect_observed": True, "fail_closed": True,
             }
             for field in (

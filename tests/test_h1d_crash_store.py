@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from agent.service_crash_store import FileCrashStore, CrashStoreError, provision, no_reparse, MAX_BYTES
-from agent.service_crash_guard import CrashGuard
+from agent.service_crash_guard import CrashGuard, FAILURE_CODES
 
 SERVICE="CyberDefenderAgent"
 
@@ -107,6 +107,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(r["repair_count"],1)
         self.assertEqual(r["attempts_since_stable"],1)
         self.assertEqual(r["state"],"LATCHED")
+
+    def test_every_runtime_failure_reason_survives_authenticated_commit(self):
+        for reason in sorted(FAILURE_CODES - {"PREVIOUS_ATTEMPT_INTERRUPTED"}):
+            with self.subTest(reason=reason):
+                root = self.root / reason.lower()
+                root.mkdir()
+                provision(root, path_validator=no_reparse)
+                store = FileCrashStore(root, SERVICE, path_validator=no_reparse)
+                try:
+                    guard = CrashGuard(store, boot="a")
+                    self.assertTrue(guard.admit())
+                    guard.failed(reason)
+                    committed = store.load()
+                    self.assertEqual(committed["recent_failures"][-1]["code"], reason)
+                    self.assertFalse(committed["active_attempt"])
+                finally:
+                    store.close()
 
     def test_closed_store_cannot_write_without_ownership(self):
         s=self.store(); r=s.load(); s.close()

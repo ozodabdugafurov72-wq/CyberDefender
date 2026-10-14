@@ -23,6 +23,7 @@ from agent.quarantine import (
     canonical_scope_digest,
 )
 from agent.quarantine.v2_vault import QuarantineVaultError
+from agent.quarantine.crypto_vault import VaultCipher
 from agent.independent_verifier import IndependentVerifier
 from agent.policy_engine import PolicyEngine
 from agent.safety_authorization_gate import SafetyAuthorizationGate
@@ -112,6 +113,17 @@ class QuarantineV2Tests(unittest.TestCase):
         self.assertEqual(record["requested_action"], "QUARANTINE")
         self.assertEqual(record["decision_digest"], request.decision_digest)
         self.assertEqual(record["evidence_ref"], request.evidence_ref)
+        self.assertEqual(record["object_encryption"], "AES-256-GCM")
+        object_bytes = Path(record["object_path"]).read_bytes()
+        self.assertTrue(object_bytes.startswith(VaultCipher.MAGIC))
+        self.assertNotIn(b"harmless canary", object_bytes)
+        evidence_record = self.vault.evidence_vault.get_record(record["evidence_quarantine_id"])
+        self.assertEqual(evidence_record["encryption"], "AES-256-GCM")
+        evidence_bytes = (
+            self.vault.evidence_vault.evidence_dir / evidence_record["evidence_file"]
+        ).read_bytes()
+        self.assertTrue(evidence_bytes.startswith(VaultCipher.MAGIC))
+        self.assertNotIn(b"harmless canary", evidence_bytes)
         self.assertEqual(result["production_authorization"], "NOT_GRANTED")
         self.assertEqual(result["lab_authorization"], "QUARANTINE_CAPABILITY_CONSUMED")
         self.assertEqual(result["capability_id"], capability["capability_id"])
@@ -119,6 +131,8 @@ class QuarantineV2Tests(unittest.TestCase):
         receipt = (self.vault.receipts_dir / f"{result['quarantine_id']}.json").read_text(encoding="utf-8")
         self.assertNotIn("token_mac", serialized)
         self.assertNotIn("token_mac", receipt)
+        self.assertNotIn("aes256.key", serialized)
+        self.assertNotIn("aes256.key", receipt)
         self.assertEqual(result["verification"]["decision_digest"], request.decision_digest)
         self.assertEqual(result["verification"]["evidence_ref"], request.evidence_ref)
         with self.assertRaises(QuarantineContractError):
@@ -225,6 +239,25 @@ class QuarantineV2Tests(unittest.TestCase):
         self.assertEqual(result["reason"], "SOURCE_CHANGED_BEFORE_CONTAINMENT")
         self.assertFalse(result["real_world_effect"])
         self.assertTrue(Path(request.target).exists())
+
+    def test_ciphertext_tamper_is_rejected_for_object_and_evidence(self) -> None:
+        request = self._request(key="cipher-tamper")
+        result = self.executor.execute(request, self._capability(request))
+        self.assertTrue(result["accepted"])
+        record = self.vault.get_verified_record(result["quarantine_id"])
+        object_path = Path(record["object_path"])
+        ciphertext = bytearray(object_path.read_bytes())
+        ciphertext[-1] ^= 0x01
+        object_path.write_bytes(bytes(ciphertext))
+        self.assertFalse(self.vault.verify_object(record))
+
+        evidence_id = record["evidence_quarantine_id"]
+        evidence = self.vault.evidence_vault.get_record(evidence_id)
+        evidence_path = self.vault.evidence_vault.evidence_dir / evidence["evidence_file"]
+        ciphertext = bytearray(evidence_path.read_bytes())
+        ciphertext[-1] ^= 0x01
+        evidence_path.write_bytes(bytes(ciphertext))
+        self.assertFalse(self.vault.evidence_vault.verify_evidence(evidence_id))
 
     def test_protected_cyberdefender_runtime_root_is_denied(self) -> None:
         previous = os.environ.get("CYBERDEFENDER_ROOT")

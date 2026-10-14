@@ -20,6 +20,7 @@ from control_plane.fleet_protocol import FleetProtocolError, SlidingWindowLimite
 from control_plane.xdr_compat import (
     CAPABILITY_DEVICE_INVENTORY,
     CAPABILITY_ENDPOINT_HEALTH,
+    CAPABILITY_RESPONSE_EVIDENCE,
     OCSF_DEVICE_INVENTORY_CLASS_UID,
     OCSF_INCIDENT_FINDING_CLASS_UID,
     OCSF_SCHEMA_NAME,
@@ -200,7 +201,7 @@ class FleetProtocolUnitTests(unittest.TestCase):
             versions = repository._conn.execute(
                 "SELECT version FROM distribution_schema ORDER BY version"
             ).fetchall()
-            self.assertEqual([item["version"] for item in versions], [1, 2, 3])
+            self.assertEqual([item["version"] for item in versions], [1, 2, 3, 4])
             self.assertEqual(row["endpoint_id"], "legacy-1")
             self.assertEqual(row["telemetry_schema"], "legacy")
             self.assertEqual(row["capabilities_json"], "[]")
@@ -403,6 +404,23 @@ class FleetProtocolHttpTests(unittest.TestCase):
             client.publish_response_evidence(
                 response_evidence(receipt_integrity=False), runtime_version="2.4"
             )
+        production = response_evidence(
+            evidence_id="qv2-production-001",
+            policy_outcome="AUTHORIZED_AUTONOMOUS_QUARANTINE",
+            production_authorization="SIGNED_POLICY_CAPABILITY_CONSUMED",
+            lab_authorization="NOT_APPLICABLE",
+            authorization_policy_id="prod-policy-2026-10",
+        )
+        self.assertTrue(client.publish_response_evidence(production, runtime_version="2.4"))
+        missing_policy = dict(production)
+        missing_policy.pop("authorization_policy_id")
+        with self.assertRaises(ValueError):
+            client.publish_response_evidence(missing_policy, runtime_version="2.4")
+        with self.assertRaises(ValueError):
+            client.publish_response_evidence(
+                dict(production, lab_authorization="QUARANTINE_CAPABILITY_CONSUMED"),
+                runtime_version="2.4",
+            )
 
     def test_tamper_replay_unsigned_and_invalid_identity_are_rejected(self):
         path = "/api/v1/enrollment/register"
@@ -423,6 +441,32 @@ class FleetProtocolHttpTests(unittest.TestCase):
         self.assertEqual(self.post(path, payload("endpoint-unsigned"), signed=False)[0], 401)
         self.assertEqual(self.post(path, payload(""))[0], 400)
         self.assertEqual(self.post(path, payload("endpoint-state", service_state="PWNED"))[0], 400)
+
+    def test_heartbeat_and_response_evidence_exact_request_replay_return_409(self):
+        heartbeat = payload("endpoint-replay-all")
+        heartbeat.pop("install_state")
+        heartbeat["resource_state"] = "NORMAL"
+        heartbeat["last_error"] = None
+        for path, body_value in (
+            ("/api/v1/endpoints/heartbeat", heartbeat),
+            (
+                "/api/v1/endpoints/response-evidence",
+                dict(
+                    heartbeat,
+                    capabilities=sorted(set(heartbeat["capabilities"]) | {CAPABILITY_RESPONSE_EVIDENCE}),
+                    response_evidence=response_evidence(),
+                ),
+            ),
+        ):
+            with self.subTest(path=path):
+                status, _, _, headers, body = self.post(path, body_value)
+                self.assertEqual(status, 200)
+                replay = urllib.request.Request(
+                    self.base + path, data=body, headers=headers, method="POST"
+                )
+                with self.assertRaises(urllib.error.HTTPError) as replay_error:
+                    urllib.request.urlopen(replay, timeout=3)
+                self.assertEqual(replay_error.exception.code, 409)
 
     def test_security_headers_and_oversized_body(self):
         status, headers, _ = self.get("/health")

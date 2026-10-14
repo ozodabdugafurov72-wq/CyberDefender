@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 from pathlib import Path
 
@@ -12,6 +13,12 @@ PATTERNS = (
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
     ("openai-token", re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{24,}\b")),
 )
+
+SENSITIVE_NAME = re.compile(
+    r"(?:^|_)(?:token|secret|password|passwd|credential|private_key|api_key|bearer)(?:_|$)",
+    re.IGNORECASE,
+)
+LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log"}
 
 
 EXCLUDED_DIRS = {
@@ -34,6 +41,43 @@ def repository_files(root: Path) -> list[Path]:
     return result
 
 
+def _sensitive_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and SENSITIVE_NAME.search(child.id):
+            names.add(child.id)
+        elif isinstance(child, ast.Attribute) and SENSITIVE_NAME.search(child.attr):
+            names.add(child.attr)
+    return names
+
+
+def _is_log_sink(call: ast.Call) -> bool:
+    if isinstance(call.func, ast.Name):
+        return call.func.id in {"print", "pprint"}
+    return isinstance(call.func, ast.Attribute) and call.func.attr in LOG_METHODS
+
+
+def scan_sensitive_log_sinks(path: Path, text: str) -> list[str]:
+    if path.suffix.lower() != ".py":
+        return []
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError:
+        return []
+    findings = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_log_sink(node):
+            continue
+        sensitive = set()
+        for value in (*node.args, *(keyword.value for keyword in node.keywords)):
+            sensitive.update(_sensitive_names(value))
+        if sensitive:
+            findings.append(
+                f"{path.as_posix()}:{node.lineno}: sensitive-log-sink({','.join(sorted(sensitive))})"
+            )
+    return findings
+
+
 def scan(root: Path) -> list[str]:
     findings: list[str] = []
     for path in repository_files(root):
@@ -47,6 +91,8 @@ def scan(root: Path) -> list[str]:
         for label, pattern in PATTERNS:
             if pattern.search(text):
                 findings.append(f"{path.relative_to(root).as_posix()}: {label}")
+        relative = path.relative_to(root)
+        findings.extend(scan_sensitive_log_sinks(relative, text))
     return findings
 
 

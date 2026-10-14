@@ -10,6 +10,7 @@ class ServiceRunner:
     """Platform-neutral lifecycle wrapper used by the Windows Service host."""
     VERSION = "1.1"
     RUNTIME_FRESHNESS_SECONDS = 60.0
+    REQUIRED_HEALTHY_CYCLES = 3
 
     def __init__(self, runtime_factory: Callable[[], Any], *, interval_seconds: float = 5.0,
                  telemetry_client: Any | None = None, lifecycle: Any | None = None,
@@ -40,6 +41,9 @@ class ServiceRunner:
         self._last_cycle_completed_monotonic: float | None = None
         self._cycle_error = False
         self._heartbeat_watchdog: threading.Thread | None = None
+        self._healthy_cycle_streak = 0
+        self._runtime_health_admitted = False
+        self._health_gate_last_reason = "INSUFFICIENT_HEALTHY_CYCLES"
 
         # ACP primary reachability observer.
         # Evidence only; cannot affect authorization or local protection.
@@ -79,6 +83,33 @@ class ServiceRunner:
     def stop(self) -> None:
         self.exit_reason = "SERVICE_STOP_EVENT_SET"
         self.stop_event.set()
+
+    def _observe_runtime_health_gate(self, health: dict[str, Any]) -> bool:
+        """Admit HEALTHY only after three completed, strict healthy cycles."""
+        runtime_health = health.get("runtime", {}) if isinstance(health, dict) else {}
+        resource = health.get("resource_guard", {}) if isinstance(health, dict) else {}
+        if not isinstance(runtime_health, dict):
+            runtime_health = {}
+        if not isinstance(resource, dict):
+            resource = {}
+        checks = {
+            "runtime_status": runtime_health.get("status") == "HEALTHY",
+            "runtime_running": runtime_health.get("running") is True,
+            "component_failures": runtime_health.get("component_failures") == 0,
+            "resource_normal": resource.get("state") == "NORMAL",
+        }
+        failed = next((name for name, passed in checks.items() if not passed), None)
+        if failed is not None:
+            self._healthy_cycle_streak = 0
+            self._runtime_health_admitted = False
+            self._health_gate_last_reason = "FAILED_" + failed.upper()
+            return False
+        self._healthy_cycle_streak += 1
+        self._runtime_health_admitted = self._healthy_cycle_streak >= self.REQUIRED_HEALTHY_CYCLES
+        self._health_gate_last_reason = (
+            "ADMITTED" if self._runtime_health_admitted else "INSUFFICIENT_HEALTHY_CYCLES"
+        )
+        return self._runtime_health_admitted
 
     def _emit_heartbeat(self, runtime: Any, client: Any) -> None:
         """Send one bounded, non-authoritative heartbeat sample."""
@@ -126,15 +157,21 @@ class ServiceRunner:
             )
             if stale:
                 health_state = "DEGRADED"
+            elif health_state == "HEALTHY" and not self._runtime_health_admitted:
+                health_state = "UNKNOWN"
+
+            service_state = "RUNNING" if self._runtime_health_admitted else "STARTING"
 
             heartbeat_attempted = True
             with self._telemetry_lock:
                 accepted = client.heartbeat(
                     runtime_version=str(getattr(runtime, "VERSION", "")),
                     health_state=health_state,
-                    service_state="RUNNING",
+                    service_state=service_state,
                     resource_state=str(resource.get("state", "")),
-                    last_error=last_error,
+                    last_error=last_error or (
+                        None if self._runtime_health_admitted else self._health_gate_last_reason
+                    ),
                 )
             if accepted is True:
                 self.last_telemetry_error = None
@@ -161,7 +198,9 @@ class ServiceRunner:
     @staticmethod
     def _response_evidence(runtime: Any) -> dict[str, Any] | None:
         """Build one bounded proof from a real verified runtime action."""
-        result = getattr(runtime, "last_lab_quarantine_result", None)
+        result = getattr(runtime, "last_quarantine_result", None)
+        if not isinstance(result, dict):
+            result = getattr(runtime, "last_lab_quarantine_result", None)
         if (
             not isinstance(result, dict)
             or result.get("accepted") is not True
@@ -198,6 +237,7 @@ class ServiceRunner:
             "evidence_ref": result.get("evidence_ref"),
             "production_authorization": result.get("production_authorization"),
             "lab_authorization": result.get("lab_authorization"),
+            "authorization_policy_id": result.get("authorization_policy_id"),
             "receipt_integrity": True,
             "post_action_verification": True,
         }
@@ -315,6 +355,16 @@ class ServiceRunner:
                     with self._cycle_lock:
                         self._cycle_in_progress = False
                         self._last_cycle_completed_monotonic = time.monotonic()
+
+                try:
+                    health_for_gate = runtime.health_snapshot()
+                    if not isinstance(health_for_gate, dict):
+                        health_for_gate = {}
+                    self._observe_runtime_health_gate(health_for_gate)
+                except Exception:
+                    self._healthy_cycle_streak = 0
+                    self._runtime_health_admitted = False
+                    self._health_gate_last_reason = "HEALTH_SNAPSHOT_UNAVAILABLE"
 
                 if self.lifecycle is not None:
                     try:

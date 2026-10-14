@@ -181,7 +181,7 @@ def _owner_snapshot(db_path: Path, *, online_after_seconds: float = 90.0) -> dic
                    policy_outcome, policy_reason, verifier_outcome, action_state,
                    verification_outcome, response_latency_ms, execution_latency_ms,
                    detection_to_response_ms, restore_latency_ms, evidence_ref,
-                   production_authorization, lab_authorization, receipt_integrity,
+                   production_authorization, lab_authorization, authorization_policy_id, receipt_integrity,
                    post_action_verification
             FROM fleet_response_evidence ORDER BY received_at DESC LIMIT 100
             """

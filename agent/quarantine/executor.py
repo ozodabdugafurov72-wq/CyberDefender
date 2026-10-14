@@ -18,6 +18,7 @@ from agent.quarantine.contracts import (
     CANARY_MARKER_FILENAME,
     DRY_RUN_ONLY,
     LAB_CANARY_EXECUTION,
+    PRODUCTION_AUTONOMOUS_EXECUTION,
     QuarantineCapabilityIssuer,
     QuarantineContractError,
     QuarantineRequest,
@@ -35,7 +36,7 @@ class BoundedQuarantineExecutor:
     def __init__(self, vault: BoundedQuarantineVault, issuer: QuarantineCapabilityIssuer,
                  *, approved_root: str | Path, mode: str = LAB_CANARY_EXECUTION,
                  restore_issuer: RestoreCapabilityIssuer | None = None) -> None:
-        if mode not in (LAB_CANARY_EXECUTION, DRY_RUN_ONLY):
+        if mode not in (LAB_CANARY_EXECUTION, PRODUCTION_AUTONOMOUS_EXECUTION, DRY_RUN_ONLY):
             raise ValueError("unsupported executor mode")
         self.vault = vault
         self.issuer = issuer
@@ -59,14 +60,16 @@ class BoundedQuarantineExecutor:
 
     def _after_effect(self, reason: str, *, quarantine_id: str | None = None,
                       state: str = "UNKNOWN_AFTER_EFFECT", capability_id: str | None = None,
-                      scope_digest: str | None = None) -> dict[str, Any]:
+                      scope_digest: str | None = None,
+                      production_authorization: str = "NOT_GRANTED",
+                      lab_authorization: str = "QUARANTINE_CAPABILITY_CONSUMED") -> dict[str, Any]:
         self.rejected += 1
         return {
             "component": "BoundedQuarantineExecutor", "version": self.VERSION,
             "accepted": False, "executed": True, "status": state, "reason": reason,
             "quarantine_id": quarantine_id, "authorization": "NOT_GRANTED",
-            "production_authorization": "NOT_GRANTED",
-            "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+            "production_authorization": production_authorization,
+            "lab_authorization": lab_authorization,
             "capability_id": capability_id, "scope_digest": scope_digest,
             "real_world_effect": True, "recovery_required": True, "fail_closed": True,
         }
@@ -112,14 +115,14 @@ class BoundedQuarantineExecutor:
             return True
 
     def _safe_target(self, request: QuarantineRequest) -> tuple[Path, str | None]:
-        if request.canary_marker != CANARY_MARKER:
+        if self.mode == LAB_CANARY_EXECUTION and request.canary_marker != CANARY_MARKER:
             return Path(), "CANARY_MARKER_INVALID"
         root = self._resolved(request.approved_root)
         if root is None:
             return Path(), "APPROVED_ROOT_UNRESOLVED"
         if root != self.approved_root:
             return Path(), "APPROVED_ROOT_MISMATCH"
-        if not self._marker_valid():
+        if self.mode == LAB_CANARY_EXECUTION and not self._marker_valid():
             return Path(), "DEDICATED_CANARY_ROOT_REQUIRED"
         target = Path(request.target).expanduser()
         try:
@@ -133,9 +136,9 @@ class BoundedQuarantineExecutor:
             return Path(), "TARGET_IDENTITY_UNAVAILABLE"
         except (OSError, RuntimeError, ValueError):
             return Path(), "TARGET_OUTSIDE_APPROVED_ROOT"
-        if resolved.suffix.lower() in self.FORBIDDEN_SUFFIXES:
+        if self.mode == LAB_CANARY_EXECUTION and resolved.suffix.lower() in self.FORBIDDEN_SUFFIXES:
             return Path(), "PROTECTED_EXECUTABLE_TYPE"
-        if resolved == root / CANARY_MARKER_FILENAME:
+        if self.mode == LAB_CANARY_EXECUTION and resolved == root / CANARY_MARKER_FILENAME:
             return Path(), "CANARY_MARKER_DENIED"
         if self._protected_path(resolved):
             return Path(), "PROTECTED_PATH_DENIED"
@@ -156,13 +159,17 @@ class BoundedQuarantineExecutor:
             return {"component": "BoundedQuarantineExecutor", "version": self.VERSION, "accepted": True,
                     "executed": False, "status": "DRY_RUN", "authorization": "NOT_GRANTED",
                     "real_world_effect": False, "fail_closed": True}
-        if req.mode != LAB_CANARY_EXECUTION or capability is None:
-            return self._deny("LAB_CAPABILITY_REQUIRED")
+        if req.mode != self.mode or capability is None:
+            return self._deny("MODE_BOUND_CAPABILITY_REQUIRED")
         record: dict[str, Any] | None = None
         target: Path | None = None
         consumed: dict[str, Any] | None = None
         try:
             consumed = self.issuer.consume(capability, req)
+            effect_auth = {
+                "production_authorization": consumed.get("production_authorization", "NOT_GRANTED"),
+                "lab_authorization": consumed.get("lab_authorization", "QUARANTINE_CAPABILITY_CONSUMED"),
+            }
             existing = self.vault.find_by_idempotency(req.idempotency_key)
             if existing is not None:
                 try:
@@ -209,13 +216,17 @@ class BoundedQuarantineExecutor:
                                       target_size=size, requester=req.requester, evidence=evidence,
                                       source_identity=identity_after_read, evidence_ref=req.evidence_ref,
                                       decision_digest=req.decision_digest, capability_id=consumed["capability_id"],
-                                      scope_digest=consumed["scope_digest"], attribution=req.attribution())
+                                      scope_digest=consumed["scope_digest"], attribution=req.attribution(),
+                                      production_authorization=consumed.get("production_authorization", "NOT_GRANTED"),
+                                      lab_authorization=consumed.get("lab_authorization", "QUARANTINE_CAPABILITY_CONSUMED"),
+                                      authorization_policy_id=consumed.get("policy_id"))
             final = self.vault.contain(record, target)
             if final.get("state") != "QUARANTINED":
                 if final.get("state") in {"FAILED_AFTER_EFFECT", "UNKNOWN_AFTER_EFFECT"}:
                     return self._after_effect(final.get("failure_code", "CONTAINMENT_POST_EFFECT_FAILURE"),
                                               quarantine_id=final.get("quarantine_id"), state=final["state"],
-                                              capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
+                                              capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"],
+                                              **effect_auth)
                 return self._deny(final.get("failure_code", "CONTAINMENT_FAILED"))
             verification = self.verifier.verify(final["quarantine_id"], original_path=str(target),
                                                 approved_root=str(self.approved_root), target_sha256=actual_hash,
@@ -224,7 +235,8 @@ class BoundedQuarantineExecutor:
                 failed = self.vault.mark_after_effect_failure(final["quarantine_id"], "POST_ACTION_UNVERIFIED")
                 return self._after_effect(failed.get("failure_code", "POST_ACTION_UNVERIFIED"),
                                           quarantine_id=final["quarantine_id"], state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
-                                          capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
+                                          capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"],
+                                          **effect_auth)
             try:
                 execution_completed_at = time.time()
                 execution_latency_ms = (time.perf_counter_ns() - execution_started_ns) / 1_000_000.0
@@ -239,14 +251,17 @@ class BoundedQuarantineExecutor:
                 failed = self.vault.mark_after_effect_failure(final["quarantine_id"], "VERIFICATION_RECORD_WRITE_FAILURE")
                 return self._after_effect(failed.get("failure_code", "VERIFICATION_RECORD_WRITE_FAILURE"),
                                           quarantine_id=final["quarantine_id"], state=failed.get("state", "UNKNOWN_AFTER_EFFECT"),
-                                          capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"])
+                                          capability_id=consumed["capability_id"], scope_digest=consumed["scope_digest"],
+                                          **effect_auth)
             self.executions += 1
             return {"component": "BoundedQuarantineExecutor", "version": self.VERSION, "accepted": True,
                     "executed": True, "status": "QUARANTINED", "quarantine_id": final["quarantine_id"],
                     "target_sha256": actual_hash, "requested_action": "QUARANTINE",
-                    "verification": verification, "authorization": "NOT_GRANTED",
-                    "production_authorization": "NOT_GRANTED",
-                    "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+                    "verification": verification,
+                    "authorization": consumed.get("production_authorization", "NOT_GRANTED"),
+                    "production_authorization": consumed.get("production_authorization", "NOT_GRANTED"),
+                    "lab_authorization": consumed.get("lab_authorization", "QUARANTINE_CAPABILITY_CONSUMED"),
+                    "authorization_policy_id": consumed.get("policy_id"),
                     "capability_id": consumed["capability_id"], "scope_digest": consumed["scope_digest"],
                     "execution_started_at": execution_started_at,
                     "execution_completed_at": execution_completed_at,
@@ -256,7 +271,9 @@ class BoundedQuarantineExecutor:
             if record is not None and target is not None and not target.exists():
                 return self._after_effect("QUARANTINE_POST_EFFECT_FAILURE", quarantine_id=record.get("quarantine_id"),
                                           capability_id=(consumed or {}).get("capability_id"),
-                                          scope_digest=(consumed or {}).get("scope_digest"))
+                                          scope_digest=(consumed or {}).get("scope_digest"),
+                                          production_authorization=(consumed or {}).get("production_authorization", "NOT_GRANTED"),
+                                          lab_authorization=(consumed or {}).get("lab_authorization", "QUARANTINE_CAPABILITY_CONSUMED"))
             return self._deny("QUARANTINE_DENIED")
 
     def _safe_restore_destination(self, request: RestoreRequest, record: dict[str, Any]) -> tuple[Path, str | None]:

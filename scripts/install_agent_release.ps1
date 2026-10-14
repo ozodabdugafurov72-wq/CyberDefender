@@ -21,6 +21,7 @@ $ToolsRoot=Join-Path $ScriptRoot 'agent_release'
 $Manager=Join-Path $ToolsRoot 'release_manager.py'
 $Bootstrap=Join-Path $ToolsRoot 'agent_service_bootstrap.py'
 $Probe=Join-Path $ToolsRoot 'isolated_import_probe.py'
+$AclVerifier=Join-Path $ScriptRoot 'verify_windows_acl.py'
 $ProductRoot=Join-Path $env:ProgramFiles 'CyberDefender'
 $OldApp=Join-Path $ProductRoot 'app'
 $Python=Join-Path $OldApp '.venv\Scripts\python.exe'
@@ -111,19 +112,9 @@ function Inspect-NoReparse([string]$Path) {
 }
 
 function Inspect-ProtectedPath([string]$Path) {
-    $acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
-    $broad=@('S-1-1-0','S-1-5-11','S-1-5-32-545','S-1-5-4','S-1-5-2')
-    $writeBits=[int][Security.AccessControl.FileSystemRights]::Write -bor
-        [int][Security.AccessControl.FileSystemRights]::Modify -bor
-        [int][Security.AccessControl.FileSystemRights]::FullControl
-    foreach($entry in $acl.Access) {
-        if($entry.AccessControlType -ne 'Allow'){ continue }
-        try { $sid=$entry.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
-        catch { throw 'ACL_PRINCIPAL_UNRESOLVED' }
-        if($broad -contains $sid -and (([int]$entry.FileSystemRights -band $writeBits) -ne 0)) {
-            throw ('BROAD_WRITE_ACCESS:' + $Path)
-        }
-    }
+    Require (Test-Path -LiteralPath $AclVerifier -PathType Leaf) 'ACL_VERIFIER_MISSING'
+    & $Python $AclVerifier $Path | Out-Host
+    Require ($LASTEXITCODE -eq 0) ('ACL_SECURITY_GATE_FAILED:' + $Path)
 }
 
 function Require-Administrator() {
@@ -263,7 +254,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
 }
 
 # Consolidated read-only precheck.
-foreach($required in ($Python,$Manager,$Bootstrap,$Probe,$ReleaseZip,$LocalToken)) {
+foreach($required in ($Python,$Manager,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$LocalToken)) {
     Require (Test-Path -LiteralPath $required -PathType Leaf) ('REQUIRED_FILE_MISSING:' + $required)
     Inspect-NoReparse $required
 }

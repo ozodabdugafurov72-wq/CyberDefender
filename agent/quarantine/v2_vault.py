@@ -15,6 +15,7 @@ from threading import RLock
 from typing import Any
 
 from agent.quarantine.vault import SecureQuarantineVault
+from agent.quarantine.crypto_vault import ImmutableFileCapture, VaultCipher, VaultCipherError
 
 
 class QuarantineVaultError(Exception):
@@ -47,6 +48,7 @@ class BoundedQuarantineVault:
         self.receipts_dir = self.root / "v2-receipts"
         self.restore_receipts_dir = self.root / "v2-restore-receipts"
         self.evidence_vault = SecureQuarantineVault(self.root / "v2-evidence")
+        self.object_cipher = VaultCipher(self.root, key_name=".objects-aes256.key")
         for path in (self.records_dir, self.objects_dir, self.receipts_dir, self.restore_receipts_dir):
             path.mkdir(parents=True, exist_ok=True)
         self.max_records = max_records
@@ -218,13 +220,25 @@ class BoundedQuarantineVault:
         except Exception as exc:
             raise QuarantineVaultError("evidence capture failed") from exc
 
-    def begin(self, *, incident_id: str, requested_action: str, idempotency_key: str, original_path: str, approved_root: str,
-              target_sha256: str, target_size: int, requester: str, evidence: dict[str, Any],
+    def begin(self, *, incident_id: str, requested_action: str, idempotency_key: str,
+              original_path: str, approved_root: str, target_sha256: str,
+              target_size: int, requester: str, evidence: dict[str, Any],
               source_identity: dict[str, int], evidence_ref: str, decision_digest: str,
-              capability_id: str, scope_digest: str, attribution: dict[str, Any] | None = None) -> dict[str, Any]:
+              capability_id: str, scope_digest: str, attribution: dict[str, Any] | None = None,
+              production_authorization: str = "NOT_GRANTED",
+              lab_authorization: str = "QUARANTINE_CAPABILITY_CONSUMED",
+              authorization_policy_id: str | None = None) -> dict[str, Any]:
+        if (production_authorization, lab_authorization) not in {
+            ("NOT_GRANTED", "QUARANTINE_CAPABILITY_CONSUMED"),
+            ("SIGNED_POLICY_CAPABILITY_CONSUMED", "NOT_APPLICABLE"),
+        }:
+            raise QuarantineVaultError("invalid quarantine authorization audit")
+        if production_authorization == "SIGNED_POLICY_CAPABILITY_CONSUMED":
+            if not isinstance(authorization_policy_id, str) or not authorization_policy_id:
+                raise QuarantineVaultError("production authorization policy id required")
         self.ensure_capacity(target_size)
         quarantine_id = "qv2-" + uuid.uuid4().hex
-        object_path = self.objects_dir / quarantine_id / Path(original_path).name
+        object_path = self.objects_dir / quarantine_id / (Path(original_path).name + ".cdq")
         record = {
             "schema": self.SCHEMA, "version": self.VERSION, "quarantine_id": quarantine_id,
             "incident_id": incident_id, "requested_action": requested_action, "idempotency_key": idempotency_key,
@@ -234,10 +248,13 @@ class BoundedQuarantineVault:
             "source_identity": dict(source_identity),
             "evidence_ref": evidence_ref, "decision_digest": decision_digest,
             "capability_id": capability_id, "scope_digest": scope_digest,
-            "production_authorization": "NOT_GRANTED",
-            "lab_authorization": "QUARANTINE_CAPABILITY_CONSUMED",
+            "production_authorization": production_authorization,
+            "lab_authorization": lab_authorization,
+            "object_encryption": "AES-256-GCM",
             "state": "EVIDENCE_CAPTURED", "created_at": self._now(),
         }
+        if authorization_policy_id is not None:
+            record["authorization_policy_id"] = authorization_policy_id
         if isinstance(attribution, dict):
             for field in self.ATTRIBUTION_FIELDS:
                 value = attribution.get(field)
@@ -254,24 +271,38 @@ class BoundedQuarantineVault:
 
     def contain(self, record: dict[str, Any], source: Path) -> dict[str, Any]:
         destination = Path(record["object_path"])
-        moved = False
+        encrypted_written = False
+        source_deleted = False
         try:
             if not self.source_identity_matches(record, source):
                 return self._write_pre_effect_failure(record, "SOURCE_CHANGED_BEFORE_CONTAINMENT")
-            current_raw = source.read_bytes()
-            if (len(current_raw) != record.get("target_size")
-                    or self._sha256(current_raw) != record.get("target_sha256")):
-                return self._write_pre_effect_failure(record, "SOURCE_CONTENT_CHANGED_BEFORE_CONTAINMENT")
-            destination.parent.mkdir(parents=True, exist_ok=False)
-            os.replace(str(source), str(destination))
-            moved = True
-            raw = destination.read_bytes()
-            if self._sha256(raw) != record["target_sha256"] or len(raw) != record["target_size"]:
-                return self._write_after_effect_failure(record, "CONTAINED_HASH_MISMATCH")
+            with ImmutableFileCapture(source, max_bytes=self.max_target_bytes) as capture:
+                current_raw = capture.raw
+                if (len(current_raw) != record.get("target_size")
+                        or self._sha256(current_raw) != record.get("target_sha256")):
+                    return self._write_pre_effect_failure(record, "SOURCE_CONTENT_CHANGED_BEFORE_CONTAINMENT")
+                aad = (record["quarantine_id"] + ":" + record["target_sha256"]).encode("ascii")
+                encrypted = self.object_cipher.encrypt(current_raw, aad=aad)
+                destination.parent.mkdir(parents=True, exist_ok=False)
+                self._atomic_write(destination, encrypted)
+                encrypted_written = True
+                verified_raw = self.object_cipher.decrypt(destination.read_bytes(), aad=aad)
+                if (
+                    len(verified_raw) != record["target_size"]
+                    or self._sha256(verified_raw) != record["target_sha256"]
+                ):
+                    return self._write_after_effect_failure(record, "CONTAINED_HASH_MISMATCH")
+                capture.delete_exact()
+                source_deleted = True
+            ciphertext_sha256 = self._sha256(destination.read_bytes())
+            record = dict(record, object_ciphertext_sha256=ciphertext_sha256)
             receipt_unsigned = {
                 "schema": "cd.quarantine.receipt.v2", "quarantine_id": record["quarantine_id"],
                 "state": "QUARANTINED", "target_sha256": record["target_sha256"],
-                "object_sha256": self._sha256(raw), "created_at": self._now(),
+                "object_sha256": record["target_sha256"], "created_at": self._now(),
+                "object_encryption": "AES-256-GCM",
+                "object_ciphertext_sha256": ciphertext_sha256,
+                "authorization_policy_id": record.get("authorization_policy_id"),
                 "incident_id": record["incident_id"], "requested_action": record["requested_action"],
                 "evidence_ref": record["evidence_ref"],
                 "decision_digest": record["decision_digest"], "capability_id": record["capability_id"],
@@ -289,7 +320,7 @@ class BoundedQuarantineVault:
                                             recovery_required=False))
         except Exception:
             self._failed += 1
-            if moved:
+            if encrypted_written or source_deleted:
                 return self._write_after_effect_failure(record, "CONTAINMENT_POST_EFFECT_FAILURE")
             return self._write_pre_effect_failure(record, "CONTAINMENT_FAILED")
 
@@ -401,10 +432,20 @@ class BoundedQuarantineVault:
                 raise QuarantineVaultError("restore source integrity failure")
             object_path = Path(current["object_path"])
             identity_before = self.file_identity(object_path)
-            raw = object_path.read_bytes()
+            stored = object_path.read_bytes()
             identity_after = self.file_identity(object_path)
             if identity_before != identity_after:
                 raise QuarantineVaultError("restore source changed during capture")
+            if current.get("object_encryption") == "AES-256-GCM":
+                ciphertext_sha256 = current.get("object_ciphertext_sha256")
+                if not isinstance(ciphertext_sha256, str) or self._sha256(stored) != ciphertext_sha256:
+                    raise QuarantineVaultError("restore ciphertext integrity failure")
+                aad = (current["quarantine_id"] + ":" + current["target_sha256"]).encode("ascii")
+                raw = self.object_cipher.decrypt(stored, aad=aad)
+            elif current.get("object_encryption") in (None, "NONE"):
+                raw = stored
+            else:
+                raise QuarantineVaultError("restore encryption scheme rejected")
             if len(raw) != current.get("target_size") or self._sha256(raw) != current.get("target_sha256"):
                 raise QuarantineVaultError("restore source hash mismatch")
 
@@ -437,6 +478,8 @@ class BoundedQuarantineVault:
                 "target": str(destination),
                 "target_sha256": current["target_sha256"],
                 "target_size": current["target_size"],
+                "object_encryption": current.get("object_encryption", "NONE"),
+                "object_ciphertext_sha256": current.get("object_ciphertext_sha256"),
                 "restore_capability_id": capability_id,
                 "restore_scope_digest": scope_digest,
                 "requester": requester,
@@ -503,6 +546,8 @@ class BoundedQuarantineVault:
                 and value.get("restore_scope_digest") == record.get("restore_scope_digest")
                 and value.get("restore_reason") == record.get("restore_reason")
                 and value.get("containment_receipt_sha256") == record.get("receipt_sha256")
+                and value.get("object_encryption") == record.get("object_encryption", "NONE")
+                and value.get("object_ciphertext_sha256") == record.get("object_ciphertext_sha256")
                 and value.get("production_authorization") == "NOT_GRANTED"
                 and value.get("lab_authorization") == "RESTORE_CAPABILITY_CONSUMED"
             )
@@ -577,7 +622,8 @@ class BoundedQuarantineVault:
                 value.get(field) == record.get(field)
                 for field in (
                     "incident_id", "requested_action", "evidence_ref", "decision_digest", "capability_id", "scope_digest",
-                    "production_authorization", "lab_authorization",
+                    "production_authorization", "lab_authorization", "object_encryption",
+                    "object_ciphertext_sha256", "authorization_policy_id",
                 )
             )
             attribution_linked = all(
@@ -602,7 +648,16 @@ class BoundedQuarantineVault:
                 return False
             if self._has_reparse_component(object_path):
                 return False
-            raw = object_path.read_bytes()
+            stored = object_path.read_bytes()
+            if record.get("object_encryption") == "AES-256-GCM":
+                if self._sha256(stored) != record.get("object_ciphertext_sha256"):
+                    return False
+                aad = (record["quarantine_id"] + ":" + record["target_sha256"]).encode("ascii")
+                raw = self.object_cipher.decrypt(stored, aad=aad)
+            elif record.get("object_encryption") in (None, "NONE"):
+                raw = stored
+            else:
+                return False
             return len(raw) == record.get("target_size") and self._sha256(raw) == record.get("target_sha256")
         except Exception:
             return False

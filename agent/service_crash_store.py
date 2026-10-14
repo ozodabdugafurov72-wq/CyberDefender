@@ -18,7 +18,7 @@ import secrets
 import stat
 import threading
 
-from agent.service_crash_guard import SERVICES, SCHEMA, fresh_record
+from agent.service_crash_guard import FAILURE_CODES, SERVICES, SCHEMA, fresh_record
 
 MAX_BYTES = 32768
 
@@ -96,7 +96,7 @@ def validate_record(r, service):
     for item in r["recent_failures"]:
         if type(item) is not dict or set(item) != {"generation", "boot", "code", "tick"}:
             raise CrashStoreError("STORE_HISTORY_REJECTED")
-        if item["code"] not in {"PREVIOUS_ATTEMPT_INTERRUPTED", "ATTEMPT_FAILED", "WORK_UNHEALTHY", "CLEANUP_UNVERIFIED"}:
+        if item["code"] not in FAILURE_CODES:
             raise CrashStoreError("STORE_REASON_REJECTED")
         if type(item["generation"]) is not int or not 0 <= item["generation"] <= r["generation"]:
             raise CrashStoreError("STORE_GENERATION_REJECTED")

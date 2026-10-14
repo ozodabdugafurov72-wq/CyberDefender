@@ -2,10 +2,14 @@
 
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 import uuid
+
+from agent.quarantine.crypto_vault import VaultCipher, VaultCipherError
 
 
 class SecureQuarantineVault:
@@ -39,6 +43,8 @@ class SecureQuarantineVault:
             parents=True,
             exist_ok=True,
         )
+
+        self._cipher = VaultCipher(self.vault_dir, key_name=".evidence-aes256.key")
 
         self._quarantined = 0
         self._already_quarantined = 0
@@ -96,6 +102,8 @@ class SecureQuarantineVault:
                         "raw_sha256"
                     )
                     == raw_hash
+                    and isinstance(metadata.get("quarantine_id"), str)
+                    and self.verify_evidence(metadata["quarantine_id"])
                 ):
                     return metadata
 
@@ -141,10 +149,7 @@ class SecureQuarantineVault:
             + uuid.uuid4().hex
         )
 
-        evidence_filename = (
-            quarantine_id
-            + ".raw"
-        )
+        evidence_filename = quarantine_id + ".cdq"
 
         metadata_filename = (
             quarantine_id
@@ -161,13 +166,22 @@ class SecureQuarantineVault:
             / metadata_filename
         )
 
-        evidence_path.write_bytes(
-            raw_record
+        aad = (quarantine_id + ":" + raw_hash).encode("ascii")
+        encrypted = self._cipher.encrypt(raw_record, aad=aad)
+        fd, temporary = tempfile.mkstemp(
+            prefix=evidence_filename + ".", suffix=".tmp", dir=str(self.evidence_dir)
         )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encrypted)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, evidence_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
-        stored = (
-            evidence_path.read_bytes()
-        )
+        stored = self._cipher.decrypt(evidence_path.read_bytes(), aad=aad)
 
         if self.sha256(
             stored
@@ -203,6 +217,12 @@ class SecureQuarantineVault:
 
             "algorithm":
                 "SHA-256",
+
+            "encryption":
+                "AES-256-GCM",
+
+            "ciphertext_sha256":
+                self.sha256(encrypted),
 
             "raw_sha256":
                 raw_hash,
@@ -283,14 +303,26 @@ class SecureQuarantineVault:
             return False
 
         try:
-
-            actual = self.sha256(
-                path.read_bytes()
-            )
-
             expected = metadata[
                 "raw_sha256"
             ]
+
+            stored = path.read_bytes()
+            if metadata.get("encryption") == "AES-256-GCM":
+                ciphertext_hash = metadata.get("ciphertext_sha256")
+                if not isinstance(ciphertext_hash, str) or self.sha256(stored) != ciphertext_hash:
+                    self._integrity_failures += 1
+                    return False
+                aad = (str(quarantine_id) + ":" + str(expected)).encode("ascii")
+                raw = self._cipher.decrypt(stored, aad=aad)
+            elif metadata.get("encryption") in (None, "NONE"):
+                # Read-only compatibility for pre-encryption lab evidence.
+                raw = stored
+            else:
+                self._integrity_failures += 1
+                return False
+
+            actual = self.sha256(raw)
 
             if actual != expected:
 
@@ -300,7 +332,7 @@ class SecureQuarantineVault:
 
             return True
 
-        except Exception:
+        except (Exception, VaultCipherError):
 
             self._read_failures += 1
 
