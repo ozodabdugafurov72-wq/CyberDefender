@@ -37,6 +37,58 @@ def git(repo: Path, *args: str, binary: bool = False) -> bytes | str:
     return result.stdout if binary else result.stdout.decode("utf-8").strip()
 
 
+def git_blobs(repo: Path, object_ids: list[str]) -> dict[str, bytes]:
+    """Read all required blobs through one bounded Git batch process."""
+    if not object_ids or len(object_ids) > MAX_FILES:
+        raise ValueError("invalid Git blob request count")
+    if len(set(object_ids)) != len(object_ids):
+        raise ValueError("duplicate Git blob object id")
+    env = dict(os.environ)
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    process = subprocess.Popen(
+        ["git", "-C", str(repo), "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    request = b"".join(object_id.encode("ascii") + b"\n" for object_id in object_ids)
+    try:
+        output, error = process.communicate(request, timeout=60)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise ValueError("Git blob batch timed out") from exc
+    if process.returncode != 0:
+        raise ValueError("Git blob batch failed: " + error.decode("utf-8", "replace")[:160])
+    cursor = 0
+    result: dict[str, bytes] = {}
+    for requested in object_ids:
+        newline = output.find(b"\n", cursor)
+        if newline < 0:
+            raise ValueError("truncated Git blob batch header")
+        header = output[cursor:newline].decode("ascii", "strict").split()
+        cursor = newline + 1
+        if len(header) != 3 or header[0] != requested or header[1] != "blob":
+            raise ValueError("unexpected Git blob batch response")
+        try:
+            size = int(header[2])
+        except ValueError as exc:
+            raise ValueError("invalid Git blob size") from exc
+        if size < 0 or size > MAX_FILE_BYTES or cursor + size >= len(output):
+            raise ValueError("Git blob exceeds bounded size")
+        content = output[cursor:cursor + size]
+        cursor += size
+        if output[cursor:cursor + 1] != b"\n":
+            raise ValueError("malformed Git blob batch framing")
+        cursor += 1
+        result[requested] = content
+    if cursor != len(output):
+        raise ValueError("unexpected trailing Git blob batch output")
+    return result
+
+
 def safe_relative_path(raw: bytes) -> str:
     name = raw.decode("utf-8", errors="strict")
     posix = PurePosixPath(name)
@@ -62,9 +114,7 @@ def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict
     if resolved != commit:
         raise ValueError("local Git commit differs from requested reviewed revision")
     listing = git(repo, "ls-tree", "-r", "-z", "--full-tree", commit, binary=True)
-    files: list[tuple[str, bytes]] = []
-    manifest: list[dict] = []
-    total = 0
+    entries: list[tuple[str, str]] = []
     for entry in listing.split(b"\0"):
         if not entry:
             continue
@@ -75,7 +125,16 @@ def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict
             raise ValueError("symlink/submodule or unsupported Git mode: " + name)
         if name in EXCLUDED:
             continue
-        content = git(repo, "cat-file", "blob", object_id, binary=True)
+        entries.append((name, object_id))
+        if len(entries) > MAX_FILES:
+            raise ValueError("too many source files")
+
+    blobs = git_blobs(repo, list(dict.fromkeys(object_id for _, object_id in entries)))
+    files: list[tuple[str, bytes]] = []
+    manifest: list[dict] = []
+    total = 0
+    for name, object_id in entries:
+        content = blobs[object_id]
         if len(content) > MAX_FILE_BYTES or total + len(content) > MAX_TOTAL_BYTES:
             raise ValueError("source exceeds bounded package limits")
         if hashlib.sha1(b"blob " + str(len(content)).encode("ascii") + b"\0" + content).hexdigest() != object_id:
@@ -85,8 +144,6 @@ def make_payload(repo: Path, commit: str) -> tuple[list[tuple[str, bytes]], dict
         files.append((name, content))
         manifest.append({"path": name, "sha256": hashlib.sha256(content).hexdigest(), "length": len(content)})
         total += len(content)
-        if len(files) > MAX_FILES:
-            raise ValueError("too many source files")
     required = {"agent/windows_service.py", "agent/main.py", "agent/service_lifecycle.py",
                 "agent/service_runner.py", "agent/fleet/client.py", "control_plane/fleet_protocol.py",
                 "control_plane/xdr_compat.py", "requirements.txt"}
