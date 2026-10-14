@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from agent.event import SecurityEvent
 from agent.storage.durable_spool import DurableEventSpool, DurableSpoolPolicy
@@ -75,6 +76,38 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
             health = unsafe.health_check()
             self.assertEqual("DEGRADED", health["status"])
             self.assertFalse(health["terminal_state_safe"])
+
+    def test_legacy_ack_journal_lock_does_not_poison_authoritative_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-ack-journal-lock-") as root:
+            spool_dir = Path(root) / "spool"
+            spool = DurableEventSpool(spool_dir, policy=self.policy(2))
+            events = [event(index) for index in range(3)]
+            for item in events:
+                self.assertTrue(spool.append(item))
+            self.assertTrue(spool.ack(events[0].event_id))
+            self.assertTrue(spool.ack(events[1].event_id))
+
+            original_rewrite = spool._rewrite_jsonl
+
+            def sharing_violation(path: Path, records: list[dict]) -> None:
+                if path == spool.acked_path:
+                    raise PermissionError("simulated Windows sharing violation")
+                original_rewrite(path, records)
+
+            with mock.patch.object(spool, "_rewrite_jsonl", side_effect=sharing_violation):
+                self.assertTrue(spool.ack(events[2].event_id))
+
+            health = spool.health_check()
+            self.assertEqual("HEALTHY", health["status"])
+            self.assertTrue(health["terminal_state_safe"])
+            self.assertEqual(1, health["terminal_compatibility_failures"])
+            self.assertEqual([], spool.pending_records())
+
+            # Restart must trust the bounded atomic snapshot, not the stale
+            # compatibility journal left by the simulated lock.
+            restarted = DurableEventSpool(spool_dir, policy=self.policy(2))
+            self.assertEqual("HEALTHY", restarted.health_check()["status"])
+            self.assertEqual([], restarted.pending_records())
 
 
 if __name__ == "__main__":

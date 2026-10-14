@@ -197,6 +197,12 @@ class DurableEventSpool:
         self._terminal_repair_required = False
         self._terminal_compactions = 0
         self._terminal_compaction_failures = 0
+        # acked_state.json is the authoritative ACK record.  acked.jsonl is
+        # compatibility/audit output only, so a transient sharing violation
+        # while rewriting that journal must not poison otherwise durable ACK
+        # state.  Keep the failure observable without turning it into a false
+        # terminal-state integrity failure.
+        self._terminal_compatibility_failures = 0
 
         # -----------------------------------------------------
         # TERMINAL STATE
@@ -589,10 +595,17 @@ class DurableEventSpool:
             ack_order = self._bounded_unique_order(self._acked_order, self._acked, limit)
             ack_set = set(ack_order)
             self._persist_ack_state(ack_set)
-            self._rewrite_jsonl(
-                self.acked_path,
-                [{"event_id": event_id} for event_id in ack_order],
-            )
+            try:
+                self._rewrite_jsonl(
+                    self.acked_path,
+                    [{"event_id": event_id} for event_id in ack_order],
+                )
+            except Exception:
+                # The atomic snapshot above is authoritative and pending.jsonl
+                # was already compacted before this method was called.  The
+                # legacy journal may safely remain over-complete and will be
+                # retried on a later compaction/restart.
+                self._terminal_compatibility_failures += 1
 
             q_order = self._bounded_unique_order(
                 self._quarantine_order, set(self._quarantined), limit
@@ -2410,6 +2423,7 @@ class DurableEventSpool:
                 "max_terminal_records": int(self.policy.max_terminal_records),
                 "max_terminal_state_bytes": int(self.policy.max_terminal_state_bytes),
                 "terminal_state_safe": self._terminal_state_safe,
+                "terminal_compatibility_failures": self._terminal_compatibility_failures,
                 "protected_reserve_events": int(self.policy.protected_reserve_events),
                 "protected_reserve_bytes": int(self.policy.protected_reserve_bytes),
                 "acked": len(
@@ -2476,6 +2490,7 @@ class DurableEventSpool:
             "max_terminal_records": int(self.policy.max_terminal_records),
             "max_terminal_state_bytes": int(self.policy.max_terminal_state_bytes),
             "terminal_state_safe": self._terminal_state_safe,
+            "terminal_compatibility_failures": self._terminal_compatibility_failures,
             "protected_reserve_events": int(self.policy.protected_reserve_events),
             "protected_reserve_bytes": int(self.policy.protected_reserve_bytes),
             "pending_physical_bytes": self._physical_pending_bytes(),
