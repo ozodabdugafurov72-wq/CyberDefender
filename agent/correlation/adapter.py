@@ -158,6 +158,19 @@ class CorrelationAdapter:
             if self.incident_outbox is not None and not outbox_scope_id:
                 raise ValueError("tenant or standalone scope required for durable incident outbox")
 
+            # A crash may occur after the authenticated outbox commit but
+            # before the source event is ACKed.  On restart the in-memory
+            # correlation window is intentionally empty, so recomputing the
+            # aggregate can produce a different (older) incident payload and
+            # create a permanent idempotency conflict.  The verified durable
+            # commit is the authoritative completion record for that source
+            # event; validate its full identity before allowing the ACK.
+            if self.incident_outbox is not None and self._confirm_replay_outbox(
+                tenant_id=outbox_scope_id,
+                source_event_id=event_id.strip(),
+            ):
+                return self._ack_event(event_id)
+
             published_before = self._published
             source_event_id = event_id.strip()
             incident = self.engine.ingest(
@@ -246,17 +259,48 @@ class CorrelationAdapter:
         scan = getattr(self.incident_outbox, "scan", None)
         if not callable(scan) or not isinstance(tenant_id, str):
             return False
-        try:
-            records = scan()
-        except Exception:
-            return False
-        return any(
-            isinstance(record, dict)
-            and record.get("tenant_id") == tenant_id.strip()
-            and record.get("source_event_id") == source_event_id
-            and record.get("state") in {"PENDING", "DISPATCHING", "DELIVERED", "REVIEW_REQUIRED"}
+        records = scan()
+        matches = [
+            record
             for record in records
-        )
+            if (
+                isinstance(record, dict)
+                and record.get("tenant_id") == tenant_id.strip()
+                and record.get("source_event_id") == source_event_id
+            )
+        ]
+        if not matches:
+            return False
+
+        identities = {
+            (
+                record.get("outbox_id"),
+                record.get("incident_id"),
+                record.get("idempotency_key"),
+                record.get("payload_sha256"),
+            )
+            for record in matches
+        }
+        if len(identities) != 1:
+            raise RuntimeError("ambiguous durable incident replay")
+
+        record = max(matches, key=lambda item: int(item.get("sequence", 0)))
+        payload = record.get("incident_payload")
+        expected_tenant = tenant_id.strip()
+        if (
+            record.get("state") not in {"PENDING", "DISPATCHING", "DELIVERED", "REVIEW_REQUIRED"}
+            or not isinstance(payload, dict)
+            or payload.get("event_type") != "INCIDENT"
+            or payload.get("source_event_id") != source_event_id
+            or payload.get("incident_id") != record.get("incident_id")
+            or payload.get("idempotency_key") != record.get("idempotency_key")
+            or (
+                not expected_tenant.startswith("local-endpoint:")
+                and payload.get("tenant_id") != expected_tenant
+            )
+        ):
+            raise RuntimeError("invalid durable incident replay")
+        return True
 
     # =========================================================
     # ACK

@@ -17,11 +17,11 @@ from agent.storage.durable_incident_outbox import (
 KEY = b"runtime-outbox-integrity-key-32-bytes!!"
 
 
-def detection(event_id="evt-1", tenant_id="tenant-a"):
+def detection(event_id="evt-1", tenant_id="tenant-a", timestamp=1700000000.0, value=1):
     return {
         "event_type": "DETECTION",
         "event_id": event_id,
-        "timestamp": 1700000000.0,
+        "timestamp": timestamp,
         "data": {
             "type": "PROCESS_START",
             "severity": "HIGH",
@@ -29,6 +29,7 @@ def detection(event_id="evt-1", tenant_id="tenant-a"):
             "tenant_id": tenant_id,
             "host_id": "host-1",
             "process_id": 42,
+            "value": value,
             "message": "synthetic",
         },
     }
@@ -79,6 +80,31 @@ class RuntimeOutboxWiringTests(unittest.TestCase):
             self.assertEqual(["evt-1"], second_acks)
             self.assertEqual(1, reopened.health_snapshot()["physical_records"])
             self.assertEqual(1, len(reopened.scan()))
+
+    def test_restart_acks_authenticated_commit_when_correlation_window_changed(self):
+        """A post-commit crash cannot create a permanent replay conflict."""
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = DurableIncidentOutbox(directory, KEY)
+            first = build_adapter(outbox, ack=lambda _event_id: True)
+            self.assertTrue(first.handle_event(detection("evt-base")))
+            self.assertTrue(first.handle_event(detection("evt-replay", timestamp=1700000001.0, value=2)))
+            committed = [
+                row for row in outbox.scan()
+                if row["source_event_id"] == "evt-replay"
+            ][0]
+            self.assertEqual(2, committed["incident_payload"]["event_count"])
+
+            acks = []
+            reopened = DurableIncidentOutbox(directory, KEY)
+            restarted = build_adapter(
+                reopened,
+                ack=lambda event_id: acks.append(event_id) or True,
+            )
+            self.assertTrue(
+                restarted.handle_event(detection("evt-replay", timestamp=1700000001.0, value=2))
+            )
+            self.assertEqual(["evt-replay"], acks)
+            self.assertEqual(2, reopened.health_snapshot()["physical_records"])
 
     def test_conflicting_existing_row_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
