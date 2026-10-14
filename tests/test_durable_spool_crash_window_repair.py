@@ -77,6 +77,48 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
             self.assertEqual("DEGRADED", health["status"])
             self.assertFalse(health["terminal_state_safe"])
 
+    def test_limit_plus_one_pending_sharing_failure_is_degraded_then_recovers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-sharing-window-") as root:
+            spool_dir = Path(root) / "spool"
+            initial = DurableEventSpool(spool_dir, policy=self.policy(4))
+            events = [event(index) for index in range(4)]
+            for item in events:
+                self.assertTrue(initial.append(item))
+
+            # Exact limit+1 crash window: three ACK tombstones for a limit of
+            # two, with one unacknowledged event that must survive repair.
+            initial._persist_ack_state({item.event_id for item in events[:3]})
+            expected_pending = {events[3].event_id}
+            original_atomic_write = DurableEventSpool._atomic_write
+
+            def pending_sharing_violation(self, path: Path, payload: bytes) -> None:
+                if path == self.pending_path:
+                    raise PermissionError("simulated Windows pending-file sharing violation")
+                original_atomic_write(self, path, payload)
+
+            with mock.patch.object(
+                DurableEventSpool, "_atomic_write", new=pending_sharing_violation
+            ):
+                blocked = DurableEventSpool(spool_dir, policy=self.policy(2))
+
+            blocked_health = blocked.health_check()
+            self.assertEqual("DEGRADED", blocked_health["status"])
+            self.assertFalse(blocked_health["terminal_state_safe"])
+            self.assertEqual(
+                expected_pending,
+                {item["event_id"] for item in blocked.pending_records()},
+            )
+
+            recovered = DurableEventSpool(spool_dir, policy=self.policy(2))
+            recovered_health = recovered.health_check()
+            self.assertEqual("HEALTHY", recovered_health["status"])
+            self.assertTrue(recovered_health["terminal_state_safe"])
+            self.assertLessEqual(recovered_health["acked"], 2)
+            self.assertEqual(
+                expected_pending,
+                {item["event_id"] for item in recovered.pending_records()},
+            )
+
     def test_legacy_ack_journal_lock_does_not_poison_authoritative_snapshot(self) -> None:
         with tempfile.TemporaryDirectory(prefix="cd-spool-ack-journal-lock-") as root:
             spool_dir = Path(root) / "spool"

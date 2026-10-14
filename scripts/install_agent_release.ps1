@@ -231,7 +231,7 @@ function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='
     return [int]$service.ProcessId
 }
 
-function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$NewBin) {
+function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string]$NewBin) {
     if(-not (Test-Path -LiteralPath $ReceiptDir)){ New-Item -ItemType Directory -Path $ReceiptDir | Out-Null }
     Inspect-NoReparse $ReceiptDir
     $receipt=[ordered]@{
@@ -241,7 +241,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
         release_path=$NewRoot
         zip_sha256=$ApprovedZipSHA256.ToLowerInvariant()
         completed_at=(Get-Date).ToUniversalTime().ToString('o')
-        agent_pid=$Pid
+        agent_pid=$AgentPid
         agent_binpath=$NewBin
         original_agent_state=$Original.State
         original_agent_binpath=$Original.PathName
@@ -250,8 +250,10 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$Pid,[string]$New
     }
     $target=Join-Path $ReceiptDir ('agent-release-' + $Revision.Substring(0,8) + '.json')
     $temporary=$target + '.pending'
-    $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temporary -Encoding utf8NoBOM
-    Move-Item -LiteralPath $temporary -Destination $target -Force
+    $serialized=$receipt | ConvertTo-Json -Depth 8 -ErrorAction Stop
+    $utf8NoBom=New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($temporary,$serialized,$utf8NoBom)
+    Move-Item -LiteralPath $temporary -Destination $target -Force -ErrorAction Stop
     return $target
 }
 
