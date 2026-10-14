@@ -41,8 +41,11 @@ class IncidentOutboxPolicy:
     max_records: int = 4096
     max_bytes: int = 16 * 1024 * 1024
     max_record_bytes: int = 256 * 1024
-    max_scan_records: int = 256
-    max_scan_bytes: int = 1 * 1024 * 1024
+    # Every identity/state lookup must be able to inspect the complete bounded
+    # journal.  Smaller defaults make valid data above the scan threshold
+    # permanently unreadable even though it is still below the storage limit.
+    max_scan_records: int = 4096
+    max_scan_bytes: int = 16 * 1024 * 1024
     lease_seconds: float = 30.0
     max_attempts: int = 8
 

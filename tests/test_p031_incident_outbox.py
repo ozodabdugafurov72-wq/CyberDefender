@@ -116,6 +116,41 @@ class IncidentOutboxTests(unittest.TestCase):
                 outbox.scan(max_records=2)
             self.assertGreaterEqual(outbox.health_snapshot()["scan_limit_exceeded"], 1)
 
+    def test_default_policy_reopens_valid_journal_above_one_megabyte(self):
+        """The default scan window covers every journal the policy can store."""
+        with tempfile.TemporaryDirectory() as directory:
+            outbox = self.make_outbox(directory)
+            payload = {
+                "event_type": "INCIDENT",
+                "severity": "HIGH",
+                "message": "x" * 120_000,
+            }
+            for index in range(9):
+                self.put(
+                    outbox,
+                    source=f"evt-large-{index}",
+                    incident=f"inc-large-{index}",
+                    idem=f"idem-large-{index}",
+                    payload=payload,
+                )
+
+            self.assertGreater(outbox.journal_path.stat().st_size, 1024 * 1024)
+            self.assertEqual(9, len(outbox.scan()))
+
+            duplicate, reused = self.put(
+                outbox,
+                source="evt-large-8",
+                incident="inc-large-8",
+                idem="idem-large-8",
+                payload=payload,
+            )
+            self.assertTrue(reused)
+            self.assertEqual("PENDING", duplicate["state"])
+
+            reopened = self.make_outbox(directory)
+            self.assertEqual(9, len(reopened.scan()))
+            self.assertEqual("HEALTHY", reopened.health_snapshot()["status"])
+
     def test_lease_expiry_allows_bounded_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             clock = FakeClock()
