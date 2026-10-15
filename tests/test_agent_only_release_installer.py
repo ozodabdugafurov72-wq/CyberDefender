@@ -171,6 +171,80 @@ if($pidResult -ne 4242 -or $script:ProcessCalls -ne 2) {{ throw 'STALE_TO_FRESH_
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             self.assertIn("PASS", completed.stdout)
 
+    def test_agent_identity_mismatch_writes_sanitized_forensic_evidence(self) -> None:
+        start = self.source.index("function Get-PathIdentityEvidence")
+        end = self.source.index("function Write-Receipt", start)
+        functions = self.source[start:end]
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            expected = base / "expected-python.exe"
+            observed = base / "observed-python.exe"
+            expected.write_bytes(b"expected")
+            observed.write_bytes(b"observed")
+            expected_bin = f'"{expected}" "C:\\release\\agent_service_bootstrap.py" --service-run'
+            script = base / "identity_evidence.ps1"
+            body = rf"""
+$ErrorActionPreference='Stop'
+$AgentName='CyberDefenderAgent'
+$Revision='a' * 40
+$Python='{expected}'
+$IdentityEvidenceDirectory='{base}'
+$script:ExpectedBin='{expected_bin}'
+$script:Started=(Get-Date).ToUniversalTime()
+function Require([bool]$Condition,[string]$Message) {{ if(-not $Condition){{ throw $Message }} }}
+function Service-Info([string]$Name) {{ return [pscustomobject]@{{State='Running';PathName=$script:ExpectedBin;ProcessId=4242}} }}
+function Get-CimInstance {{
+ param([string]$ClassName,[string]$Filter,[object]$ErrorAction)
+ if($Filter -eq "Name='services.exe'") {{ return [pscustomobject]@{{ProcessId=888;Name='services.exe'}} }}
+ if($Filter -eq 'ProcessId=4242') {{ return [pscustomobject]@{{ProcessId=4242;ParentProcessId=999;ExecutablePath='{observed}';CommandLine='C:\release\agent_service_bootstrap.py --service-run';CreationDate=$script:Started.AddMilliseconds(1)}} }}
+ if($Filter -eq 'ProcessId=999') {{ return [pscustomobject]@{{ProcessId=999;Name='foreign.exe'}} }}
+ return $null
+}}
+{functions}
+try {{ [void](Verify-AgentProcess $script:ExpectedBin 'C:\release' $script:Started 1000); throw 'EXPECTED_IDENTITY_FAILURE' }} catch {{ if($_.Exception.Message -ne 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'){{throw}} }}
+$evidence=Get-Content -LiteralPath $script:IdentityEvidencePath -Raw|ConvertFrom-Json
+if($evidence.reason -ne 'EXECUTABLE_MISMATCH' -or $evidence.process_id -ne 4242 -or $evidence.parent.pid -ne 999 -or $evidence.parent.name -ne 'foreign.exe'){{throw 'IDENTITY_FIELDS_MISSING'}}
+if($evidence.expected.basename -ne 'expected-python.exe' -or $evidence.observed.basename -ne 'observed-python.exe'){{throw 'PATH_FIELDS_MISSING'}}
+if($evidence.expected.path_sha256 -notmatch '^[0-9a-f]{{64}}$' -or $evidence.observed.path_sha256 -notmatch '^[0-9a-f]{{64}}$' -or $evidence.expected.path_sha256 -eq $evidence.observed.path_sha256){{throw 'PATH_HASH_INVALID'}}
+if($null -ne $evidence.expected.raw_path -or $null -ne $evidence.observed.full_path){{throw 'RAW_PATH_LEAK'}}
+if($evidence.expected.sha256 -notmatch '^[0-9a-f]{{64}}$' -or $evidence.observed.sha256 -notmatch '^[0-9a-f]{{64}}$' -or $evidence.expected.sha256 -eq $evidence.observed.sha256){{throw 'FILE_HASH_INVALID'}}
+'PASS'
+"""
+            script.write_text(body, encoding="utf-8")
+            completed = subprocess.run(
+                [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", str(script)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertIn("PASS", completed.stdout)
+
+    def test_apply_success_path_avoids_reserved_pid_variable_in_windows_powershell_51(self) -> None:
+        assignment = next(line.strip() for line in self.source.splitlines() if "=Verify-AgentProcess $newBin" in line)
+        receipt = next(line.strip() for line in self.source.splitlines() if "=Write-Receipt $agentBaseline" in line)
+        self.assertEqual(assignment, "$agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt")
+        self.assertIn("$agentPid $newBin", receipt)
+        self.assertNotRegex(assignment + receipt, r"(?i)\$pid\b")
+        body = f"""
+$ErrorActionPreference='Stop'
+function Verify-AgentProcess {{ return 4321 }}
+function Write-Receipt {{ param($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string]$NewBin); if($AgentPid -ne 4321){{throw 'PID_NOT_FORWARDED'}}; return 'receipt' }}
+$newBin='approved-bin';$NewRoot='release';$startedAt=(Get-Date).ToUniversalTime();$agentBaseline=@{{}};$otherBaseline=@();$runtimeEvidence=@()
+{assignment}
+{receipt}
+if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
+'PASS'
+"""
+        completed = subprocess.run(
+            [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-Command", body],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn("PASS", completed.stdout)
+
     def test_stopped_recovery_and_probe_are_explicit(self) -> None:
         for required in (
             "$RecoverStoppedAgent.IsPresent",

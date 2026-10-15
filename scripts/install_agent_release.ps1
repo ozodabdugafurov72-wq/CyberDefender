@@ -35,6 +35,7 @@ $ReceiptDir=Join-Path $StateBase 'deploy-receipts'
 $OriginFile=Join-Path $StateBase 'identity\distribution_url.txt'
 $RemoteToken=Join-Path $StateBase 'secrets\remote_fleet_token.txt'
 $LocalToken=Join-Path $StateBase 'secrets\fleet_token.txt'
+$IdentityEvidenceDirectory=$env:TEMP
 
 function Require([bool]$Condition,[string]$Message) {
     if(-not $Condition){ throw $Message }
@@ -219,12 +220,95 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=240) {
     return [pscustomobject]@{ observations=$observations; final_cycle=[int]$final.runtime.cycle_count }
 }
 
+function Get-PathIdentityEvidence([string]$Path) {
+    $raw=[string]$Path
+    $full=$null
+    try { if($raw){ $full=[IO.Path]::GetFullPath($raw) } } catch {}
+    $pathHash=$null
+    if($full) {
+        $pathSha=[Security.Cryptography.SHA256]::Create()
+        try {
+            $pathBytes=[Text.Encoding]::UTF8.GetBytes($full.ToUpperInvariant())
+            $pathHash=([BitConverter]::ToString($pathSha.ComputeHash($pathBytes))).Replace('-','').ToLowerInvariant()
+        } finally { $pathSha.Dispose() }
+    }
+    $exists=[bool]($raw -and (Test-Path -LiteralPath $raw -PathType Leaf))
+    $hash=$null
+    $attributes=$null
+    $length=$null
+    if($exists) {
+        try {
+            $item=Get-Item -LiteralPath $raw -Force -ErrorAction Stop
+            $attributes=[string]$item.Attributes
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try {
+                $stream=[IO.File]::Open($raw,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+                try {
+                    $length=[long]$stream.Length
+                    $limit=134217728L
+                    if($length -gt $limit) { $hash='FILE_TOO_LARGE' }
+                    else {
+                        $buffer=New-Object byte[] 65536
+                        $total=0L
+                        while($true) {
+                            $remaining=($limit + 1L) - $total
+                            $read=$stream.Read($buffer,0,[int][Math]::Min([long]$buffer.Length,$remaining))
+                            if($read -eq 0) {
+                                [void]$sha.TransformFinalBlock($buffer,0,0)
+                                $hash=([BitConverter]::ToString($sha.Hash)).Replace('-','').ToLowerInvariant()
+                                break
+                            }
+                            $total += $read
+                            if($total -gt $limit) { $hash='FILE_TOO_LARGE'; break }
+                            [void]$sha.TransformBlock($buffer,0,$read,$null,0)
+                        }
+                    }
+                } finally { $stream.Dispose() }
+            } finally { $sha.Dispose() }
+        } catch { $hash='READ_FAILED' }
+    }
+    return [ordered]@{basename=if($full){[IO.Path]::GetFileName($full)}else{$null};path_sha256=$pathHash;length_chars=$raw.Length;rooted=[IO.Path]::IsPathRooted($raw);exists=$exists;file_length=$length;sha256=$hash;attributes=$attributes}
+}
+
+function Write-AgentIdentityEvidence($Process,[string]$ExpectedPath,[datetime]$StartedUtc,[string]$Reason) {
+    try {
+        $parent=$null
+        if($null -ne $Process -and [int]$Process.ParentProcessId -gt 0) {
+            $parent=Get-CimInstance Win32_Process -Filter ('ProcessId=' + [int]$Process.ParentProcessId) -ErrorAction SilentlyContinue
+        }
+        $created=$null
+        if($null -ne $Process -and $null -ne $Process.CreationDate){ $created=([datetime]$Process.CreationDate).ToUniversalTime().ToString('o') }
+        $evidence=[ordered]@{
+            schema='cyberdefender.agent-identity-evidence.v1'
+            reason=$Reason
+            captured_at=(Get-Date).ToUniversalTime().ToString('o')
+            start_utc=$StartedUtc.ToUniversalTime().ToString('o')
+            process_id=if($null -ne $Process){[int]$Process.ProcessId}else{$null}
+            creation_utc=$created
+            expected=(Get-PathIdentityEvidence $ExpectedPath)
+            observed=(Get-PathIdentityEvidence $(if($null -ne $Process){[string]$Process.ExecutablePath}else{''}))
+            parent=[ordered]@{pid=if($null -ne $Process){[int]$Process.ParentProcessId}else{$null};name=if($null -ne $parent){[string]$parent.Name}else{$null}}
+            command_matches_release=$null
+        }
+        $json=$evidence | ConvertTo-Json -Depth 6 -Compress
+        $path=Join-Path $IdentityEvidenceDirectory ('cyberdefender_agent_identity_' + $Revision + '_' + [Guid]::NewGuid().ToString('N') + '.json')
+        $bytes=(New-Object Text.UTF8Encoding($false)).GetBytes($json)
+        $stream=New-Object IO.FileStream($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        $script:IdentityEvidencePath=$path
+        Write-Host ('AGENT_IDENTITY_EVIDENCE_WRITTEN:' + $path)
+    } catch {
+        Write-Host 'AGENT_IDENTITY_EVIDENCE_WRITE_FAILED'
+    }
+}
+
 function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000) {
     $services=@(Get-CimInstance Win32_Process -Filter "Name='services.exe'" -ErrorAction Stop)
     Require ($services.Count -eq 1) 'SCM_PROCESS_IDENTITY_UNAVAILABLE'
     $servicesPid=[int]$services[0].ProcessId
     $deadline=(Get-Date).ToUniversalTime().AddMilliseconds([Math]::Max(250,$TimeoutMilliseconds))
     $staleObserved=$false
+    $lastProcess=$null
     do {
         $service=Service-Info $AgentName
         Require ($service.State -eq 'Running') 'AGENT_NOT_RUNNING'
@@ -238,6 +322,7 @@ function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='
             Start-Sleep -Milliseconds 100
             continue
         }
+        $lastProcess=$process
         Require ($null -ne $process.CreationDate) 'AGENT_PROCESS_CREATION_MISSING'
         $createdUtc=([datetime]$process.CreationDate).ToUniversalTime()
         if($StartedUtc -ne [datetime]::MinValue -and $createdUtc -lt $StartedUtc.ToUniversalTime()) {
@@ -245,14 +330,24 @@ function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='
             Start-Sleep -Milliseconds 100
             continue
         }
-        Require ([string]$process.ExecutablePath -eq $Python) 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'
-        Require ([int]$process.ParentProcessId -eq $servicesPid) 'AGENT_PROCESS_PARENT_UNEXPECTED'
+        if([string]$process.ExecutablePath -ne $Python) {
+            Write-AgentIdentityEvidence $process $Python $StartedUtc 'EXECUTABLE_MISMATCH'
+            throw 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'
+        }
+        if([int]$process.ParentProcessId -ne $servicesPid) {
+            Write-AgentIdentityEvidence $process $Python $StartedUtc 'PARENT_MISMATCH'
+            throw 'AGENT_PROCESS_PARENT_UNEXPECTED'
+        }
         if($ExpectedReleaseRoot) {
-            Require ([string]$process.CommandLine -like ('*' + $ExpectedReleaseRoot + '*agent_service_bootstrap.py*')) 'AGENT_PROCESS_COMMAND_UNEXPECTED'
+            if([string]$process.CommandLine -notlike ('*' + $ExpectedReleaseRoot + '*agent_service_bootstrap.py*')) {
+                Write-AgentIdentityEvidence $process $Python $StartedUtc 'COMMAND_MISMATCH'
+                throw 'AGENT_PROCESS_COMMAND_UNEXPECTED'
+            }
         }
         return [int]$service.ProcessId
     } while((Get-Date).ToUniversalTime() -lt $deadline)
-    if($staleObserved){ throw 'AGENT_PROCESS_STALE_TIMEOUT' }
+    if($staleObserved){ Write-AgentIdentityEvidence $lastProcess $Python $StartedUtc 'STALE_TIMEOUT'; throw 'AGENT_PROCESS_STALE_TIMEOUT' }
+    Write-AgentIdentityEvidence $null $Python $StartedUtc 'MISSING_TIMEOUT'
     throw 'AGENT_PROCESS_MISSING_TIMEOUT'
 }
 
@@ -348,7 +443,7 @@ try {
     $startedAt=(Get-Date).ToUniversalTime()
     Start-Agent
     $candidateStarted=$true
-    $pid=Verify-AgentProcess $newBin $NewRoot $startedAt
+    $agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt
     $runtimeEvidence=Await-HealthyRuntime $startedAt 240
     Verify-Others $otherBaseline
     Verify-LocalCompanions
@@ -356,7 +451,7 @@ try {
     Require ($agentAfter.StartMode -eq $agentBaseline.StartMode) 'AGENT_STARTMODE_CHANGED'
     Require ($agentAfter.StartName -eq $agentBaseline.StartName) 'AGENT_IDENTITY_CHANGED'
     Require ($agentAfter.Recovery -eq $agentBaseline.Recovery) 'AGENT_RECOVERY_CHANGED'
-    $receipt=Write-Receipt $agentBaseline $otherBaseline $runtimeEvidence $pid $newBin
+    $receipt=Write-Receipt $agentBaseline $otherBaseline $runtimeEvidence $agentPid $newBin
     Write-Host ('AGENT_RELEASE_PASS: ' + $receipt) -ForegroundColor Green
     exit 0
 } catch {
