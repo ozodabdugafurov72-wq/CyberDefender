@@ -15,6 +15,10 @@ import stat
 import sys
 import zipfile
 
+TOOLS_ROOT = Path(__file__).resolve().parent
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
 from build_pinned_release import make_payload
 from release_manager import verify as verify_zip
 

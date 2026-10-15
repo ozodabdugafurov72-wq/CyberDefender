@@ -19,6 +19,15 @@ from verify_git_zip_provenance import ProvenanceError, verify_provenance
 
 
 class GitZipProvenanceTests(unittest.TestCase):
+    def test_cli_imports_are_available_in_isolated_mode(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "-I", str(TOOLS / "verify_git_zip_provenance.py"), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
