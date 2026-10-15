@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -50,8 +51,34 @@ def _rotate(path: Path) -> None:
         raise  # Do not append beyond the retention bound if rotation fails.
 
 
+def failure_fields(exc: BaseException, stage: str) -> dict:
+    # Never inspect exception args, messages, locals, or chained exceptions.
+    name = type(exc).__name__
+    known = _EXCEPTIONS | {"RuntimeBootstrapError", "SpoolError"}
+    result = {"exception_category": name if name in _EXCEPTIONS else "OTHER_EXCEPTION",
+              "exception_class": name if name in known else "UNCLASSIFIED",
+              "stage": stage if stage in {"STARTUP", "RUNTIME_RUN"} else "UNKNOWN"}
+    if name not in known:
+        result["class_fingerprint"] = hashlib.sha256(name[:256].encode("utf-8", "replace")).hexdigest()[:16]
+    trusted = {"windows_service.py": {"_run_attempt"},
+               "service_runner.py": {"run"},
+               "main.py": {"build_managed_runtime", "__init__"}}
+    root = Path(__file__).resolve().parent
+    frame = exc.__traceback__
+    for _ in range(32):
+        if frame is None:
+            break
+        code = frame.tb_frame.f_code
+        file = Path(code.co_filename)
+        if file.is_absolute() and file.parent == root and code.co_name in trusted.get(file.name, set()):
+            result["source"] = {"file": file.name, "function": code.co_name,
+                                "line": min(max(frame.tb_lineno, 0), 999999)}
+        frame = frame.tb_next
+    return result
+
+
 def write_service_log(service: str, message: str, *, exc: BaseException | None = None,
-                      exit_reason: str | None = None) -> None:
+                      exit_reason: str | None = None, stage: str = "UNKNOWN") -> None:
     """Allowlisted, bounded per-service evidence; no arbitrary exception text.
 
     Separate files and an OS exclusive lock serialize rotation across processes.
@@ -62,8 +89,7 @@ def write_service_log(service: str, message: str, *, exc: BaseException | None =
                       time=datetime.now(timezone.utc).isoformat(),
                       event=message if message in _EVENTS else "UNCLASSIFIED")
         if exc is not None:
-            name=type(exc).__name__
-            record["exception_category"]=name if name in _EXCEPTIONS else "OTHER_EXCEPTION"
+            record.update(failure_fields(exc, stage))
         if exit_reason is not None:
             record["exit_reason"] = exit_reason if exit_reason in _EXIT_REASONS else "UNKNOWN_EXIT"
         raw=json.dumps(record,separators=(",",":"),ensure_ascii=True).encode("ascii")+b"\n"

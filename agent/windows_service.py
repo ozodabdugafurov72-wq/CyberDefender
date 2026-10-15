@@ -146,6 +146,7 @@ if PYWIN32_AVAILABLE:
 
         def _run_attempt(self, guard):
             from agent.service_diagnostics import write_service_log
+            startup_stage = "STARTUP"
             try:
                 from agent.main import build_managed_runtime
                 from agent.service_runner import ServiceRunner
@@ -169,6 +170,7 @@ if PYWIN32_AVAILABLE:
                     # EventLog registration is non-authoritative observability;
                     # it must never terminate the protection loop.
                     write_service_log(SERVICE_NAME, "EVENTLOG_UNAVAILABLE")
+                startup_stage = "RUNTIME_RUN"
                 self._runner.run()
                 exit_reason = getattr(self._runner, "exit_reason", "UNKNOWN_EXIT")
                 write_service_log(SERVICE_NAME, "EXIT", exit_reason=exit_reason)
@@ -193,7 +195,7 @@ if PYWIN32_AVAILABLE:
                     "EXIT",
                     exit_reason=getattr(self._runner, "exit_reason", "UNKNOWN_EXIT"),
                 )
-                write_service_log(SERVICE_NAME, "FATAL", exc=exc)
+                write_service_log(SERVICE_NAME, "FATAL", exc=exc, stage=startup_stage)
                 try: servicemanager.LogErrorMsg("CyberDefenderAgent: ATTEMPT_FAILED; see protected lifecycle evidence")
                 except Exception: pass
                 try:
