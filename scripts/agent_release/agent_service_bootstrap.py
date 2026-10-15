@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import runpy
+import secrets
 import stat
 import sys
 from pathlib import Path
@@ -25,27 +26,68 @@ _STAGE_CODES = (
 )
 _STAGE_CODE_SET = frozenset(_STAGE_CODES)
 _MAX_STAGE_BYTES = 4096
-_STAGE_PATH = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Temp" / "CyberDefenderAgent-bootstrap-v1.log"
+_STAGE_DIRECTORY = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Temp"
+_STAGE_PATH: Path | None = None
+_STAGE_HANDLE = None
+_STAGE_BYTES = 0
+
+
+def _directory_is_safe(path: Path) -> bool:
+    try:
+        for part in (path, *path.parents):
+            info = part.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                return False
+        return True
+    except OSError:
+        return False
+
+
+def _open_stage() -> None:
+    global _STAGE_PATH, _STAGE_HANDLE, _STAGE_BYTES
+    if _STAGE_HANDLE is not None or not _directory_is_safe(_STAGE_DIRECTORY):
+        return
+    path = _STAGE_DIRECTORY / ("CyberDefenderAgent-bootstrap-" + secrets.token_hex(16) + ".log")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        _STAGE_PATH = path
+        _STAGE_HANDLE = os.fdopen(descriptor, "wb", buffering=0)
+        _STAGE_BYTES = 0
+    except OSError:
+        _STAGE_PATH = None
+        _STAGE_HANDLE = None
+        _STAGE_BYTES = 0
+
+
+def _close_stage() -> None:
+    global _STAGE_HANDLE
+    if _STAGE_HANDLE is not None:
+        try:
+            _STAGE_HANDLE.close()
+        except OSError:
+            pass
+        _STAGE_HANDLE = None
 
 
 def _stage(code: str) -> None:
     """Best-effort, bounded fixed-code evidence before SCM lifecycle starts."""
+    global _STAGE_BYTES
     if code not in _STAGE_CODE_SET:
         return
     try:
-        if _STAGE_PATH.exists():
-            info = _STAGE_PATH.lstat()
-            if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-                return
-            if info.st_size + len(code) + 1 > _MAX_STAGE_BYTES:
-                return
-        with _STAGE_PATH.open("ab", buffering=0) as handle:
-            handle.write(code.encode("ascii") + b"\n")
-    except Exception:
+        raw = code.encode("ascii") + b"\n"
+        if _STAGE_HANDLE is None or _STAGE_BYTES + len(raw) > _MAX_STAGE_BYTES:
+            return
+        written = _STAGE_HANDLE.write(raw)
+        if written == len(raw):
+            _STAGE_BYTES += written
+    except (OSError, ValueError):
         pass
 
 
 def main() -> int:
+    _open_stage()
     _stage("CD_BOOTSTRAP_B00_ENTER")
     root = Path(__file__).resolve().parent
     if not (root / "agent" / "windows_service.py").is_file():
@@ -63,11 +105,17 @@ def main() -> int:
     _stage("CD_BOOTSTRAP_B40_DISPATCH_ENTER")
     try:
         runpy.run_module("agent.windows_service", run_name="__main__", alter_sys=True)
+    except SystemExit as exc:
+        _stage("CD_BOOTSTRAP_B99_DISPATCH_RETURN" if exc.code in (None, 0) else "CD_BOOTSTRAP_B90_DISPATCH_ERROR")
+        raise
     except BaseException:
         _stage("CD_BOOTSTRAP_B90_DISPATCH_ERROR")
         raise
-    _stage("CD_BOOTSTRAP_B99_DISPATCH_RETURN")
-    return 0
+    else:
+        _stage("CD_BOOTSTRAP_B99_DISPATCH_RETURN")
+        return 0
+    finally:
+        _close_stage()
 
 
 if __name__ == "__main__":

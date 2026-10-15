@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from unittest.mock import patch
 import tempfile
 
 
@@ -24,13 +25,35 @@ def main() -> int:
     spec.loader.exec_module(module)
     assert tuple(module._STAGE_CODES) == EXPECTED
     with tempfile.TemporaryDirectory() as raw:
-        marker = Path(raw) / "marker.log"
-        module._STAGE_PATH = marker
+        directory = Path(raw)
+        module._STAGE_DIRECTORY = directory
+        with patch.object(module.secrets, "token_hex", return_value="a" * 32):
+            module._open_stage()
+        marker = module._STAGE_PATH
+        assert marker is not None and marker.parent == directory
         for code in EXPECTED:
             module._stage(code)
         module._stage("UNTRUSTED_DETAIL")
+        module._close_stage()
         assert marker.read_text(encoding="ascii").splitlines() == list(EXPECTED)
         assert marker.stat().st_size <= module._MAX_STAGE_BYTES
+        module._STAGE_DIRECTORY = directory
+        module._STAGE_BYTES = module._MAX_STAGE_BYTES
+        module._STAGE_HANDLE = marker.open("ab", buffering=0)
+        before = marker.stat().st_size
+        module._stage(EXPECTED[0])
+        module._close_stage()
+        assert marker.stat().st_size == before
+        module._STAGE_DIRECTORY = directory
+        with patch.object(module, "_directory_is_safe", return_value=False):
+            module._open_stage()
+        assert module._STAGE_HANDLE is None
+        collision = directory / ("CyberDefenderAgent-bootstrap-" + "b" * 32 + ".log")
+        collision.write_bytes(b"existing")
+        with patch.object(module.secrets, "token_hex", return_value="b" * 32):
+            module._open_stage()
+        assert module._STAGE_HANDLE is None
+        assert collision.read_bytes() == b"existing"
     print("PASS | bootstrap diagnostics emit only bounded fixed stage codes")
     return 0
 
