@@ -51,4 +51,8 @@ class ProgressWatchdog:
             try: state=self.snapshot()["state"]
             except Exception: state="UNAVAILABLE"
             if state != last:
-                callback(state); last=state
+                try:
+                    callback(state)
+                except Exception:
+                    pass
+                last=state

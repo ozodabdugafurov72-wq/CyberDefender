@@ -37,6 +37,18 @@ def notify(service, state):
         except Exception: pass
 
 
+def _notify(observer, service, state):
+    """Keep observer failures outside CrashGuard accounting."""
+    try:
+        observer(service, state)
+    except Exception as exc:
+        try:
+            from agent.service_diagnostics import write_service_log
+            write_service_log(service, "OBSERVER_FAILED", exc=exc)
+        except Exception:
+            pass
+
+
 def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(),
                         store_factory=None, boot_factory=boot_identity, observer=notify,
                         clock=active_time):
@@ -47,18 +59,18 @@ def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(
             store=(store_factory or (lambda: FileCrashStore(default_root(),service)))()
             guard=CrashGuard(store,boot=boot_factory(),policy=policy,clock=clock)
             guard.watchdog=ProgressWatchdog(clock=clock)
-            monitor=threading.Thread(target=guard.watchdog.monitor,args=(monitor_stop,lambda state:observer(service,state)),
+            monitor=threading.Thread(target=guard.watchdog.monitor,args=(monitor_stop,lambda state:_notify(observer,service,state)),
                                      name="CyberDefenderProgressWatchdog",daemon=True)
             monitor.start()
         except Exception:
-            observer(service,"UNAVAILABLE")
+            _notify(observer,service,"UNAVAILABLE")
             # No untrusted-state reprovision or risky application bootstrap.
             stop_event.wait()
             return
         while not stop_event.is_set():
             try:
                 if guard.admit():
-                    observer(service,"STARTING")
+                    _notify(observer,service,"STARTING")
                     result=run_attempt(guard)
                     if not stop_event.is_set() and not getattr(guard, "_failure_marked", False):
                         guard.failed("CLEANUP_UNVERIFIED" if result is False else "ATTEMPT_FAILED")
@@ -68,11 +80,11 @@ def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(
                 except Exception: pass
                 state=guard.snapshot()["state"]
             if state != last_state:
-                observer(service,state); last_state=state
+                _notify(observer,service,state); last_state=state
             stop_event.wait(1.0)
         if guard is not None:
             try: guard.stop()
-            except Exception: observer(service,"UNAVAILABLE")
+            except Exception: _notify(observer,service,"UNAVAILABLE")
     finally:
         monitor_stop.set()
         if monitor is not None: monitor.join(timeout=2)
