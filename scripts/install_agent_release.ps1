@@ -219,18 +219,41 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=240) {
     return [pscustomobject]@{ observations=$observations; final_cycle=[int]$final.runtime.cycle_count }
 }
 
-function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='') {
-    $service=Service-Info $AgentName
-    Require ($service.State -eq 'Running') 'AGENT_NOT_RUNNING'
-    Require ($service.PathName -eq $ExpectedBin) 'AGENT_BINARY_UNEXPECTED'
-    Require ($service.ProcessId -gt 0) 'AGENT_PID_MISSING'
-    $process=Get-CimInstance Win32_Process -Filter ("ProcessId=" + $service.ProcessId) -ErrorAction Stop
-    Require ($null -ne $process) 'AGENT_PROCESS_MISSING'
-    Require ([string]$process.ExecutablePath -eq $Python) 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'
-    if($ExpectedReleaseRoot) {
-        Require ([string]$process.CommandLine -like ('*' + $ExpectedReleaseRoot + '*agent_service_bootstrap.py*')) 'AGENT_PROCESS_COMMAND_UNEXPECTED'
-    }
-    return [int]$service.ProcessId
+function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000) {
+    $services=@(Get-CimInstance Win32_Process -Filter "Name='services.exe'" -ErrorAction Stop)
+    Require ($services.Count -eq 1) 'SCM_PROCESS_IDENTITY_UNAVAILABLE'
+    $servicesPid=[int]$services[0].ProcessId
+    $deadline=(Get-Date).ToUniversalTime().AddMilliseconds([Math]::Max(250,$TimeoutMilliseconds))
+    $staleObserved=$false
+    do {
+        $service=Service-Info $AgentName
+        Require ($service.State -eq 'Running') 'AGENT_NOT_RUNNING'
+        Require ($service.PathName -eq $ExpectedBin) 'AGENT_BINARY_UNEXPECTED'
+        if($service.ProcessId -le 0) {
+            Start-Sleep -Milliseconds 100
+            continue
+        }
+        $process=Get-CimInstance Win32_Process -Filter ("ProcessId=" + $service.ProcessId) -ErrorAction SilentlyContinue
+        if($null -eq $process) {
+            Start-Sleep -Milliseconds 100
+            continue
+        }
+        Require ($null -ne $process.CreationDate) 'AGENT_PROCESS_CREATION_MISSING'
+        $createdUtc=([datetime]$process.CreationDate).ToUniversalTime()
+        if($StartedUtc -ne [datetime]::MinValue -and $createdUtc -lt $StartedUtc.ToUniversalTime()) {
+            $staleObserved=$true
+            Start-Sleep -Milliseconds 100
+            continue
+        }
+        Require ([string]$process.ExecutablePath -eq $Python) 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'
+        Require ([int]$process.ParentProcessId -eq $servicesPid) 'AGENT_PROCESS_PARENT_UNEXPECTED'
+        if($ExpectedReleaseRoot) {
+            Require ([string]$process.CommandLine -like ('*' + $ExpectedReleaseRoot + '*agent_service_bootstrap.py*')) 'AGENT_PROCESS_COMMAND_UNEXPECTED'
+        }
+        return [int]$service.ProcessId
+    } while((Get-Date).ToUniversalTime() -lt $deadline)
+    if($staleObserved){ throw 'AGENT_PROCESS_STALE_TIMEOUT' }
+    throw 'AGENT_PROCESS_MISSING_TIMEOUT'
 }
 
 function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string]$NewBin) {
@@ -317,15 +340,15 @@ $newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
 $newBin='"' + $Python + '" "' + $newBootstrap + '" --service-run'
 $didSwitch=$false
 $candidateStarted=$false
-$startedAt=(Get-Date).ToUniversalTime()
 try {
     Stop-Agent
     if($AuthorizeRecoveryProbe) { Authorize-AgentProbe }
     $didSwitch=$true
     Set-AgentBinary $newBin
+    $startedAt=(Get-Date).ToUniversalTime()
     Start-Agent
     $candidateStarted=$true
-    $pid=Verify-AgentProcess $newBin $NewRoot
+    $pid=Verify-AgentProcess $newBin $NewRoot $startedAt
     $runtimeEvidence=Await-HealthyRuntime $startedAt 240
     Verify-Others $otherBaseline
     Verify-LocalCompanions

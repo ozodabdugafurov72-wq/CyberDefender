@@ -117,6 +117,60 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("SCM_BINARY_UPDATE_FAILED:", function)
         self.assertIn("SCM_BINARY_READBACK_MISMATCH", function)
 
+    def test_agent_identity_rechecks_stale_pid_until_fresh_process(self) -> None:
+        start = self.source.index("function Verify-AgentProcess")
+        end = self.source.index("function Write-Receipt", start)
+        function = self.source[start:end]
+        with tempfile.TemporaryDirectory() as raw:
+            script = Path(raw) / "identity_race.ps1"
+            expected_bin = '"C:\\Python\\python.exe" "C:\\release\\agent_service_bootstrap.py" --service-run'
+            body = rf"""
+$ErrorActionPreference='Stop'
+$AgentName='CyberDefenderAgent'
+$Python='C:\Python\python.exe'
+$script:ExpectedBin='{expected_bin}'
+$script:Started=(Get-Date).ToUniversalTime()
+$script:ProcessCalls=0
+function Require([bool]$Condition,[string]$Message) {{ if(-not $Condition){{ throw $Message }} }}
+function Service-Info([string]$Name) {{
+    return [pscustomobject]@{{State='Running';PathName=$script:ExpectedBin;ProcessId=4242}}
+}}
+function Get-CimInstance {{
+    param([string]$ClassName,[string]$Filter,[object]$ErrorAction)
+    if($Filter -eq "Name='services.exe'") {{ return [pscustomobject]@{{ProcessId=888}} }}
+    if($Filter -eq 'ProcessId=4242') {{
+        $script:ProcessCalls++
+        if($script:ProcessCalls -eq 1) {{
+            return [pscustomobject]@{{ProcessId=4242;ParentProcessId=777;ExecutablePath='C:\stale\python.exe';CommandLine='stale';CreationDate=$script:Started.AddSeconds(-5)}}
+        }}
+        return [pscustomobject]@{{ProcessId=4242;ParentProcessId=888;ExecutablePath=$Python;CommandLine='C:\release\agent_service_bootstrap.py --service-run';CreationDate=$script:Started.AddMilliseconds(1)}}
+    }}
+    return $null
+}}
+function Start-Sleep {{ param([int]$Milliseconds) }}
+{function}
+$pidResult=Verify-AgentProcess $script:ExpectedBin 'C:\release' $script:Started 1000
+if($pidResult -ne 4242 -or $script:ProcessCalls -ne 2) {{ throw 'STALE_TO_FRESH_RECHECK_FAILED' }}
+'PASS'
+"""
+            script.write_text(body, encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "RemoteSigned",
+                    "-File",
+                    str(script),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertIn("PASS", completed.stdout)
+
     def test_stopped_recovery_and_probe_are_explicit(self) -> None:
         for required in (
             "$RecoverStoppedAgent.IsPresent",
