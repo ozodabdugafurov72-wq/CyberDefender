@@ -12,6 +12,7 @@ import runpy
 import secrets
 import stat
 import sys
+import threading
 from pathlib import Path
 
 
@@ -30,6 +31,7 @@ _STAGE_DIRECTORY = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Temp"
 _STAGE_PATH: Path | None = None
 _STAGE_HANDLE = None
 _STAGE_BYTES = 0
+_STAGE_LOCK = threading.RLock()
 
 
 def _directory_is_safe(path: Path) -> bool:
@@ -45,29 +47,31 @@ def _directory_is_safe(path: Path) -> bool:
 
 def _open_stage() -> None:
     global _STAGE_PATH, _STAGE_HANDLE, _STAGE_BYTES
-    if _STAGE_HANDLE is not None or not _directory_is_safe(_STAGE_DIRECTORY):
-        return
-    path = _STAGE_DIRECTORY / ("CyberDefenderAgent-bootstrap-" + secrets.token_hex(16) + ".log")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
-    try:
-        descriptor = os.open(path, flags, 0o600)
-        _STAGE_PATH = path
-        _STAGE_HANDLE = os.fdopen(descriptor, "wb", buffering=0)
-        _STAGE_BYTES = 0
-    except OSError:
-        _STAGE_PATH = None
-        _STAGE_HANDLE = None
-        _STAGE_BYTES = 0
+    with _STAGE_LOCK:
+        if _STAGE_HANDLE is not None or not _directory_is_safe(_STAGE_DIRECTORY):
+            return
+        path = _STAGE_DIRECTORY / ("CyberDefenderAgent-bootstrap-" + secrets.token_hex(16) + ".log")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        try:
+            descriptor = os.open(path, flags, 0o600)
+            _STAGE_PATH = path
+            _STAGE_HANDLE = os.fdopen(descriptor, "wb", buffering=0)
+            _STAGE_BYTES = 0
+        except OSError:
+            _STAGE_PATH = None
+            _STAGE_HANDLE = None
+            _STAGE_BYTES = 0
 
 
 def _close_stage() -> None:
     global _STAGE_HANDLE
-    if _STAGE_HANDLE is not None:
-        try:
-            _STAGE_HANDLE.close()
-        except OSError:
-            pass
-        _STAGE_HANDLE = None
+    with _STAGE_LOCK:
+        if _STAGE_HANDLE is not None:
+            try:
+                _STAGE_HANDLE.close()
+            except OSError:
+                pass
+            _STAGE_HANDLE = None
 
 
 def _stage(code: str) -> None:
@@ -75,15 +79,35 @@ def _stage(code: str) -> None:
     global _STAGE_BYTES
     if code not in _STAGE_CODE_SET:
         return
-    try:
-        raw = code.encode("ascii") + b"\n"
-        if _STAGE_HANDLE is None or _STAGE_BYTES + len(raw) > _MAX_STAGE_BYTES:
-            return
-        written = _STAGE_HANDLE.write(raw)
-        if written == len(raw):
-            _STAGE_BYTES += written
-    except (OSError, ValueError):
-        pass
+    with _STAGE_LOCK:
+        descriptor = None
+        before = None
+        try:
+            raw = code.encode("ascii") + b"\n"
+            if _STAGE_HANDLE is None:
+                return
+            descriptor = _STAGE_HANDLE.fileno()
+            before = os.fstat(descriptor).st_size
+            _STAGE_BYTES = before
+            if before + len(raw) > _MAX_STAGE_BYTES:
+                return
+            written = os.write(descriptor, raw)
+            after = os.fstat(descriptor).st_size
+            if written != len(raw) or after != before + len(raw):
+                os.ftruncate(descriptor, before)
+                os.lseek(descriptor, before, os.SEEK_SET)
+                _STAGE_BYTES = before
+                return
+            os.fsync(descriptor)
+            _STAGE_BYTES = after
+        except (OSError, ValueError):
+            if descriptor is not None and before is not None:
+                try:
+                    os.ftruncate(descriptor, before)
+                    os.lseek(descriptor, before, os.SEEK_SET)
+                except OSError:
+                    pass
+                _STAGE_BYTES = before
 
 
 def main() -> int:

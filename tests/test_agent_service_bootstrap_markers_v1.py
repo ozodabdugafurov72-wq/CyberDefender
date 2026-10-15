@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 from unittest.mock import patch
 import tempfile
 
@@ -38,12 +40,30 @@ def main() -> int:
         assert marker.read_text(encoding="ascii").splitlines() == list(EXPECTED)
         assert marker.stat().st_size <= module._MAX_STAGE_BYTES
         module._STAGE_DIRECTORY = directory
-        module._STAGE_BYTES = module._MAX_STAGE_BYTES
+        complete = marker.read_bytes()
+        with marker.open("r+b", buffering=0) as full:
+            full.truncate(module._MAX_STAGE_BYTES)
         module._STAGE_HANDLE = marker.open("ab", buffering=0)
         before = marker.stat().st_size
         module._stage(EXPECTED[0])
         module._close_stage()
         assert marker.stat().st_size == before
+        marker.write_bytes(complete)
+
+        # A short OS write must be rolled back so the marker and byte count
+        # remain at the last complete fixed-code record.
+        module._STAGE_BYTES = marker.stat().st_size
+        module._STAGE_HANDLE = marker.open("ab", buffering=0)
+        real_write = os.write
+
+        def short_write(descriptor: int, payload: bytes) -> int:
+            return real_write(descriptor, payload[:3])
+
+        with patch.object(module.os, "write", side_effect=short_write):
+            module._stage(EXPECTED[0])
+        module._close_stage()
+        assert marker.read_bytes() == complete
+        assert module._STAGE_BYTES == len(complete)
         module._STAGE_DIRECTORY = directory
         with patch.object(module, "_directory_is_safe", return_value=False):
             module._open_stage()
@@ -54,6 +74,25 @@ def main() -> int:
             module._open_stage()
         assert module._STAGE_HANDLE is None
         assert collision.read_bytes() == b"existing"
+
+        if os.name == "nt":
+            target = directory / "real-target"
+            target.mkdir()
+            junction = directory / "real-reparse"
+            created = subprocess.run(
+                ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(target)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert created.returncode == 0, created.stderr
+            try:
+                module._STAGE_DIRECTORY = junction
+                module._open_stage()
+                assert module._STAGE_HANDLE is None
+                assert not list(target.glob("CyberDefenderAgent-bootstrap-*.log"))
+            finally:
+                os.rmdir(junction)
     print("PASS | bootstrap diagnostics emit only bounded fixed stage codes")
     return 0
 
