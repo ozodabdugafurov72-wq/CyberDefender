@@ -7,6 +7,7 @@ immutable Agent release directory.
 from __future__ import annotations
 
 import importlib.util
+import importlib
 import os
 import runpy
 import secrets
@@ -110,8 +111,36 @@ def _stage(code: str) -> None:
                 _STAGE_BYTES = before
 
 
+def _verify_pinned_dependencies(root: Path, *, required: bool) -> None:
+    runtime_root = (root / "runtime").resolve()
+    if Path(sys.executable).resolve().parent != runtime_root:
+        if required:
+            raise RuntimeError("dependency probe is not using the pinned runtime")
+        return
+    dependency_root = (runtime_root / "Lib" / "site-packages").resolve(strict=True)
+    if not dependency_root.is_relative_to(runtime_root) or not _directory_is_safe(dependency_root):
+        raise RuntimeError("dependency path escaped pinned runtime")
+    for relative in ("win32", "win32/lib", "Pythonwin"):
+        extension_root = (dependency_root / relative).resolve(strict=True)
+        if not extension_root.is_relative_to(dependency_root) or not _directory_is_safe(extension_root):
+            raise RuntimeError("pywin32 path escaped pinned runtime")
+        sys.path.insert(0, str(extension_root))
+    bootstrap_spec = importlib.util.find_spec("pywin32_bootstrap")
+    if bootstrap_spec is None or bootstrap_spec.origin is None or not Path(bootstrap_spec.origin).resolve(strict=True).is_relative_to(dependency_root):
+        raise RuntimeError("pywin32 bootstrap escaped pinned runtime")
+    importlib.import_module("pywin32_bootstrap")
+    for name in ("cryptography", "psutil", "win32service"):
+        module = importlib.import_module(name)
+        origin = getattr(module, "__file__", None)
+        if origin is None or not Path(origin).resolve(strict=True).is_relative_to(dependency_root):
+            raise RuntimeError("dependency import escaped pinned runtime: " + name)
+
+
 def main() -> int:
-    _open_stage()
+    dependency_probe = sys.argv[1:] == ["--dependency-probe"]
+    authorize_probe = sys.argv[1:] == ["--authorize-probe"]
+    if not dependency_probe and not authorize_probe:
+        _open_stage()
     _stage("CD_BOOTSTRAP_B00_ENTER")
     root = Path(__file__).resolve().parent
     if not (root / "agent" / "windows_service.py").is_file():
@@ -123,6 +152,16 @@ def main() -> int:
     if spec is None or spec.origin is None or Path(spec.origin).resolve().parent.parent != root:
         raise RuntimeError("Agent import escaped protected release root")
     _stage("CD_BOOTSTRAP_B30_ORIGIN_OK")
+    _verify_pinned_dependencies(root, required=dependency_probe or authorize_probe)
+    if dependency_probe:
+        print("PROTECTED_RUNTIME_DEPENDENCY_PROBE_PASS")
+        return 0
+    if authorize_probe:
+        from agent import service_crash_store
+
+        sys.argv = ["service_crash_store", "authorize-probe", "--service", "CyberDefenderAgent"]
+        service_crash_store.main()
+        return 0
     # Preserve the known-good `python -m agent.windows_service` dispatch
     # contract: pywin32 observes the service module as __main__, including
     # its module argv[0], while all imports remain pinned to this release.

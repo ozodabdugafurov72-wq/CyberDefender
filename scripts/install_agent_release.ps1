@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory=$true)][string]$ReleaseZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedZipSHA256,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ApprovedCommit,
+    [Parameter(Mandatory=$true)][string]$RuntimeZip,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedRuntimeZipSHA256,
     [switch]$Apply,
     [ValidateSet('','AGENT_ONLY_AUTHORIZED')][string]$HostAcknowledgement='',
     [switch]$RecoverStoppedAgent,
@@ -37,6 +39,8 @@ $RemoteToken=Join-Path $StateBase 'secrets\remote_fleet_token.txt'
 $LocalToken=Join-Path $StateBase 'secrets\fleet_token.txt'
 $IdentityEvidenceDirectory=$env:TEMP
 
+Add-Type -AssemblyName System.IO.Compression
+
 function Require([bool]$Condition,[string]$Message) {
     if(-not $Condition){ throw $Message }
 }
@@ -44,6 +48,205 @@ function Require([bool]$Condition,[string]$Message) {
 function Run-Checked([string]$Executable,[string[]]$CommandArgs) {
     & $Executable @CommandArgs | Out-Host
     if($LASTEXITCODE -ne 0){ throw ('COMMAND_FAILED exit=' + $LASTEXITCODE) }
+}
+
+function Get-Sha256Hex([byte[]]$Bytes) {
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
+function Get-StreamSha256Hex($Stream) {
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Stream))).Replace('-','').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
+function Read-BoundedFile([string]$Path,[int64]$MaximumBytes) {
+    $input=[IO.FileStream]::new($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try {
+        Require ($input.Length -le $MaximumBytes) 'RUNTIME_ZIP_OVERSIZED'
+        $output=[IO.MemoryStream]::new()
+        try {
+            $buffer=New-Object byte[] 1048576
+            $measured=0L
+            while(($read=$input.Read($buffer,0,$buffer.Length)) -gt 0) {
+                $measured += $read
+                Require ($measured -le $MaximumBytes) 'RUNTIME_ZIP_OVERSIZED'
+                $output.Write($buffer,0,$read)
+            }
+            return ,$output.ToArray()
+        } finally { $output.Dispose() }
+    } finally { $input.Dispose() }
+}
+
+function Test-JsonInteger($Value) {
+    return ($Value -is [int] -or $Value -is [long])
+}
+
+function Test-SafeRuntimePath([string]$Name) {
+    if(-not $Name -or $Name -match '[\\:]' -or [IO.Path]::IsPathRooted($Name) -or $Name -match '[<>|?*\x00-\x1f]') { return $false }
+    $reserved=@('CON','PRN','AUX','NUL','CONIN$','CONOUT$','COM1','COM2','COM3','COM4','COM5','COM6','COM7','COM8','COM9','LPT1','LPT2','LPT3','LPT4','LPT5','LPT6','LPT7','LPT8','LPT9')
+    foreach($part in $Name.Split('/')) {
+        if(-not $part -or $part -eq '.' -or $part -eq '..' -or $part.EndsWith('.') -or $part.EndsWith(' ')) { return $false }
+        if($reserved -contains $part.Split('.')[0].ToUpperInvariant()) { return $false }
+    }
+    return $true
+}
+
+function Read-PinnedRuntimePackage([string]$Path,[string]$ApprovedSha256) {
+    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    Require ($item.Length -le 67108864) 'RUNTIME_ZIP_OVERSIZED'
+    $payload=Read-BoundedFile $item.FullName 67108864
+    Require ($payload.Length -le 67108864) 'RUNTIME_ZIP_OVERSIZED'
+    Require ((Get-Sha256Hex $payload) -eq $ApprovedSha256.ToLowerInvariant()) 'RUNTIME_ZIP_SHA256_MISMATCH'
+    $memory=[IO.MemoryStream]::new($payload,$false)
+    $archive=[IO.Compression.ZipArchive]::new($memory,[IO.Compression.ZipArchiveMode]::Read,$false)
+    try {
+        $entries=@($archive.Entries)
+        Require ($entries.Count -gt 1 -and $entries.Count -le 4000) 'RUNTIME_ENTRY_COUNT_INVALID'
+        $byName=@{}
+        foreach($entry in $entries) {
+            $name=[string]$entry.FullName
+            Require ($name -and -not $entry.Name.Equals('')) 'RUNTIME_DIRECTORY_ENTRY_FORBIDDEN'
+            Require (-not $byName.ContainsKey($name)) 'RUNTIME_DUPLICATE_PATH'
+            $byName[$name]=$entry
+        }
+        Require ($byName.ContainsKey('RUNTIME_MANIFEST.json')) 'RUNTIME_MANIFEST_MISSING'
+        $manifestEntry=$byName['RUNTIME_MANIFEST.json']
+        Require ($manifestEntry.Length -le 4194304) 'RUNTIME_MANIFEST_OVERSIZED'
+        $reader=[IO.StreamReader]::new($manifestEntry.Open(),[Text.Encoding]::UTF8,$true,4096,$false)
+        try { $meta=$reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop }
+        finally { $reader.Dispose() }
+        Require ($meta.schema -is [string] -and $meta.schema -eq 'cyberdefender.pinned-python-runtime.v1') 'RUNTIME_SCHEMA_INVALID'
+        Require ($null -ne $meta.python -and $meta.python.name -is [string] -and $meta.python.sha256 -is [string]) 'RUNTIME_PYTHON_PROVENANCE_INVALID'
+        Require ($meta.python.name -eq 'python-3.14.7-amd64.zip' -and $meta.python.sha256 -eq 'ac1a727a71738e11de80b76e975f9b8a258aea6412bfc31696b929d59c6aafd0') 'RUNTIME_PYTHON_PROVENANCE_INVALID'
+        $expectedWheels=@(
+            'cffi-2.1.1-cp314-cp314-win_amd64.whl=3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48',
+            'cryptography-50.0.2-cp311-abi3-win_amd64.whl=7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c',
+            'psutil-7.2.2-cp37-abi3-win_amd64.whl=eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988',
+            'pycparser-3.11-py3-none-any.whl=51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80',
+            'pywin32-312-cp314-cp314-win_amd64.whl=a4dd3a848290ef724347b19f301045831d8e802fa4464f491b98b1e0a081432e'
+        )
+        Require ($meta.wheels -is [Object[]] -and @($meta.wheels).Count -eq 5) 'RUNTIME_WHEEL_PROVENANCE_INVALID'
+        Require (@($meta.wheels | Where-Object { -not ($_.name -is [string]) -or -not ($_.sha256 -is [string]) }).Count -eq 0) 'RUNTIME_WHEEL_PROVENANCE_INVALID'
+        $actualWheels=@($meta.wheels | ForEach-Object { $_.name + '=' + $_.sha256 } | Sort-Object)
+        Require (($actualWheels -join '|') -eq (($expectedWheels | Sort-Object) -join '|')) 'RUNTIME_WHEEL_PROVENANCE_INVALID'
+        Require ($meta.files -is [Object[]] -and (Test-JsonInteger $meta.file_count) -and (Test-JsonInteger $meta.total_bytes)) 'RUNTIME_MANIFEST_TYPE_INVALID'
+        $files=@($meta.files)
+        Require ($files.Count -gt 0 -and $files.Count -lt 4000 -and $entries.Count -eq $files.Count + 1) 'RUNTIME_MANIFEST_COUNT_INVALID'
+        $seen=@{}
+        $total=0L
+        foreach($record in $files) {
+            Require ($record.path -is [string] -and (Test-JsonInteger $record.length) -and $record.sha256 -is [string]) 'RUNTIME_RECORD_INVALID'
+            $name=$record.path
+            $length=[long]$record.length
+            $digest=$record.sha256
+            Require (Test-SafeRuntimePath $name) 'RUNTIME_PATH_INVALID'
+            Require (-not $name.EndsWith('.') -and -not $name.EndsWith(' ') -and -not $name.ToLowerInvariant().EndsWith('.pth')) 'RUNTIME_PATH_INVALID'
+            Require ($name -ne 'RUNTIME_MANIFEST.json') 'RUNTIME_MANIFEST_MEMBERSHIP_INVALID'
+            Require (-not $seen.ContainsKey($name) -and $byName.ContainsKey($name)) 'RUNTIME_MANIFEST_MEMBERSHIP_INVALID'
+            Require ($length -ge 0 -and $length -le 33554432 -and $digest -match '^[0-9a-f]{64}$') 'RUNTIME_RECORD_INVALID'
+            $entry=$byName[$name]
+            Require ([long]$entry.Length -eq $length) 'RUNTIME_MEMBER_LENGTH_INVALID'
+            $fileType=(([int64]$entry.ExternalAttributes -shr 16) -band 0xF000)
+            Require ($fileType -eq 0 -or $fileType -eq 0x8000) 'RUNTIME_MEMBER_TYPE_INVALID'
+            $stream=$entry.Open()
+            try { $actualDigest=Get-StreamSha256Hex $stream }
+            finally { $stream.Dispose() }
+            Require ($actualDigest -eq $digest) 'RUNTIME_MEMBER_HASH_INVALID'
+            $total += $length
+            Require ($total -le 188743680) 'RUNTIME_EXPANDED_SIZE_INVALID'
+            $seen[$name]=$true
+        }
+        foreach($entryName in $byName.Keys) {
+            if($entryName -ne 'RUNTIME_MANIFEST.json') { Require ($seen.ContainsKey($entryName)) 'RUNTIME_MANIFEST_MEMBERSHIP_INVALID' }
+        }
+        foreach($requiredName in @('python.exe','python314.dll','python3.dll','vcruntime140.dll','Lib/encodings/__init__.py','DLLs/_ctypes.pyd')) {
+            Require ($seen.ContainsKey($requiredName)) 'RUNTIME_REQUIRED_FILE_MISSING'
+        }
+        Require ($total -eq [long]$meta.total_bytes -and $files.Count -eq [int]$meta.file_count) 'RUNTIME_MANIFEST_TOTAL_INVALID'
+        return [pscustomobject]@{Payload=$payload;Manifest=$meta}
+    } finally {
+        $archive.Dispose()
+        $memory.Dispose()
+    }
+}
+
+function Expand-PinnedRuntimePackage($Package,[string]$Destination) {
+    $destinationFull=[IO.Path]::GetFullPath($Destination)
+    $approvedDestination=[IO.Path]::GetFullPath((Join-Path $NewRoot 'runtime'))
+    Require ($destinationFull -eq $approvedDestination -and -not (Test-Path -LiteralPath $destinationFull)) 'RUNTIME_DESTINATION_INVALID'
+    $prefix=$destinationFull.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $memory=[IO.MemoryStream]::new([byte[]]$Package.Payload,$false)
+    $archive=[IO.Compression.ZipArchive]::new($memory,[IO.Compression.ZipArchiveMode]::Read,$false)
+    $made=$false
+    try {
+        New-Item -ItemType Directory -Path $destinationFull -ErrorAction Stop | Out-Null
+        $made=$true
+        foreach($record in @($Package.Manifest.files)) {
+            $name=[string]$record.path
+            $target=[IO.Path]::GetFullPath((Join-Path $destinationFull ($name -replace '/','\')))
+            Require ($target.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) 'RUNTIME_EXTRACTION_ESCAPE'
+            $parent=Split-Path -Parent $target
+            if(-not (Test-Path -LiteralPath $parent)){ New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop | Out-Null }
+            $entry=$archive.GetEntry($name)
+            Require ($null -ne $entry) 'RUNTIME_EXTRACTION_MEMBER_MISSING'
+            $input=$entry.Open()
+            try {
+                $output=[IO.FileStream]::new($target,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+                try {
+                    $buffer=New-Object byte[] 1048576
+                    $written=0L
+                    while(($read=$input.Read($buffer,0,$buffer.Length)) -gt 0) {
+                        $written += $read
+                        Require ($written -le [long]$record.length) 'RUNTIME_EXTRACTION_LENGTH_INVALID'
+                        $output.Write($buffer,0,$read)
+                    }
+                    $output.Flush($true)
+                } finally { $output.Dispose() }
+            } finally { $input.Dispose() }
+            Require ($written -eq [long]$record.length) 'RUNTIME_EXTRACTION_LENGTH_INVALID'
+            $writtenStream=[IO.File]::Open($target,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+            try { $writtenDigest=Get-StreamSha256Hex $writtenStream }
+            finally { $writtenStream.Dispose() }
+            Require ($writtenDigest -eq [string]$record.sha256) 'RUNTIME_POST_WRITE_HASH_INVALID'
+        }
+    } catch {
+        if($made -and $destinationFull -eq $approvedDestination){ Remove-Item -LiteralPath $destinationFull -Recurse -Force -ErrorAction SilentlyContinue }
+        throw
+    } finally {
+        $archive.Dispose()
+        $memory.Dispose()
+    }
+}
+
+function Inspect-ProtectedPathNative([string]$Path) {
+    $acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
+    $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    Require (@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') -contains $owner) 'ACL_OWNER_NOT_PRIVILEGED'
+    $privileged=@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $writeMask=0x00000002 -bor 0x00000004 -bor 0x00000010 -bor 0x00000040 -bor 0x00000100 -bor 0x00010000 -bor 0x00040000 -bor 0x00080000 -bor 0x10000000 -bor 0x40000000
+    $rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
+    foreach($rule in $rules) {
+        $sid=$rule.IdentityReference.Value
+        if($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $privileged -notcontains $sid) {
+            Require (([int64]$rule.FileSystemRights -band $writeMask) -eq 0) 'ACL_BROAD_WRITE_OR_CONTROL'
+        }
+    }
+}
+
+function Verify-ExtractedRuntime($Package,[string]$Destination) {
+    $destinationFull=[IO.Path]::GetFullPath($Destination)
+    Require ($destinationFull -eq [IO.Path]::GetFullPath((Join-Path $NewRoot 'runtime'))) 'RUNTIME_DESTINATION_INVALID'
+    foreach($record in @($Package.Manifest.files)) {
+        $target=[IO.Path]::GetFullPath((Join-Path $destinationFull (([string]$record.path) -replace '/','\')))
+        Require (Test-Path -LiteralPath $target -PathType Leaf) 'RUNTIME_POST_WRITE_FILE_MISSING'
+        $stream=[IO.File]::Open($target,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        try { $digest=Get-StreamSha256Hex $stream }
+        finally { $stream.Dispose() }
+        Require ($digest -eq [string]$record.sha256) 'RUNTIME_POST_WRITE_HASH_INVALID'
+    }
 }
 
 function Service-Info([string]$Name) {
@@ -116,7 +319,7 @@ function Inspect-NoReparse([string]$Path) {
 
 function Inspect-ProtectedPath([string]$Path) {
     Require (Test-Path -LiteralPath $AclVerifier -PathType Leaf) 'ACL_VERIFIER_MISSING'
-    & $Python $AclVerifier $Path | Out-Host
+    & $Python -I $AclVerifier $Path | Out-Host
     Require ($LASTEXITCODE -eq 0) ('ACL_SECURITY_GATE_FAILED:' + $Path)
 }
 
@@ -148,13 +351,7 @@ function Set-AgentBinary([string]$Value) {
 }
 
 function Authorize-AgentProbe() {
-    $previous=Get-Location
-    try {
-        Set-Location -LiteralPath $OldApp
-        Run-Checked $Python @('-m','agent.service_crash_store','authorize-probe','--service',$AgentName)
-    } finally {
-        Set-Location -LiteralPath $previous
-    }
+    Run-Checked $newPython @('-I',$newBootstrap,'--authorize-probe')
 }
 
 function Read-RuntimeSnapshot() {
@@ -302,7 +499,7 @@ function Write-AgentIdentityEvidence($Process,[string]$ExpectedPath,[datetime]$S
     }
 }
 
-function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000) {
+function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000,[string]$ExpectedExecutable=$Python) {
     $services=@(Get-CimInstance Win32_Process -Filter "Name='services.exe'" -ErrorAction Stop)
     Require ($services.Count -eq 1) 'SCM_PROCESS_IDENTITY_UNAVAILABLE'
     $servicesPid=[int]$services[0].ProcessId
@@ -330,24 +527,24 @@ function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='
             Start-Sleep -Milliseconds 100
             continue
         }
-        if([string]$process.ExecutablePath -ne $Python) {
-            Write-AgentIdentityEvidence $process $Python $StartedUtc 'EXECUTABLE_MISMATCH'
+        if([string]$process.ExecutablePath -ne $ExpectedExecutable) {
+            Write-AgentIdentityEvidence $process $ExpectedExecutable $StartedUtc 'EXECUTABLE_MISMATCH'
             throw 'AGENT_PROCESS_EXECUTABLE_UNEXPECTED'
         }
         if([int]$process.ParentProcessId -ne $servicesPid) {
-            Write-AgentIdentityEvidence $process $Python $StartedUtc 'PARENT_MISMATCH'
+            Write-AgentIdentityEvidence $process $ExpectedExecutable $StartedUtc 'PARENT_MISMATCH'
             throw 'AGENT_PROCESS_PARENT_UNEXPECTED'
         }
         if($ExpectedReleaseRoot) {
             if([string]$process.CommandLine -notlike ('*' + $ExpectedReleaseRoot + '*agent_service_bootstrap.py*')) {
-                Write-AgentIdentityEvidence $process $Python $StartedUtc 'COMMAND_MISMATCH'
+                Write-AgentIdentityEvidence $process $ExpectedExecutable $StartedUtc 'COMMAND_MISMATCH'
                 throw 'AGENT_PROCESS_COMMAND_UNEXPECTED'
             }
         }
         return [int]$service.ProcessId
     } while((Get-Date).ToUniversalTime() -lt $deadline)
-    if($staleObserved){ Write-AgentIdentityEvidence $lastProcess $Python $StartedUtc 'STALE_TIMEOUT'; throw 'AGENT_PROCESS_STALE_TIMEOUT' }
-    Write-AgentIdentityEvidence $null $Python $StartedUtc 'MISSING_TIMEOUT'
+    if($staleObserved){ Write-AgentIdentityEvidence $lastProcess $ExpectedExecutable $StartedUtc 'STALE_TIMEOUT'; throw 'AGENT_PROCESS_STALE_TIMEOUT' }
+    Write-AgentIdentityEvidence $null $ExpectedExecutable $StartedUtc 'MISSING_TIMEOUT'
     throw 'AGENT_PROCESS_MISSING_TIMEOUT'
 }
 
@@ -360,6 +557,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
         commit=$Revision
         release_path=$NewRoot
         zip_sha256=$ApprovedZipSHA256.ToLowerInvariant()
+        runtime_zip_sha256=$ApprovedRuntimeZipSHA256.ToLowerInvariant()
         completed_at=(Get-Date).ToUniversalTime().ToString('o')
         agent_pid=$AgentPid
         agent_binpath=$NewBin
@@ -378,7 +576,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
 }
 
 # Consolidated read-only precheck.
-foreach($required in ($Python,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$LocalToken)) {
+foreach($required in ($Python,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$RuntimeZip,$LocalToken)) {
     Require (Test-Path -LiteralPath $required -PathType Leaf) ('REQUIRED_FILE_MISSING:' + $required)
     Inspect-NoReparse $required
 }
@@ -408,8 +606,9 @@ if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
         Inspect-ProtectedPath (Split-Path $RemoteToken -Parent)
     }
 }
-Run-Checked $Python @($Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
-Run-Checked $Python @($Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+Run-Checked $Python @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+$runtimePackage=Read-PinnedRuntimePackage $RuntimeZip $ApprovedRuntimeZipSHA256
+Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 Verify-Others $otherBaseline
 Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
 if(-not $Apply) {
@@ -423,16 +622,26 @@ Require (-not (Test-Path -LiteralPath $NewRoot)) 'VERSION_ALREADY_STAGED_REFUSE_
 New-Item -ItemType Directory -Path $Releases -Force | Out-Null
 Inspect-NoReparse $Releases
 Inspect-ProtectedPath $Releases
-Run-Checked $Python @($Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
-Run-Checked $Python @($Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
+Run-Checked $Python @('-I',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
+Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
 Inspect-NoReparse $NewRoot
 Inspect-ProtectedPath $NewRoot
-Run-Checked $Python @($Probe,$NewRoot,'--runtime')
+Run-Checked $Python @('-I',$Probe,$NewRoot,'--runtime')
+$newRuntime=Join-Path $NewRoot 'runtime'
+Expand-PinnedRuntimePackage $runtimePackage $newRuntime
+Inspect-NoReparse $newRuntime
+Inspect-ProtectedPathNative $newRuntime
+Verify-ExtractedRuntime $runtimePackage $newRuntime
+$newPython=Join-Path $newRuntime 'python.exe'
+$pythonSignature=Get-AuthenticodeSignature -LiteralPath $newPython
+Require ([string]$pythonSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
+Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
+$newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
+Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')
 Verify-Others $otherBaseline
 Verify-LocalCompanions
 
-$newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
-$newBin='"' + $Python + '" "' + $newBootstrap + '" --service-run'
+$newBin='"' + $newPython + '" -I "' + $newBootstrap + '" --service-run'
 $didSwitch=$false
 $candidateStarted=$false
 try {
@@ -443,7 +652,7 @@ try {
     $startedAt=(Get-Date).ToUniversalTime()
     Start-Agent
     $candidateStarted=$true
-    $agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt
+    $agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt 5000 $newPython
     $runtimeEvidence=Await-HealthyRuntime $startedAt 240
     Verify-Others $otherBaseline
     Verify-LocalCompanions

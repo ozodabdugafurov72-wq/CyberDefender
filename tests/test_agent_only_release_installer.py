@@ -21,6 +21,12 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 release_manager = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release_manager)
+RUNTIME_SPEC = importlib.util.spec_from_file_location(
+    "agent_runtime_manager", TOOLS / "runtime_manager.py"
+)
+assert RUNTIME_SPEC and RUNTIME_SPEC.loader
+runtime_manager = importlib.util.module_from_spec(RUNTIME_SPEC)
+RUNTIME_SPEC.loader.exec_module(runtime_manager)
 
 
 def make_release(path: Path, files: dict[str, bytes] | None = None) -> str:
@@ -86,6 +92,57 @@ class ReleaseManagerTests(unittest.TestCase):
                 stream.write(b"tamper")
             with self.assertRaisesRegex(ValueError, "SHA256"):
                 release_manager.verify(package, digest, COMMIT)
+
+
+class RuntimeManagerTests(unittest.TestCase):
+    def _runtime_zip(self, path: Path, extra: dict[str, bytes] | None = None) -> str:
+        files = {name: b"runtime" for name in runtime_manager.REQUIRED}
+        files.update(extra or {})
+        records = [
+            {"path": name, "length": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            for name, data in sorted(files.items())
+        ]
+        manifest = {
+            "schema": runtime_manager.SCHEMA,
+            "python": runtime_manager.PYTHON_INPUT,
+            "wheels": [
+                {"name": name, "sha256": digest}
+                for name, digest in sorted(runtime_manager.WHEEL_INPUTS.items())
+            ],
+            "file_count": len(records),
+            "total_bytes": sum(item["length"] for item in records),
+            "files": records,
+        }
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, data in files.items():
+                archive.writestr(name, data)
+            archive.writestr("RUNTIME_MANIFEST.json", json.dumps(manifest))
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def test_pinned_runtime_verifies_and_extracts_once(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            package = base / "runtime.zip"
+            digest = self._runtime_zip(package)
+            destination = base / "release" / "runtime"
+            destination.parent.mkdir()
+            self.assertEqual(runtime_manager.verify(package, digest)["status"], "PINNED_RUNTIME_VERIFIED")
+            result = runtime_manager.extract(package, destination, digest)
+            self.assertEqual(result["status"], "PINNED_RUNTIME_EXTRACTED")
+            self.assertTrue((destination / "python.exe").is_file())
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                runtime_manager.extract(package, destination, digest)
+
+    def test_runtime_archive_rejects_escape_and_tamper(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw)
+            package = base / "runtime.zip"
+            digest = self._runtime_zip(package, {"../escape.dll": b"x"})
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                runtime_manager.verify(package, digest)
+            package.write_bytes(package.read_bytes() + b"tamper")
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                runtime_manager.verify(package, digest)
 
 
 class InstallerContractTests(unittest.TestCase):
@@ -223,14 +280,14 @@ if($evidence.expected.sha256 -notmatch '^[0-9a-f]{{64}}$' -or $evidence.observed
     def test_apply_success_path_avoids_reserved_pid_variable_in_windows_powershell_51(self) -> None:
         assignment = next(line.strip() for line in self.source.splitlines() if "=Verify-AgentProcess $newBin" in line)
         receipt = next(line.strip() for line in self.source.splitlines() if "=Write-Receipt $agentBaseline" in line)
-        self.assertEqual(assignment, "$agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt")
+        self.assertEqual(assignment, "$agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt 5000 $newPython")
         self.assertIn("$agentPid $newBin", receipt)
         self.assertNotRegex(assignment + receipt, r"(?i)\$pid\b")
         body = f"""
 $ErrorActionPreference='Stop'
 function Verify-AgentProcess {{ return 4321 }}
 function Write-Receipt {{ param($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string]$NewBin); if($AgentPid -ne 4321){{throw 'PID_NOT_FORWARDED'}}; return 'receipt' }}
-$newBin='approved-bin';$NewRoot='release';$startedAt=(Get-Date).ToUniversalTime();$agentBaseline=@{{}};$otherBaseline=@();$runtimeEvidence=@()
+$newBin='approved-bin';$newPython='approved-python';$NewRoot='release';$startedAt=(Get-Date).ToUniversalTime();$agentBaseline=@{{}};$otherBaseline=@();$runtimeEvidence=@()
 {assignment}
 {receipt}
 if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
@@ -250,10 +307,109 @@ if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
             "$RecoverStoppedAgent.IsPresent",
             "$AuthorizeRecoveryProbe",
             "$Revision=$ApprovedCommit.ToLowerInvariant()",
-            "'agent.service_crash_store','authorize-probe','--service',$AgentName",
+            "Run-Checked $newPython @('-I',$newBootstrap,'--authorize-probe')",
             "HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED'",
         ):
             self.assertIn(required, self.source)
+
+    def test_pinned_protected_runtime_is_verified_before_scm_switch(self) -> None:
+        for required in (
+            "[Parameter(Mandatory=$true)][string]$RuntimeZip",
+            "[Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedRuntimeZipSHA256",
+            "$runtimePackage=Read-PinnedRuntimePackage $RuntimeZip $ApprovedRuntimeZipSHA256",
+            "Expand-PinnedRuntimePackage $runtimePackage $newRuntime",
+            "PINNED_RUNTIME_SIGNATURE_INVALID",
+            "PINNED_RUNTIME_SIGNER_INVALID",
+            "Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')",
+            "$newBin='\"' + $newPython + '\" -I \"' + $newBootstrap + '\" --service-run'",
+        ):
+            self.assertIn(required, self.source)
+        self.assertNotIn("$RuntimeManager", self.source)
+        after_runtime_extract = self.source.split("Expand-PinnedRuntimePackage $runtimePackage $newRuntime", 1)[1]
+        self.assertNotIn("Run-Checked $Python", after_runtime_extract)
+        self.assertNotIn("& $Python", after_runtime_extract)
+        self.assertNotIn("Inspect-ProtectedPath $newRuntime", after_runtime_extract)
+        self.assertIn("Inspect-ProtectedPathNative $newRuntime", after_runtime_extract)
+        self.assertIn("Verify-ExtractedRuntime $runtimePackage $newRuntime", after_runtime_extract)
+        self.assertIn("$privileged -notcontains $sid", self.source)
+        self.assertIn("sys.argv = [\"service_crash_store\", \"authorize-probe\", \"--service\", \"CyberDefenderAgent\"]", (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8"))
+        self.assertLess(
+            self.source.index("Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')"),
+            self.source.index("Set-AgentBinary $newBin"),
+        )
+
+    def test_powershell_51_runtime_snapshot_verifies_and_extracts_without_old_python(self) -> None:
+        start = self.source.index("function Require")
+        end = self.source.index("function Service-Info", start)
+        functions = self.source[start:end]
+        self.assertNotIn("Run-Checked $Python", functions)
+        with tempfile.TemporaryDirectory(prefix="cd-runtime-ps51-") as raw:
+            base = Path(raw)
+            package = base / "runtime.zip"
+            digest = RuntimeManagerTests()._runtime_zip(package)
+            new_root = base / "release"
+            escaped_package = str(package).replace("'", "''")
+            escaped_root = str(new_root).replace("'", "''")
+            body = f"""
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+Add-Type -AssemblyName System.IO.Compression
+$NewRoot='{escaped_root}'
+{functions}
+$package=Read-PinnedRuntimePackage '{escaped_package}' '{digest}'
+Expand-PinnedRuntimePackage $package (Join-Path $NewRoot 'runtime')
+if(-not (Test-Path -LiteralPath (Join-Path $NewRoot 'runtime\\python.exe') -PathType Leaf)){{throw 'RUNTIME_NOT_EXTRACTED'}}
+'PASS'
+"""
+            completed = subprocess.run(
+                [
+                    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "RemoteSigned",
+                    "-Command",
+                    body,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            self.assertIn("PASS", completed.stdout)
+
+    def test_native_acl_rejects_unprivileged_delete_child_right(self) -> None:
+        start = self.source.index("function Inspect-ProtectedPathNative")
+        end = self.source.index("function Verify-ExtractedRuntime", start)
+        function = self.source[start:end]
+        body = f"""
+$ErrorActionPreference='Stop'
+function Require([bool]$Condition,[string]$Message){{if(-not $Condition){{throw $Message}}}}
+function Get-Acl{{
+    $rule=[pscustomobject]@{{
+        IdentityReference=[pscustomobject]@{{Value='S-1-5-21-1-2-3-1001'}}
+        AccessControlType=[Security.AccessControl.AccessControlType]::Allow
+        FileSystemRights=[Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles
+    }}
+    $acl=[pscustomobject]@{{Rule=$rule}}
+    $acl|Add-Member ScriptMethod GetOwner {{param($type)[pscustomobject]@{{Value='S-1-5-18'}}}}
+    $acl|Add-Member ScriptMethod GetAccessRules {{param($explicit,$inherited,$type)@($this.Rule)}}
+    return $acl
+}}
+{function}
+try{{Inspect-ProtectedPathNative 'C:\\protected';throw 'EXPECTED_ACL_FAILURE'}}catch{{if($_.Exception.Message -ne 'ACL_BROAD_WRITE_OR_CONTROL'){{throw}}}}
+'PASS'
+"""
+        completed = subprocess.run(
+            [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-Command", body],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("PASS", completed.stdout)
 
     def test_runtime_gate_is_real_and_strict(self) -> None:
         for required in (
