@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,9 +26,13 @@ def main() -> int:
         )
         bootstrap = release / "agent_service_bootstrap.py"
         shutil.copyfile(source, bootstrap)
+        (base / "Temp").mkdir()
+        environment = os.environ.copy()
+        environment["WINDIR"] = str(base)
         result = subprocess.run(
             [sys.executable, str(bootstrap), "--service-run"],
             cwd=base,
+            env=environment,
             capture_output=True,
             text=True,
             check=False,
