@@ -104,8 +104,18 @@ class InstallerContractTests(unittest.TestCase):
             "ExecutionPolicy Bypass",
         ):
             self.assertNotIn(forbidden, self.source)
-        self.assertIn("& sc.exe config $AgentName 'binPath=' $Value", self.source)
+        self.assertIn("Invoke-CimMethod", self.source)
         self.assertIn("Stop-Service -Name $AgentName", self.source)
+
+    def test_scm_binary_update_uses_typed_cim_pathname(self) -> None:
+        start = self.source.index("function Set-AgentBinary")
+        end = self.source.index("function Authorize-AgentProbe", start)
+        function = self.source[start:end]
+        self.assertNotIn("sc.exe", function)
+        self.assertIn("-MethodName Change", function)
+        self.assertIn("@{PathName=$Value}", function)
+        self.assertIn("SCM_BINARY_UPDATE_FAILED:", function)
+        self.assertIn("SCM_BINARY_READBACK_MISMATCH", function)
 
     def test_stopped_recovery_and_probe_are_explicit(self) -> None:
         for required in (

@@ -139,8 +139,10 @@ function Start-Agent() {
 }
 
 function Set-AgentBinary([string]$Value) {
-    & sc.exe config $AgentName 'binPath=' $Value | Out-Host
-    if($LASTEXITCODE -ne 0){ throw ('SCM_BINARY_UPDATE_FAILED:' + $LASTEXITCODE) }
+    $service=Service-Info $AgentName
+    $result=Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{PathName=$Value} -ErrorAction Stop
+    $returnCode=[int]$result.ReturnValue
+    if($returnCode -ne 0){ throw ('SCM_BINARY_UPDATE_FAILED:' + $returnCode) }
     Require ((Service-Info $AgentName).PathName -eq $Value) 'SCM_BINARY_READBACK_MISMATCH'
 }
 
