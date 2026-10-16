@@ -29,7 +29,7 @@ $Probe=Join-Path $ToolsRoot 'isolated_import_probe.py'
 $AclVerifier=Join-Path $ScriptRoot 'verify_windows_acl.py'
 $ProductRoot=Join-Path $env:ProgramFiles 'CyberDefender'
 $OldApp=Join-Path $ProductRoot 'app'
-$Python=Join-Path $OldApp '.venv\Scripts\python.exe'
+$LegacyPython=Join-Path $OldApp '.venv\Scripts\python.exe'
 $Releases=Join-Path $ProductRoot 'agent-releases'
 $NewRoot=Join-Path $Releases $Revision
 $StateBase=Join-Path $env:ProgramData 'CyberDefender'
@@ -174,17 +174,30 @@ function Read-PinnedRuntimePackage([string]$Path,[string]$ApprovedSha256) {
     }
 }
 
-function Expand-PinnedRuntimePackage($Package,[string]$Destination) {
+function New-ProtectedDirectory([string]$Path) {
+    Require (-not (Test-Path -LiteralPath $Path)) 'PROTECTED_DIRECTORY_ALREADY_EXISTS'
+    [void](New-Item -ItemType Directory -Path $Path -ErrorAction Stop)
+    $acl=New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true,$false)
+    foreach($sid in @('S-1-5-18','S-1-5-32-544')) {
+        $identity=New-Object Security.Principal.SecurityIdentifier($sid)
+        $rule=New-Object Security.AccessControl.FileSystemAccessRule($identity,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+        [void]$acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl -ErrorAction Stop
+    Inspect-NoReparse $Path
+}
+
+function Expand-PinnedRuntimePackage($Package,[string]$Destination,[string]$ApprovedDestination) {
     $destinationFull=[IO.Path]::GetFullPath($Destination)
-    $approvedDestination=[IO.Path]::GetFullPath((Join-Path $NewRoot 'runtime'))
-    Require ($destinationFull -eq $approvedDestination -and -not (Test-Path -LiteralPath $destinationFull)) 'RUNTIME_DESTINATION_INVALID'
+    $approvedDestinationFull=[IO.Path]::GetFullPath($ApprovedDestination)
+    Require ($destinationFull -eq $approvedDestinationFull) 'RUNTIME_DESTINATION_INVALID'
+    Require (Test-Path -LiteralPath $destinationFull -PathType Container) 'RUNTIME_DESTINATION_INVALID'
+    Require (@(Get-ChildItem -LiteralPath $destinationFull -Force).Count -eq 0) 'RUNTIME_DESTINATION_NOT_EMPTY'
     $prefix=$destinationFull.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $memory=[IO.MemoryStream]::new([byte[]]$Package.Payload,$false)
     $archive=[IO.Compression.ZipArchive]::new($memory,[IO.Compression.ZipArchiveMode]::Read,$false)
-    $made=$false
     try {
-        New-Item -ItemType Directory -Path $destinationFull -ErrorAction Stop | Out-Null
-        $made=$true
         foreach($record in @($Package.Manifest.files)) {
             $name=[string]$record.path
             $target=[IO.Path]::GetFullPath((Join-Path $destinationFull ($name -replace '/','\')))
@@ -214,7 +227,6 @@ function Expand-PinnedRuntimePackage($Package,[string]$Destination) {
             Require ($writtenDigest -eq [string]$record.sha256) 'RUNTIME_POST_WRITE_HASH_INVALID'
         }
     } catch {
-        if($made -and $destinationFull -eq $approvedDestination){ Remove-Item -LiteralPath $destinationFull -Recurse -Force -ErrorAction SilentlyContinue }
         throw
     } finally {
         $archive.Dispose()
@@ -237,9 +249,9 @@ function Inspect-ProtectedPathNative([string]$Path) {
     }
 }
 
-function Verify-ExtractedRuntime($Package,[string]$Destination) {
+function Verify-ExtractedRuntime($Package,[string]$Destination,[string]$ApprovedDestination) {
     $destinationFull=[IO.Path]::GetFullPath($Destination)
-    Require ($destinationFull -eq [IO.Path]::GetFullPath((Join-Path $NewRoot 'runtime'))) 'RUNTIME_DESTINATION_INVALID'
+    Require ($destinationFull -eq [IO.Path]::GetFullPath($ApprovedDestination)) 'RUNTIME_DESTINATION_INVALID'
     foreach($record in @($Package.Manifest.files)) {
         $target=[IO.Path]::GetFullPath((Join-Path $destinationFull (([string]$record.path) -replace '/','\')))
         Require (Test-Path -LiteralPath $target -PathType Leaf) 'RUNTIME_POST_WRITE_FILE_MISSING'
@@ -368,9 +380,9 @@ function Inspect-NoReparse([string]$Path) {
     }
 }
 
-function Inspect-ProtectedPath([string]$Path) {
+function Inspect-ProtectedPath([string]$Path,[string]$Interpreter) {
     Require (Test-Path -LiteralPath $AclVerifier -PathType Leaf) 'ACL_VERIFIER_MISSING'
-    & $Python -I $AclVerifier $Path | Out-Host
+    & $Interpreter -I $AclVerifier $Path | Out-Host
     Require ($LASTEXITCODE -eq 0) ('ACL_SECURITY_GATE_FAILED:' + $Path)
 }
 
@@ -426,12 +438,16 @@ function Runtime-IsHealthy($Snapshot) {
     )
 }
 
-function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=240) {
+function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int]$MinimumSnapshotSpacingSeconds=60,[int]$StableSeconds=900) {
     $deadline=(Get-Date).ToUniversalTime().AddSeconds($TimeoutSeconds)
     $observations=@()
     $lastStamp=[datetime]::MinValue
+    $initialPid=[int](Service-Info $AgentName).ProcessId
+    Require ($initialPid -gt 0) 'AGENT_PID_MISSING'
     while((Get-Date).ToUniversalTime() -lt $deadline) {
-        Require ((Service-Info $AgentName).State -eq 'Running') 'AGENT_SERVICE_NOT_RUNNING'
+        $service=Service-Info $AgentName
+        Require ($service.State -eq 'Running') 'AGENT_SERVICE_NOT_RUNNING'
+        Require ([int]$service.ProcessId -eq $initialPid) 'AGENT_PID_CHANGED_DURING_STABILITY'
         if(Test-Path -LiteralPath $RuntimeFile -PathType Leaf) {
             $item=Get-Item -LiteralPath $RuntimeFile
             $stamp=$item.LastWriteTimeUtc
@@ -439,10 +455,11 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=240) {
                 $lastStamp=$stamp
                 try {
                     $snapshot=Read-RuntimeSnapshot
-                    if(Runtime-IsHealthy $snapshot) {
+                    if(Runtime-IsHealthy $snapshot -and ($observations.Count -eq 0 -or ($stamp-$observations[-1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds)) {
                         $observations+=,[pscustomobject]@{
                             observed_at=(Get-Date).ToUniversalTime().ToString('o')
                             file_timestamp=$stamp.ToString('o')
+                            file_timestamp_utc=$stamp
                             cycle_count=[int]$snapshot.runtime.cycle_count
                             component_failures=[int]$snapshot.runtime.component_failures
                             events_acked=[int]$snapshot.runtime.events_acked
@@ -461,7 +478,15 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=240) {
         Start-Sleep -Seconds 5
     }
     Require ($observations.Count -ge 3) 'RUNTIME_HEALTH_GATE_TIMEOUT'
-    Start-Sleep -Seconds 20
+    Require (($observations[1].file_timestamp_utc-$observations[0].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) 'RUNTIME_SNAPSHOT_SPACING_INVALID'
+    Require (($observations[2].file_timestamp_utc-$observations[1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) 'RUNTIME_SNAPSHOT_SPACING_INVALID'
+    $stableDeadline=(Get-Date).ToUniversalTime().AddSeconds($StableSeconds)
+    while((Get-Date).ToUniversalTime() -lt $stableDeadline) {
+        $service=Service-Info $AgentName
+        Require ($service.State -eq 'Running') 'AGENT_SERVICE_NOT_RUNNING'
+        Require ([int]$service.ProcessId -eq $initialPid) 'AGENT_PID_CHANGED_DURING_STABILITY'
+        Start-Sleep -Seconds ([Math]::Min(5,[Math]::Max(1,$StableSeconds)))
+    }
     $finalItem=Get-Item -LiteralPath $RuntimeFile
     Require ((((Get-Date).ToUniversalTime()-$finalItem.LastWriteTimeUtc).TotalSeconds -le 30)) 'RUNTIME_SUSTAINED_STATE_STALE'
     $final=Read-RuntimeSnapshot
@@ -554,7 +579,12 @@ function Write-AgentIdentityEvidence($Process,[string]$ExpectedPath,[datetime]$S
     }
 }
 
-function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000,[string]$ExpectedExecutable=$Python) {
+function Verify-AgentProcess([string]$ExpectedBin,[string]$ExpectedReleaseRoot='',[datetime]$StartedUtc=[datetime]::MinValue,[int]$TimeoutMilliseconds=5000,[string]$ExpectedExecutable='') {
+    if(-not $ExpectedExecutable) {
+        $ExpectedExecutable=[string](Get-Variable -Name LegacyPython -ValueOnly -ErrorAction SilentlyContinue)
+        if(-not $ExpectedExecutable){$ExpectedExecutable=[string](Get-Variable -Name Python -ValueOnly -ErrorAction SilentlyContinue)}
+    }
+    Require ([bool]$ExpectedExecutable) 'AGENT_EXPECTED_EXECUTABLE_MISSING'
     $services=@(Get-CimInstance Win32_Process -Filter "Name='services.exe'" -ErrorAction Stop)
     Require ($services.Count -eq 1) 'SCM_PROCESS_IDENTITY_UNAVAILABLE'
     $servicesPid=[int]$services[0].ProcessId
@@ -619,7 +649,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
         original_agent_state=$Original.State
         original_agent_binpath=$Original.PathName
         other_services_unchanged=$true
-        companion_degraded_acknowledged=[bool]$AcknowledgeCompanionDegraded.IsPresent
+        companion_degraded_acknowledged=[bool]($null -ne $AcknowledgeCompanionDegraded -and $AcknowledgeCompanionDegraded.IsPresent)
         companion_baseline=@($OtherServices | ForEach-Object {
             $entry=$Others[$_]
             [ordered]@{service=$_;state=$entry.State;listener_present=$entry.ListenerPresent;health_code=$entry.HealthCode}
@@ -636,12 +666,12 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
 }
 
 # Consolidated read-only precheck.
-foreach($required in ($Python,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$RuntimeZip,$LocalToken)) {
+foreach($required in ($LegacyPython,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$RuntimeZip,$LocalToken)) {
     Require (Test-Path -LiteralPath $required -PathType Leaf) ('REQUIRED_FILE_MISSING:' + $required)
     Inspect-NoReparse $required
 }
 $agentBaseline=Capture-Service $AgentName
-$expectedInstalledBin='"' + $Python + '" -m agent.windows_service --service-run'
+$expectedInstalledBin='"' + $LegacyPython + '" -m agent.windows_service --service-run'
 Require ($agentBaseline.PathName -eq $expectedInstalledBin) 'AGENT_ORIGINAL_PATH_NOT_RECOGNIZED'
 Require ($agentBaseline.StartMode -eq 'Auto') 'AGENT_STARTMODE_NOT_AUTO'
 Require ($agentBaseline.StartName -eq 'LocalSystem') 'AGENT_IDENTITY_UNEXPECTED'
@@ -656,50 +686,66 @@ $otherBaseline=Capture-Others
 Assert-CompanionBaseline $otherBaseline
 Inspect-NoReparse $ProductRoot
 Inspect-NoReparse $Releases
-Inspect-ProtectedPath $ProductRoot
-if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
-    $url=(Get-Content -LiteralPath $OriginFile -Raw -Encoding Ascii).Trim().TrimEnd('/')
-    Require ($url -eq 'https://cyberdefender-staging.up.railway.app' -or $url -eq 'http://127.0.0.1:8785') 'UNAPPROVED_DISTRIBUTION_ORIGIN'
-    if($url -ne 'http://127.0.0.1:8785') {
-        Require (Test-Path -LiteralPath $RemoteToken -PathType Leaf) 'REMOTE_FLEET_TOKEN_MISSING'
-        Inspect-NoReparse $RemoteToken
-        Inspect-ProtectedPath (Split-Path $RemoteToken -Parent)
-    }
-}
-Run-Checked $Python @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 $runtimePackage=Read-PinnedRuntimePackage $RuntimeZip $ApprovedRuntimeZipSHA256
-Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
-Run-Checked $Python @('-I',$Bootstrap,'--recovery-plan-copy')
-Verify-Others $otherBaseline
-Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion snapshots verified.' -ForegroundColor Green
-if(-not $Apply) {
+Require-Administrator
+$PreflightRoot=Join-Path ([IO.Path]::GetTempPath()) ('CyberDefenderReleasePlan-' + [Guid]::NewGuid().ToString('N'))
+$PreflightPython=Join-Path $PreflightRoot 'python.exe'
+$planOnly=-not $Apply.IsPresent
+try {
+    New-ProtectedDirectory $PreflightRoot
+    Expand-PinnedRuntimePackage $runtimePackage $PreflightRoot $PreflightRoot
+    Verify-ExtractedRuntime $runtimePackage $PreflightRoot $PreflightRoot
+    $preflightSignature=Get-AuthenticodeSignature -LiteralPath $PreflightPython
+    Require ([string]$preflightSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
+    Require ([string]$preflightSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
+    Inspect-ProtectedPath $ProductRoot $PreflightPython
+    if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
+        $url=(Get-Content -LiteralPath $OriginFile -Raw -Encoding Ascii).Trim().TrimEnd('/')
+        Require ($url -eq 'https://cyberdefender-staging.up.railway.app' -or $url -eq 'http://127.0.0.1:8785') 'UNAPPROVED_DISTRIBUTION_ORIGIN'
+        if($url -ne 'http://127.0.0.1:8785') {
+            Require (Test-Path -LiteralPath $RemoteToken -PathType Leaf) 'REMOTE_FLEET_TOKEN_MISSING'
+            Inspect-NoReparse $RemoteToken
+            Inspect-ProtectedPath (Split-Path $RemoteToken -Parent) $PreflightPython
+        }
+    }
+    Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+    Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+    Run-Checked $PreflightPython @('-I',$Bootstrap,'--recovery-plan-copy')
+    Verify-Others $otherBaseline
+    Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion snapshots verified.' -ForegroundColor Green
+    if($Apply) {
+        Require ($HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED') 'HOST_ACKNOWLEDGEMENT_REQUIRED'
+        Require (-not (Test-Path -LiteralPath $NewRoot)) 'VERSION_ALREADY_STAGED_REFUSE_OVERWRITE'
+        New-Item -ItemType Directory -Path $Releases -Force | Out-Null
+        Inspect-NoReparse $Releases
+        Inspect-ProtectedPath $Releases $PreflightPython
+        Run-Checked $PreflightPython @('-I',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
+        Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
+        Inspect-NoReparse $NewRoot
+        Inspect-ProtectedPath $NewRoot $PreflightPython
+        $newRuntime=Join-Path $NewRoot 'runtime'
+        New-ProtectedDirectory $newRuntime
+        Expand-PinnedRuntimePackage $runtimePackage $newRuntime $newRuntime
+        Inspect-NoReparse $newRuntime
+        Inspect-ProtectedPathNative $newRuntime
+        Verify-ExtractedRuntime $runtimePackage $newRuntime $newRuntime
+        $newPython=Join-Path $newRuntime 'python.exe'
+        $pythonSignature=Get-AuthenticodeSignature -LiteralPath $newPython
+        Require ([string]$pythonSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
+        Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
+        $newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
+        Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')
+        Run-Checked $newPython @('-I',$Probe,$NewRoot,'--runtime')
+        Verify-Others $otherBaseline
+    }
+} finally {
+    if(Test-Path -LiteralPath $PreflightRoot) { Remove-Item -LiteralPath $PreflightRoot -Recurse -Force -ErrorAction Stop }
+    Require (-not (Test-Path -LiteralPath $PreflightRoot)) 'PRECHECK_RUNTIME_CLEANUP_FAILED'
+}
+if($planOnly) {
     Write-Host 'PLAN_ONLY: no release files or service settings changed.'
     exit 0
 }
-
-Require ($HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED') 'HOST_ACKNOWLEDGEMENT_REQUIRED'
-Require-Administrator
-Require (-not (Test-Path -LiteralPath $NewRoot)) 'VERSION_ALREADY_STAGED_REFUSE_OVERWRITE'
-New-Item -ItemType Directory -Path $Releases -Force | Out-Null
-Inspect-NoReparse $Releases
-Inspect-ProtectedPath $Releases
-Run-Checked $Python @('-I',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
-Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
-Inspect-NoReparse $NewRoot
-Inspect-ProtectedPath $NewRoot
-Run-Checked $Python @('-I',$Probe,$NewRoot,'--runtime')
-$newRuntime=Join-Path $NewRoot 'runtime'
-Expand-PinnedRuntimePackage $runtimePackage $newRuntime
-Inspect-NoReparse $newRuntime
-Inspect-ProtectedPathNative $newRuntime
-Verify-ExtractedRuntime $runtimePackage $newRuntime
-$newPython=Join-Path $newRuntime 'python.exe'
-$pythonSignature=Get-AuthenticodeSignature -LiteralPath $newPython
-Require ([string]$pythonSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
-Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
-$newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
-Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')
-Verify-Others $otherBaseline
 
 $newBin='"' + $newPython + '" -I "' + $newBootstrap + '" --service-run'
 $didSwitch=$false
@@ -714,7 +760,7 @@ try {
     Start-Agent
     $candidateStarted=$true
     $agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt 5000 $newPython
-    $runtimeEvidence=Await-HealthyRuntime $startedAt 240
+    $runtimeEvidence=Await-HealthyRuntime $startedAt 1200
     Verify-Others $otherBaseline
     $agentAfter=Capture-Service $AgentName
     Require ($agentAfter.StartMode -eq $agentBaseline.StartMode) 'AGENT_STARTMODE_CHANGED'

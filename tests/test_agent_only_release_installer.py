@@ -357,7 +357,9 @@ Add-Type -AssemblyName System.IO.Compression
 $NewRoot='{escaped_root}'
 {functions}
 $package=Read-PinnedRuntimePackage '{escaped_package}' '{digest}'
-Expand-PinnedRuntimePackage $package (Join-Path $NewRoot 'runtime')
+$runtime=Join-Path $NewRoot 'runtime'
+[void](New-Item -ItemType Directory -Path $runtime -Force)
+Expand-PinnedRuntimePackage $package $runtime $runtime
 if(-not (Test-Path -LiteralPath (Join-Path $NewRoot 'runtime\\python.exe') -PathType Leaf)){{throw 'RUNTIME_NOT_EXTRACTED'}}
 'PASS'
 """
@@ -461,6 +463,9 @@ function Inspect-NoReparse([string]$Path) {{ }}
 $Revision='{'b' * 40}'
 $NewRoot='C:\\approved-release'
 $ApprovedZipSHA256='{'a' * 64}'
+$ApprovedRuntimeZipSHA256='{'c' * 64}'
+$AcknowledgeCompanionDegraded=$false
+$OtherServices=@()
 {write_receipt}
 $Original=[pscustomobject]@{{State='Stopped';PathName='original-bin'}}
 $Others=@()
