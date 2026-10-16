@@ -62,7 +62,7 @@ class PostPlanFailureBatchTests(unittest.TestCase):
         required = (
             "[switch]$AcknowledgeCompanionDegraded",
             "COMPANION_CONTROLPLANE_UNREACHABLE",
-            "COMPANION_OWNERUI_UNREACHABLE",
+            "$OtherServices=@('CyberDefenderControlPlane')",
             "ListenerPresent",
             "COMPANION_LISTENER_CHANGED",
             "companion_degraded_acknowledged",
@@ -70,6 +70,8 @@ class PostPlanFailureBatchTests(unittest.TestCase):
         )
         for marker in required:
             self.assertIn(marker, source)
+        self.assertNotIn("Stop-Service -Name CyberDefenderOwnerUI", source)
+        self.assertNotIn("Start-Service -Name CyberDefenderOwnerUI", source)
         self.assertNotIn("function Verify-LocalCompanions", source)
         self.assertRegex(source, r"catch\s*\{\s*return\s+\[pscustomobject\]")
 

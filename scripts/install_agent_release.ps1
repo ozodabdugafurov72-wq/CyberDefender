@@ -18,7 +18,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $Revision=$ApprovedCommit.ToLowerInvariant()
 $AgentName='CyberDefenderAgent'
-$OtherServices=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')
+$OtherServices=@('CyberDefenderControlPlane')
 $ScriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolsRoot=Join-Path $ScriptRoot 'agent_release'
 $Manager=Join-Path $ToolsRoot 'release_manager.py'
@@ -290,9 +290,6 @@ function Capture-Service([string]$Name) {
 function Get-CompanionDefinition([string]$Name) {
     if($Name -eq 'CyberDefenderControlPlane') {
         return [pscustomobject]@{Port=8785;Uri='http://127.0.0.1:8785/health';Unreachable='COMPANION_CONTROLPLANE_UNREACHABLE'}
-    }
-    if($Name -eq 'CyberDefenderOwnerUI') {
-        return [pscustomobject]@{Port=8775;Uri='http://127.0.0.1:8775/owner/api/state';Unreachable='COMPANION_OWNERUI_UNREACHABLE'}
     }
     throw 'COMPANION_DEFINITION_MISSING'
 }
