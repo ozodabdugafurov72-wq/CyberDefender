@@ -115,6 +115,22 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             value["xdr"]["event_classes"] = [{"class_uid": 2005}]
         if type(self).mode == "invalid-response":
             value["responses"][0]["production_authorization"] = "GRANTED"
+        if type(self).mode == "invalid-endpoint":
+            value["endpoints"] = [{
+                "endpoint_id": "../cross-tenant",
+                "hostname": "host-a",
+                "install_state": "INSTALLED",
+                "health_state": "HEALTHY",
+                "service_state": "RUNNING",
+                "runtime_version": "2.4",
+                "resource_state": "NORMAL",
+                "first_seen": 1_900_000_000.0,
+                "last_seen": 1_900_000_001.0,
+                "telemetry_schema": "ocsf",
+                "telemetry_schema_version": "1.9.0",
+                "capabilities": ["endpoint-health"],
+                "last_observed_at": 1_900_000_001.0,
+            }]
         raw = json.dumps(value).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -169,6 +185,10 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
         self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 
         UpstreamHandler.mode = "invalid-response"
+        rejected = self.client.state()
+        self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
+
+        UpstreamHandler.mode = "invalid-endpoint"
         rejected = self.client.state()
         self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 

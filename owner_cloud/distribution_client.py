@@ -6,7 +6,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from control_plane.xdr_compat import validate_response_evidence
+from control_plane.xdr_compat import (
+    normalize_capabilities,
+    validate_endpoint_id,
+    validate_hostname,
+    validate_response_evidence,
+    validate_runtime_version,
+)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -16,12 +22,79 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class DistributionClient:
     MAX_RESPONSE = 1024 * 1024
+    _INSTALL_STATES = frozenset({"PENDING", "INSTALLED", "FAILED", "REVOKED"})
+    _HEALTH_STATES = frozenset({"UNKNOWN", "HEALTHY", "DEGRADED", "CRITICAL", "OFFLINE"})
+    _SERVICE_STATES = frozenset({
+        "UNKNOWN", "REGISTERED", "STARTING", "RUNNING", "DEGRADED",
+        "STOPPING", "STOPPED", "FAILED",
+    })
+    _RESOURCE_STATES = frozenset({"UNKNOWN", "NORMAL", "DEGRADED", "CRITICAL"})
 
     def __init__(self, base_url: str, token: str, *, timeout: float = 3.0):
         self.base_url = str(base_url).rstrip("/")
         self.token = str(token)
         self.timeout = max(0.5, min(float(timeout), 10.0))
         self._opener = urllib.request.build_opener(_NoRedirect)
+
+    @classmethod
+    def _normalized_endpoint(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("invalid endpoint")
+        allowed = {
+            "endpoint_id", "hostname", "install_state", "health_state",
+            "service_state", "runtime_version", "resource_state", "first_seen",
+            "last_seen", "telemetry_schema", "telemetry_schema_version",
+            "capabilities", "last_observed_at",
+        }
+        if set(value) != allowed:
+            raise ValueError("invalid endpoint fields")
+
+        def state(name: str, accepted: frozenset[str]) -> str:
+            current = value.get(name)
+            if not isinstance(current, str) or current not in accepted:
+                raise ValueError("invalid endpoint state")
+            return current
+
+        def timestamp(name: str, *, optional: bool = False) -> float | None:
+            current = value.get(name)
+            if optional and current is None:
+                return None
+            if isinstance(current, bool) or not isinstance(current, (int, float)):
+                raise ValueError("invalid endpoint timestamp")
+            current = float(current)
+            if not math.isfinite(current) or current < 0:
+                raise ValueError("invalid endpoint timestamp")
+            return current
+
+        schema = value.get("telemetry_schema")
+        schema_version = value.get("telemetry_schema_version")
+        capabilities = value.get("capabilities")
+        if schema == "ocsf" and schema_version == "1.9.0":
+            capabilities = list(normalize_capabilities(capabilities))
+        elif schema == "legacy" and schema_version == "unversioned" and capabilities == []:
+            capabilities = []
+        else:
+            raise ValueError("unsupported endpoint telemetry contract")
+        first_seen = timestamp("first_seen")
+        last_seen = timestamp("last_seen")
+        observed = timestamp("last_observed_at", optional=True)
+        if first_seen > last_seen or (observed is not None and observed > last_seen + 300.0):
+            raise ValueError("invalid endpoint time ordering")
+        return {
+            "endpoint_id": validate_endpoint_id(value.get("endpoint_id")),
+            "hostname": validate_hostname(value.get("hostname")),
+            "install_state": state("install_state", cls._INSTALL_STATES),
+            "health_state": state("health_state", cls._HEALTH_STATES),
+            "service_state": state("service_state", cls._SERVICE_STATES),
+            "runtime_version": validate_runtime_version(value.get("runtime_version")),
+            "resource_state": state("resource_state", cls._RESOURCE_STATES),
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+            "telemetry_schema": schema,
+            "telemetry_schema_version": schema_version,
+            "capabilities": capabilities,
+            "last_observed_at": observed,
+        }
 
     @staticmethod
     def _normalized_state(value: Any) -> dict[str, Any]:
@@ -75,6 +148,7 @@ class DistributionClient:
         endpoints = value.get("endpoints")
         if not isinstance(endpoints, list) or len(endpoints) > 100:
             raise ValueError("invalid endpoint list")
+        endpoints = [DistributionClient._normalized_endpoint(item) for item in endpoints]
         raw_responses = value.get("responses")
         if not isinstance(raw_responses, list) or len(raw_responses) > 100:
             raise ValueError("invalid response evidence list")
