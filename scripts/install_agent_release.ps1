@@ -10,7 +10,8 @@ param(
     [switch]$Apply,
     [ValidateSet('','AGENT_ONLY_AUTHORIZED')][string]$HostAcknowledgement='',
     [switch]$RecoverStoppedAgent,
-    [switch]$AuthorizeRecoveryProbe
+    [switch]$AuthorizeRecoveryProbe,
+    [switch]$AcknowledgeCompanionDegraded
 )
 
 $ErrorActionPreference='Stop'
@@ -274,34 +275,84 @@ function Capture-Service([string]$Name) {
     }
 }
 
+function Get-CompanionDefinition([string]$Name) {
+    if($Name -eq 'CyberDefenderControlPlane') {
+        return [pscustomobject]@{Port=8785;Uri='http://127.0.0.1:8785/health';Unreachable='COMPANION_CONTROLPLANE_UNREACHABLE'}
+    }
+    if($Name -eq 'CyberDefenderOwnerUI') {
+        return [pscustomobject]@{Port=8775;Uri='http://127.0.0.1:8775/owner/api/state';Unreachable='COMPANION_OWNERUI_UNREACHABLE'}
+    }
+    throw 'COMPANION_DEFINITION_MISSING'
+}
+
+function Capture-Companion([string]$Name) {
+    $service=Capture-Service $Name
+    $definition=Get-CompanionDefinition $Name
+    $listener=$false
+    try {
+        $listener=@([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() |
+            Where-Object {$_.Port -eq $definition.Port}).Count -gt 0
+    } catch {
+        return [pscustomobject]@{
+            Name=$service.Name;State=$service.State;ProcessId=$service.ProcessId;PathName=$service.PathName
+            StartMode=$service.StartMode;StartName=$service.StartName;Recovery=$service.Recovery
+            ListenerPresent=$false;HealthCode='COMPANION_LISTENER_QUERY_FAILED'
+        }
+    }
+    $healthCode=$definition.Unreachable
+    if($listener) {
+        try {
+            $response=Invoke-WebRequest -UseBasicParsing -Uri $definition.Uri -TimeoutSec 5 -ErrorAction Stop
+            if($response.StatusCode -eq 200){$healthCode='COMPANION_OK'}
+        } catch {
+            $healthCode=$definition.Unreachable
+        }
+    }
+    return [pscustomobject]@{
+        Name=$service.Name;State=$service.State;ProcessId=$service.ProcessId;PathName=$service.PathName
+        StartMode=$service.StartMode;StartName=$service.StartName;Recovery=$service.Recovery
+        ListenerPresent=[bool]$listener;HealthCode=$healthCode
+    }
+}
+
 function Capture-Others() {
     $saved=@{}
     foreach($name in $OtherServices) {
-        $service=Capture-Service $name
-        Require ($service.State -eq 'Running') ('OTHER_SERVICE_UNHEALTHY:' + $name)
-        $saved[$name]=$service
+        $saved[$name]=Capture-Companion $name
     }
     return $saved
+}
+
+function Assert-CompanionBaseline($Baseline) {
+    $degraded=@()
+    foreach($name in $OtherServices) {
+        $entry=$Baseline[$name]
+        if($entry.State -ne 'Running' -or -not $entry.ListenerPresent -or $entry.HealthCode -ne 'COMPANION_OK') {
+            $code=if($entry.HealthCode -ne 'COMPANION_OK'){$entry.HealthCode}else{'COMPANION_SERVICE_NOT_RUNNING'}
+            $degraded+=($name + ':' + $code)
+        }
+    }
+    if($degraded.Count -gt 0 -and -not $AcknowledgeCompanionDegraded.IsPresent) {
+        throw ($degraded[0].Split(':',2)[1])
+    }
+    if($degraded.Count -gt 0) {
+        Write-Host ('COMPANION_DEGRADED_ACKNOWLEDGED:' + ($degraded -join ',')) -ForegroundColor Yellow
+    }
 }
 
 function Verify-Others($Baseline) {
     foreach($name in $OtherServices) {
         $before=$Baseline[$name]
-        $after=Capture-Service $name
-        Require ($after.State -eq 'Running') ('OTHER_SERVICE_STOPPED:' + $name)
-        Require ($after.ProcessId -eq $before.ProcessId) ('OTHER_SERVICE_RESTARTED:' + $name)
+        $after=Capture-Companion $name
+        Require ($after.State -eq $before.State) ('COMPANION_STATE_CHANGED:' + $name)
+        Require ($after.ProcessId -eq $before.ProcessId) ('COMPANION_PID_CHANGED:' + $name)
+        Require ($after.ListenerPresent -eq $before.ListenerPresent) ('COMPANION_LISTENER_CHANGED:' + $name)
+        Require ($after.HealthCode -eq $before.HealthCode) ('COMPANION_HEALTH_CHANGED:' + $name)
         Require ($after.PathName -eq $before.PathName) ('OTHER_SERVICE_PATH_CHANGED:' + $name)
         Require ($after.StartMode -eq $before.StartMode) ('OTHER_SERVICE_MODE_CHANGED:' + $name)
         Require ($after.StartName -eq $before.StartName) ('OTHER_SERVICE_IDENTITY_CHANGED:' + $name)
         Require ($after.Recovery -eq $before.Recovery) ('OTHER_SERVICE_RECOVERY_CHANGED:' + $name)
     }
-}
-
-function Verify-LocalCompanions() {
-    $control=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8785/health' -TimeoutSec 5
-    Require ($control.StatusCode -eq 200) 'CONTROL_PLANE_HEALTH_FAILED'
-    $owner=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8775/owner/api/state' -TimeoutSec 5
-    Require ($owner.StatusCode -eq 200) 'OWNER_UI_HEALTH_FAILED'
 }
 
 function Inspect-NoReparse([string]$Path) {
@@ -568,6 +619,11 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
         original_agent_state=$Original.State
         original_agent_binpath=$Original.PathName
         other_services_unchanged=$true
+        companion_degraded_acknowledged=[bool]$AcknowledgeCompanionDegraded.IsPresent
+        companion_baseline=@($OtherServices | ForEach-Object {
+            $entry=$Others[$_]
+            [ordered]@{service=$_;state=$entry.State;listener_present=$entry.ListenerPresent;health_code=$entry.HealthCode}
+        })
         runtime=$RuntimeEvidence
     }
     $target=Join-Path $ReceiptDir ('agent-release-' + $Revision.Substring(0,8) + '.json')
@@ -597,7 +653,7 @@ if($agentBaseline.State -eq 'Running') {
     Require ($RecoverStoppedAgent.IsPresent) 'RECOVER_STOPPED_AGENT_ACK_REQUIRED'
 }
 $otherBaseline=Capture-Others
-Verify-LocalCompanions
+Assert-CompanionBaseline $otherBaseline
 Inspect-NoReparse $ProductRoot
 Inspect-NoReparse $Releases
 Inspect-ProtectedPath $ProductRoot
@@ -615,7 +671,7 @@ $runtimePackage=Read-PinnedRuntimePackage $RuntimeZip $ApprovedRuntimeZipSHA256
 Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 Run-Checked $Python @('-I',$Bootstrap,'--recovery-plan-copy')
 Verify-Others $otherBaseline
-Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
+Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion snapshots verified.' -ForegroundColor Green
 if(-not $Apply) {
     Write-Host 'PLAN_ONLY: no release files or service settings changed.'
     exit 0
@@ -644,7 +700,6 @@ Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Softw
 $newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
 Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')
 Verify-Others $otherBaseline
-Verify-LocalCompanions
 
 $newBin='"' + $newPython + '" -I "' + $newBootstrap + '" --service-run'
 $didSwitch=$false
@@ -661,7 +716,6 @@ try {
     $agentPid=Verify-AgentProcess $newBin $NewRoot $startedAt 5000 $newPython
     $runtimeEvidence=Await-HealthyRuntime $startedAt 240
     Verify-Others $otherBaseline
-    Verify-LocalCompanions
     $agentAfter=Capture-Service $AgentName
     Require ($agentAfter.StartMode -eq $agentBaseline.StartMode) 'AGENT_STARTMODE_CHANGED'
     Require ($agentAfter.StartName -eq $agentBaseline.StartName) 'AGENT_IDENTITY_CHANGED'
@@ -693,7 +747,7 @@ try {
         Require ($rolled.Recovery -eq $agentBaseline.Recovery) 'ROLLBACK_RECOVERY_MISMATCH'
         Require ($rolled.State -eq $agentBaseline.State) 'ROLLBACK_START_STATE_MISMATCH'
     } catch { $rollbackFailures+=('rollback-readback:' + $_.Exception.Message) }
-    try { Verify-Others $otherBaseline; Verify-LocalCompanions } catch { $rollbackFailures+=('companions:' + $_.Exception.Message) }
+    try { Verify-Others $otherBaseline } catch { $rollbackFailures+=('companions:' + $_.Exception.Message) }
     if($rollbackFailures.Count -eq 0) {
         Write-Host ('AGENT_RELEASE_FAIL_ROLLBACK_PASS: ' + $failure) -ForegroundColor Yellow
     } else {
