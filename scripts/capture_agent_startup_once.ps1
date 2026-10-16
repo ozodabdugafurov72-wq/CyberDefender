@@ -69,23 +69,36 @@ $candidate=Join-Path $WorkRoot 'candidate';$clone=Join-Path $WorkRoot 'clone';$e
 New-Item -ItemType Directory -Path $candidate,$clone,$evidence | Out-Null; Restrict-Path $WorkRoot $true
 $liveState=Join-Path $env:ProgramData 'CyberDefender\state';$liveKey=Join-Path $env:ProgramData 'CyberDefender\secrets\storage_key.b64'
 $before=Tree-Digest $liveState @($liveKey)
-Expand-Archive -LiteralPath $source -DestinationPath $candidate -Force
-Expand-Archive -LiteralPath $runtime -DestinationPath (Join-Path $candidate 'runtime') -Force
-Copy-Item -LiteralPath $liveState -Destination (Join-Path $clone 'state') -Recurse -Force
-New-Item -ItemType Directory -Path (Join-Path $clone 'secrets') | Out-Null
-Copy-Item -LiteralPath $liveKey -Destination (Join-Path $clone 'secrets\storage_key.b64') -Force
-Restrict-Path $clone $true
-[void]@(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction Stop)
-$env:CYBERDEFENDER_STATE_DIR=Join-Path $clone 'state'
-$env:CYBERDEFENDER_STORAGE_KEY_B64=(Get-Content -LiteralPath (Join-Path $clone 'secrets\storage_key.b64') -Raw -Encoding Ascii).Trim()
-$env:CYBERDEFENDER_ENDPOINT_ID='startup-capture-isolated'
-$env:CYBERDEFENDER_DISTRIBUTION_URL=''
-Remove-Item Env:CYBERDEFENDER_FLEET_TOKEN_FILE -ErrorAction SilentlyContinue
-$python=Join-Path $candidate 'runtime\python.exe';$worker=Join-Path $candidate 'scripts\agent_release\startup_capture_once.py'
-$result=Join-Path $evidence 'candidate.json';$trace=Join-Path $evidence 'traceback.txt'
-try{& $python -I $worker --source-root $candidate --result $result --trace $trace;$candidateExit=$LASTEXITCODE}finally{$env:CYBERDEFENDER_STORAGE_KEY_B64=''}
-$after=Tree-Digest $liveState @($liveKey);Require ($before -eq $after) 'CAPTURE_LIVE_STATE_CHANGED'
-Remove-Item -LiteralPath $clone -Recurse -Force;Require (-not (Test-Path -LiteralPath $clone)) 'CAPTURE_CLONE_DELETE_FAILED'
+$candidateExit=$null
+try {
+  Expand-Archive -LiteralPath $source -DestinationPath $candidate -Force
+  $manifestPath=Join-Path $candidate 'PINNED_MANIFEST.json'
+  Require (Test-Path -LiteralPath $manifestPath -PathType Leaf) 'CAPTURE_SOURCE_MANIFEST_MISSING'
+  $manifest=Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  Require ($manifest.schema -eq 'cyberdefender.pinned-review-source.v1') 'CAPTURE_SOURCE_MANIFEST_SCHEMA'
+  Require ($manifest.commit -eq $Commit.ToLowerInvariant()) 'CAPTURE_SOURCE_COMMIT_MISMATCH'
+  Expand-Archive -LiteralPath $runtime -DestinationPath (Join-Path $candidate 'runtime') -Force
+  Copy-Item -LiteralPath $liveState -Destination (Join-Path $clone 'state') -Recurse -Force
+  New-Item -ItemType Directory -Path (Join-Path $clone 'secrets') | Out-Null
+  Copy-Item -LiteralPath $liveKey -Destination (Join-Path $clone 'secrets\storage_key.b64') -Force
+  Restrict-Path $clone $true
+  [void]@(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction Stop)
+  $env:CYBERDEFENDER_STATE_DIR=Join-Path $clone 'state'
+  $env:CYBERDEFENDER_STORAGE_KEY_B64=(Get-Content -LiteralPath (Join-Path $clone 'secrets\storage_key.b64') -Raw -Encoding Ascii).Trim()
+  $env:CYBERDEFENDER_ENDPOINT_ID='startup-capture-isolated'
+  $env:CYBERDEFENDER_DISTRIBUTION_URL=''
+  Remove-Item Env:CYBERDEFENDER_FLEET_TOKEN_FILE -ErrorAction SilentlyContinue
+  $python=Join-Path $candidate 'runtime\python.exe';$worker=Join-Path $candidate 'scripts\agent_release\startup_capture_once.py'
+  $result=Join-Path $evidence 'candidate.json';$trace=Join-Path $evidence 'traceback.txt'
+  & $python -I $worker --source-root $candidate --result $result --trace $trace
+  $candidateExit=$LASTEXITCODE
+  $after=Tree-Digest $liveState @($liveKey)
+  Require ($before -eq $after) 'CAPTURE_LIVE_STATE_CHANGED'
+} finally {
+  $env:CYBERDEFENDER_STORAGE_KEY_B64=''
+  if(Test-Path -LiteralPath $clone){Remove-Item -LiteralPath $clone -Recurse -Force}
+}
+Require (-not (Test-Path -LiteralPath $clone)) 'CAPTURE_CLONE_DELETE_FAILED'
 $candidateResult=Get-Content -LiteralPath $result -Raw -Encoding UTF8 | ConvertFrom-Json
 $summary=[ordered]@{status=$candidateResult.status;exception_class=$candidateResult.exception_class;stage=$candidateResult.stage;gate_code=$candidateResult.gate_code;failing_component=$candidateResult.failing_component;runtime_status=$candidateResult.runtime_status;component_failures=$candidateResult.component_failures;candidate_exit=$candidateExit;live_hashes_match=$true;clone_exists_after=$false;trace_retained_system_only=$true}
 $summary | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $WorkRoot 'sanitized.json') -Encoding utf8

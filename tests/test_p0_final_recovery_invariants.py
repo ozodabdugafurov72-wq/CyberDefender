@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 from pathlib import Path
@@ -92,6 +93,27 @@ class FinalRecoveryInvariants(unittest.TestCase):
         self.assertEqual(1, len(calls))
         self.assertFalse(store.record["clean_stop"])
         self.assertFalse(store.record["active_attempt"])
+
+        import agent.service_diagnostics as service_diagnostics
+        import agent.service_lifecycle as service_lifecycle
+        source = Path("agent/windows_service.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        service_class = next(child for node in tree.body if isinstance(node, ast.If) for child in node.body
+                             if isinstance(child, ast.ClassDef) and child.name == "CyberDefenderWindowsService")
+        method = next(node for node in service_class.body if isinstance(node, ast.FunctionDef) and node.name == "SvcDoRun")
+        method.name = "svc_do_run"
+        module = ast.fix_missing_locations(ast.Module(body=[method], type_ignores=[]))
+        namespace = {"SERVICE_NAME": "CyberDefenderAgent"}
+        exec(compile(module, "agent/windows_service.py", "exec"), namespace)
+        service = type("FakeService", (), {})()
+        service._stop_event = threading.Event()
+        observed = []
+        with mock.patch.object(service_lifecycle, "run_guarded_service", return_value=False) as lifecycle, \
+             mock.patch.object(service_diagnostics, "write_service_log", side_effect=lambda *a, **kw: observed.append((a, kw))):
+            with self.assertRaisesRegex(RuntimeError, "^AGENT_RUNTIME_FATAL$"):
+                namespace["svc_do_run"](service)
+        self.assertTrue(lifecycle.call_args.kwargs["stop_on_attempt_failure"])
+        self.assertIn((("CyberDefenderAgent", "STOPPED"), {"exit_reason": "UNHANDLED_EXCEPTION"}), observed)
 
     def test_failure_codes_have_one_authoritative_set(self):
         self.assertIs(crash_store.FAILURE_CODES, FAILURE_CODES)
