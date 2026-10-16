@@ -1,4 +1,4 @@
-# CyberDefender production Go / No-Go evidence
+# CyberDefender production Goq / No-Go evidence
 
 | Claim | Label | Evidence path | UTC time |
 |---|---|---|---|
@@ -104,3 +104,18 @@
 | Live spool recovery remains proposal-only: backup and hash while stopped, run the authenticated product recovery on an isolated copy, prove 16,385 to at most 16,384 with pending set unchanged, then require separate authorization before any live transaction; rollback restores the hash-verified backup on mismatch. | BLOCKED | Offline recovery plan; no live write performed | 2026-10-16T07:40:56.9207468Z |
 | PLAN and passive SYSTEM capture await the two operator UAC commands. The legacy-lineage 95 ms FATAL remains unresolved; no APPLY, probe, restart, SCM mutation, Railway action, or university install occurred. | BLOCKED | Operator gates | 2026-10-16T07:40:56.9207468Z |
 | Elevated PLAN for source `2304316d0c3162471e369cfc6f9cf8b37f1056c4` stopped before any mutation because `CyberDefenderOwnerUI` was SCM Running but had no listener on loopback port 8775; ControlPlane remained available on port 8785 and Agent remained Stopped. System log also contains OwnerUI dispatcher-mismatch event 7039. Candidate ZIP/runtime validation was not reached, so PLAN PASS is not claimed. | BLOCKED | Sanitized PLAN output, read-only SCM/TCP/System-log correlation | 2026-10-16T08:36:14.8449456Z |
+
+## 2026-10-16 post-PLAN failure repair
+
+| Claim | Label | Evidence | UTC time |
+|---|---|---|---|
+| OwnerUI SCM process chain was created at 2026-10-15T16:18:40Z and remained registered Running without a listener on 8775; ControlPlane continued listening on 8785. The installed venv was built from a user-local Python 3.14.7 home. | VERIFIED | Read-only SCM, CIM, tasklist, netstat and pyvenv.cfg inspection | 2026-10-16T13:13:20.3412853Z |
+| OwnerUI listener loss is bounded after the last recorded PLAN PASS near 2026-10-15T10:52Z and no later than the first OwnerUI SCM 7039 event at 2026-10-15T15:56:16Z. The exact protected FATAL record remains pending elevated readback and is not inferred. | BLOCKED | Read-only System log; protected diagnostics ACL | 2026-10-16T13:13:20.3412853Z |
+| Shared lifecycle analysis proved that ControlPlane and OwnerUI ignored a failed `run_guarded_service` return and could remain SCM Running after the HTTP runtime died; Agent already used the fail-fast contract. | VERIFIED | Source analysis and pre-fix failing regression | 2026-10-16T13:13:20.3412853Z |
+| All three SCM hosts now use `stop_on_attempt_failure=True`, persist STOPPED with closed `UNHANDLED_EXCEPTION`, and raise a fixed fatal code without adding retries or Windows recovery actions. | PATCHED/TESTED | `agent/windows_service.py`; `control_plane/windows_service.py`; `dashboard_owner/windows_service.py` | 2026-10-16T13:13:20.3412853Z |
+| Installer companion gates now snapshot State, PID, listener, health code and service configuration, require exact post-snapshot equality, fail closed on a degraded baseline by default, and accept it only with explicit `-AcknowledgeCompanionDegraded`. Raw loopback errors collapse to fixed companion codes. | PATCHED/TESTED | `scripts/install_agent_release.ps1`; focused contract regression | 2026-10-16T13:13:20.3412853Z |
+| A degraded acknowledgement and sanitized companion baseline are included in a successful protected receipt; no companion service mutation was introduced. | PATCHED/VERIFIED | Installer receipt contract and OpenCode review | 2026-10-16T13:13:20.3412853Z |
+| Focused batch used exactly three runs: corrected failing-first reproduction followed by one final run where all three tests passed, including the source-extracted `SvcDoRun()` fixture. | TESTED | `tests/test_post_plan_failure_batch.py`; `tests/test_p0_final_recovery_invariants.py` | 2026-10-16T13:13:20.3412853Z |
+| OpenCode independently reviewed `f6595c0..ecbba89` and verified fail-fast lifecycle, exact snapshot equality, closed error codes, explicit receipt-bound acknowledgement, and read-only PLAN behavior. | VERIFIED | Independent delta review | 2026-10-16T13:13:20.3412853Z |
+| Source `ecbba89b3ea6d44265dee1dbe609cdcb2dccfac3` produced two byte-identical 605-file ZIPs at SHA-256 `0aba524d71a9da6bb367c58eb0c012b203f284891f10b35b03de58e54a39bb5a`; Git-to-ZIP provenance passed 605/605. Runtime SHA-256 remains `7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2`; installer SHA-256 is `9ec4caf6e627d5ff04bbe8b5b1d07a7b2c759f70d9b7cc46e2dc52ee7142c7aa`. | VERIFIED | Deterministic build, provenance verifier and local hashes | 2026-10-16T13:13:20.3412853Z |
+| Next elevated command is PLAN-only with explicit degraded-companion acknowledgement and protected diagnostic readback. No APPLY, probe, restart, service mutation or live spool write is authorized. | BLOCKED | Operator PLAN gate | 2026-10-16T13:13:20.3412853Z |
