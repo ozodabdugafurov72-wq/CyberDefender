@@ -107,11 +107,13 @@ class FinalRecoveryInvariants(unittest.TestCase):
         exec(compile(module, "agent/windows_service.py", "exec"), namespace)
         service = type("FakeService", (), {})()
         service._stop_event = threading.Event()
+        service._run_attempt = lambda _guard: False
         observed = []
         with mock.patch.object(service_lifecycle, "run_guarded_service", return_value=False) as lifecycle, \
              mock.patch.object(service_diagnostics, "write_service_log", side_effect=lambda *a, **kw: observed.append((a, kw))):
             with self.assertRaisesRegex(RuntimeError, "^AGENT_RUNTIME_FATAL$"):
                 namespace["svc_do_run"](service)
+        self.assertIs(lifecycle.call_args.args[2], service._run_attempt)
         self.assertTrue(lifecycle.call_args.kwargs["stop_on_attempt_failure"])
         self.assertIn((("CyberDefenderAgent", "STOPPED"), {"exit_reason": "UNHANDLED_EXCEPTION"}), observed)
 
