@@ -455,18 +455,20 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
                 $lastStamp=$stamp
                 try {
                     $snapshot=Read-RuntimeSnapshot
-                    if(Runtime-IsHealthy $snapshot -and ($observations.Count -eq 0 -or ($stamp-$observations[-1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds)) {
-                        $observations+=,[pscustomobject]@{
-                            observed_at=(Get-Date).ToUniversalTime().ToString('o')
-                            file_timestamp=$stamp.ToString('o')
-                            file_timestamp_utc=$stamp
-                            cycle_count=[int]$snapshot.runtime.cycle_count
-                            component_failures=[int]$snapshot.runtime.component_failures
-                            events_acked=[int]$snapshot.runtime.events_acked
-                            deferred=[int]$snapshot.runtime.events_persisted_deferred
-                            resource_state=[string]$snapshot.runtime.resource_snapshot.state
+                    if(Runtime-IsHealthy $snapshot) {
+                        if($observations.Count -eq 0 -or ($stamp-$observations[-1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) {
+                            $observations+=,[pscustomobject]@{
+                                observed_at=(Get-Date).ToUniversalTime().ToString('o')
+                                file_timestamp=$stamp.ToString('o')
+                                file_timestamp_utc=$stamp
+                                cycle_count=[int]$snapshot.runtime.cycle_count
+                                component_failures=[int]$snapshot.runtime.component_failures
+                                events_acked=[int]$snapshot.runtime.events_acked
+                                deferred=[int]$snapshot.runtime.events_persisted_deferred
+                                resource_state=[string]$snapshot.runtime.resource_snapshot.state
+                            }
+                            if($observations.Count -ge 3){ break }
                         }
-                        if($observations.Count -ge 3){ break }
                     } else {
                         $observations=@()
                     }
@@ -481,10 +483,24 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
     Require (($observations[1].file_timestamp_utc-$observations[0].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) 'RUNTIME_SNAPSHOT_SPACING_INVALID'
     Require (($observations[2].file_timestamp_utc-$observations[1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) 'RUNTIME_SNAPSHOT_SPACING_INVALID'
     $stableDeadline=(Get-Date).ToUniversalTime().AddSeconds($StableSeconds)
+    $stableStamp=$observations[-1].file_timestamp_utc
+    $stableCycle=[int]$observations[-1].cycle_count
+    $stableInitialCycle=$stableCycle
+    $stableDeferred=[int]$observations[-1].deferred
     while((Get-Date).ToUniversalTime() -lt $stableDeadline) {
         $service=Service-Info $AgentName
         Require ($service.State -eq 'Running') 'AGENT_SERVICE_NOT_RUNNING'
         Require ([int]$service.ProcessId -eq $initialPid) 'AGENT_PID_CHANGED_DURING_STABILITY'
+        $stableItem=Get-Item -LiteralPath $RuntimeFile -ErrorAction Stop
+        Require ((((Get-Date).ToUniversalTime()-$stableItem.LastWriteTimeUtc).TotalSeconds -le 30)) 'RUNTIME_SUSTAINED_STATE_STALE'
+        $stableSnapshot=Read-RuntimeSnapshot
+        Require (Runtime-IsHealthy $stableSnapshot) 'RUNTIME_SUSTAINED_HEALTH_FAILED'
+        if($stableItem.LastWriteTimeUtc -gt $stableStamp) {
+            Require ([int]$stableSnapshot.runtime.cycle_count -gt $stableCycle) 'RUNTIME_CYCLE_NOT_ADVANCING'
+            $stableStamp=$stableItem.LastWriteTimeUtc
+            $stableCycle=[int]$stableSnapshot.runtime.cycle_count
+        }
+        Require ([int]$stableSnapshot.runtime.events_persisted_deferred -le ($stableDeferred + 1)) 'UNACKNOWLEDGED_OUTBOX_GROWTH'
         Start-Sleep -Seconds ([Math]::Min(5,[Math]::Max(1,$StableSeconds)))
     }
     $finalItem=Get-Item -LiteralPath $RuntimeFile
@@ -492,7 +508,7 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
     $final=Read-RuntimeSnapshot
     Require (Runtime-IsHealthy $final) 'RUNTIME_SUSTAINED_HEALTH_FAILED'
     $last=$observations[-1]
-    Require ([int]$final.runtime.cycle_count -gt [int]$last.cycle_count) 'RUNTIME_CYCLE_NOT_ADVANCING'
+    Require ([int]$final.runtime.cycle_count -gt $stableInitialCycle) 'RUNTIME_CYCLE_NOT_ADVANCING'
     Require ([int]$final.runtime.events_persisted_deferred -le ([int]$last.deferred + 1)) 'UNACKNOWLEDGED_OUTBOX_GROWTH'
     return [pscustomobject]@{ observations=$observations; final_cycle=[int]$final.runtime.cycle_count }
 }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import tempfile
 import threading
 import unittest
 
@@ -43,6 +45,43 @@ class ReleaseGateClosureTests(unittest.TestCase):
         self.assertIn("[int]$StableSeconds=900", source)
         self.assertIn("AGENT_PID_CHANGED_DURING_STABILITY", source)
         self.assertIn("RUNTIME_SNAPSHOT_SPACING_INVALID", source)
+
+    def test_health_gate_ignores_early_healthy_snapshots_and_rejects_degraded_stability(self):
+        source = (ROOT / "scripts/install_agent_release.ps1").read_text(encoding="utf-8")
+        start = source.index("function Runtime-IsHealthy")
+        end = source.index("function Get-PathIdentityEvidence", start)
+        functions = source[start:end]
+        body = rf'''
+$ErrorActionPreference='Stop'
+$AgentName='CyberDefenderAgent';$RuntimeFile='C:\fake\runtime.json'
+$script:Now=[datetime]'2026-01-01T00:00:00Z';$script:Cycle=0;$script:Mode='healthy'
+function Require([bool]$Condition,[string]$Message){{if(-not $Condition){{throw $Message}}}}
+function Service-Info([string]$Name){{[pscustomobject]@{{State='Running';ProcessId=42}}}}
+function Test-Path{{param($LiteralPath,$PathType)[bool]$true}}
+function Get-Date{{$script:Now}}
+function Get-Item{{param($LiteralPath,$ErrorAction)[pscustomobject]@{{LastWriteTimeUtc=$script:Now}}}}
+function Start-Sleep{{param([int]$Seconds)$script:Now=$script:Now.AddSeconds($Seconds)}}
+function Read-RuntimeSnapshot{{
+  $script:Cycle++
+  $healthy=($script:Mode -eq 'healthy' -or $script:Cycle -le 3)
+  [pscustomobject]@{{runtime=[pscustomobject]@{{status=$(if($healthy){{'HEALTHY'}}else{{'DEGRADED'}});running=$healthy;component_failures=$(if($healthy){{0}}else{{1}});cycle_count=$script:Cycle;events_acked=0;events_persisted_deferred=0;resource_snapshot=[pscustomobject]@{{state=$(if($healthy){{'NORMAL'}}else{{'DEGRADED'}})}}}}}}
+}}
+{functions}
+$ok=Await-HealthyRuntime $script:Now 300 60 0
+if($ok.observations.Count -ne 3){{throw 'EARLY_HEALTHY_SNAPSHOT_HANDLING_FAILED'}}
+$script:Now=[datetime]'2026-01-01T00:00:00Z';$script:Cycle=0;$script:Mode='degrade'
+try{{[void](Await-HealthyRuntime $script:Now 60 1 10);throw 'EXPECTED_STABILITY_FAILURE'}}catch{{if($_.Exception.Message -ne 'RUNTIME_SUSTAINED_HEALTH_FAILED'){{throw}}}}
+'PASS'
+'''
+        with tempfile.TemporaryDirectory() as raw:
+            script = Path(raw) / "health_gate.ps1"
+            script.write_text(body, encoding="utf-8")
+            completed = subprocess.run(
+                [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", str(script)],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("PASS", completed.stdout)
 
 
 if __name__ == "__main__":
