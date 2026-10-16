@@ -65,6 +65,8 @@ def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(
         except Exception:
             _notify(observer,service,"UNAVAILABLE")
             # No untrusted-state reprovision or risky application bootstrap.
+            if stop_on_attempt_failure:
+                return False
             stop_event.wait()
             return
         while not stop_event.is_set():
