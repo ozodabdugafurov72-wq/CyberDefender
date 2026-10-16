@@ -48,7 +48,16 @@ if PYWIN32_AVAILABLE:
 
         def SvcDoRun(self):
             from agent.service_lifecycle import run_guarded_service
-            run_guarded_service(SERVICE_NAME, self._stop_event, self._run_attempt)
+            completed = run_guarded_service(
+                SERVICE_NAME,
+                self._stop_event,
+                self._run_attempt,
+                stop_on_attempt_failure=True,
+            )
+            if completed is False:
+                from agent.service_diagnostics import write_service_log
+                write_service_log(SERVICE_NAME, "STOPPED", exit_reason="UNHANDLED_EXCEPTION")
+                raise RuntimeError("CONTROL_PLANE_RUNTIME_FATAL")
 
         def _run_attempt(self, guard):
             from agent.service_diagnostics import write_service_log
