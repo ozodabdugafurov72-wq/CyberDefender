@@ -205,14 +205,24 @@ class FileCrashStore:
     def authorize_probe(self):
         """Authenticated administrator repair under exclusive stopped-host lock."""
         with self._mutex:
-            r=self.load()
-            if r["active_attempt"]:
-                r["cumulative_failures"]+=1
-                r["recent_failures"]=(r["recent_failures"]+[dict(generation=r["generation"],boot=r["boot"],
-                    code="PREVIOUS_ATTEMPT_INTERRUPTED",tick=r["last_progress"])])[-32:]
-            r["repair_count"]+=1; r["probes_used"]=0
-            r["state"]="LATCHED"; r["active_attempt"]=False
-            return self.write(r)
+            return self.write(authorize_probe_transition(self.load()))
+
+
+def authorize_probe_transition(record):
+    """Pure preview of the authenticated operator repair transaction.
+
+    The live store method commits this result under its exclusive lock.  PLAN
+    can apply the same transition to an already-authenticated in-memory copy
+    without writing protected state or weakening the one-probe accounting.
+    """
+    r=copy.deepcopy(record)
+    if r["active_attempt"]:
+        r["cumulative_failures"]+=1
+        r["recent_failures"]=(r["recent_failures"]+[dict(generation=r["generation"],boot=r["boot"],
+            code="PREVIOUS_ATTEMPT_INTERRUPTED",tick=r["last_progress"])])[-32:]
+    r["repair_count"]+=1; r["probes_used"]=0
+    r["state"]="LATCHED"; r["active_attempt"]=False
+    return r
 
 
 def provision(root: Path, *, path_validator=protected_path):

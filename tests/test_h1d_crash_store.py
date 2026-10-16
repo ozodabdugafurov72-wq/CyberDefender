@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from agent.service_crash_store import FileCrashStore, CrashStoreError, provision, no_reparse, MAX_BYTES
-from agent.service_crash_guard import CrashGuard, FAILURE_CODES
+from agent.service_crash_guard import CrashGuard, CrashPolicy, FAILURE_CODES
 
 SERVICE="CyberDefenderAgent"
 
@@ -124,6 +124,42 @@ class StoreTests(unittest.TestCase):
                     self.assertFalse(committed["active_attempt"])
                 finally:
                     store.close()
+
+    def test_shared_failure_codes_and_interrupted_probe_are_durable(self):
+        import agent.service_crash_store as store_module
+
+        self.assertIs(store_module.FAILURE_CODES, FAILURE_CODES)
+        clock = [0.0]
+        now = lambda: clock[0]
+        policy = CrashPolicy(cooldown_seconds=1.0)
+        s = self.store()
+        guard = CrashGuard(s, boot="a", policy=policy, clock=now)
+        self.assertTrue(guard.admit())
+        guard.failed("UNHANDLED_EXCEPTION")
+        failed = s.load()
+        self.assertEqual("UNHANDLED_EXCEPTION", failed["recent_failures"][-1]["code"])
+        self.assertFalse(failed["active_attempt"])
+        guard.stop()
+        stopped = s.load()
+        self.assertTrue(stopped["clean_stop"])
+        self.assertFalse(stopped["active_attempt"])
+
+        repaired = s.authorize_probe()
+        self.assertEqual("LATCHED", repaired["state"])
+        clock[0] = 2.0
+        probe = CrashGuard(s, boot="b", policy=policy, clock=now)
+        clock[0] = 4.0
+        self.assertTrue(probe.admit())
+        self.assertEqual("PROBE", s.load()["state"])
+        s.close()
+
+        reopened = self.store()
+        interrupted = CrashGuard(reopened, boot="c", policy=policy, clock=now)
+        committed = reopened.load()
+        self.assertEqual("LATCHED", committed["state"])
+        self.assertFalse(committed["active_attempt"])
+        self.assertEqual("PREVIOUS_ATTEMPT_INTERRUPTED", committed["recent_failures"][-1]["code"])
+        self.assertFalse(interrupted.admit())
 
     def test_closed_store_cannot_write_without_ownership(self):
         s=self.store(); r=s.load(); s.close()

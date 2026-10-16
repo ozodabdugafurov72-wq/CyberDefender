@@ -354,6 +354,10 @@ function Authorize-AgentProbe() {
     Run-Checked $newPython @('-I',$newBootstrap,'--authorize-probe')
 }
 
+function Assert-AgentPreStartGates() {
+    Run-Checked $newPython @('-I',$newBootstrap,'--pre-start-check')
+}
+
 function Read-RuntimeSnapshot() {
     Require (Test-Path -LiteralPath $RuntimeFile -PathType Leaf) 'RUNTIME_STATE_MISSING'
     return Get-Content -LiteralPath $RuntimeFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -609,6 +613,7 @@ if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
 Run-Checked $Python @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
 $runtimePackage=Read-PinnedRuntimePackage $RuntimeZip $ApprovedRuntimeZipSHA256
 Run-Checked $Python @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+Run-Checked $Python @('-I',$Bootstrap,'--recovery-plan-copy')
 Verify-Others $otherBaseline
 Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion services verified.' -ForegroundColor Green
 if(-not $Apply) {
@@ -647,6 +652,7 @@ $candidateStarted=$false
 try {
     Stop-Agent
     if($AuthorizeRecoveryProbe) { Authorize-AgentProbe }
+    Assert-AgentPreStartGates
     $didSwitch=$true
     Set-AgentBinary $newBin
     $startedAt=(Get-Date).ToUniversalTime()

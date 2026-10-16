@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import importlib.util
 import importlib
+import copy
+import hashlib
+import json
 import os
 import runpy
 import secrets
+import shutil
 import stat
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -136,13 +141,184 @@ def _verify_pinned_dependencies(root: Path, *, required: bool) -> None:
             raise RuntimeError("dependency import escaped pinned runtime: " + name)
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _strict_spool_snapshot(spool_dir: Path) -> tuple[int, int, set[str]]:
+    from agent.storage.durable_spool import DurableSpoolPolicy
+
+    policy = DurableSpoolPolicy()
+    snapshot = spool_dir / "acked_state.json"
+    pending = spool_dir / "pending.jsonl"
+    if not snapshot.is_file() or not pending.is_file():
+        raise RuntimeError("RECOVERY_SPOOL_REQUIRED_FILE_MISSING")
+    raw = snapshot.read_bytes()
+    if not 0 < len(raw) <= policy.max_terminal_state_bytes:
+        raise RuntimeError("RECOVERY_ACK_SNAPSHOT_SIZE_REJECTED")
+    try:
+        state = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise RuntimeError("RECOVERY_ACK_SNAPSHOT_JSON_REJECTED") from None
+    if (
+        type(state) is not dict
+        or set(state) != {"schema_version", "status", "acked_ids"}
+        or state["schema_version"] != "1"
+        or state["status"] != "ACKED"
+        or type(state["acked_ids"]) is not list
+        or any(type(item) is not str or not item.strip() for item in state["acked_ids"])
+        or len(set(state["acked_ids"])) != len(state["acked_ids"])
+    ):
+        raise RuntimeError("RECOVERY_ACK_SNAPSHOT_SCHEMA_REJECTED")
+    if pending.stat().st_size > policy.max_recovery_scan_bytes:
+        raise RuntimeError("RECOVERY_PENDING_SIZE_REJECTED")
+    pending_ids: set[str] = set()
+    with pending.open("rb") as handle:
+        for raw_line in handle:
+            if not raw_line.strip():
+                continue
+            try:
+                record = json.loads(raw_line.decode("utf-8"))
+            except Exception:
+                raise RuntimeError("RECOVERY_PENDING_JSON_REJECTED") from None
+            event_id = record.get("event_id") if type(record) is dict else None
+            if type(event_id) is not str or not event_id.strip():
+                raise RuntimeError("RECOVERY_PENDING_SCHEMA_REJECTED")
+            pending_ids.add(event_id)
+            if len(pending_ids) > policy.max_pending_events:
+                raise RuntimeError("RECOVERY_PENDING_COUNT_REJECTED")
+    return len(state["acked_ids"]), len(raw), pending_ids
+
+
+def _copy_spool_for_check(live: Path, destination: Path) -> dict[str, str]:
+    if not _directory_is_safe(live):
+        raise RuntimeError("RECOVERY_SPOOL_PATH_REJECTED")
+    names = ("pending.jsonl", "acked.jsonl", "quarantined.jsonl", "acked_state.json")
+    hashes: dict[str, str] = {}
+    destination.mkdir(parents=True)
+    for name in names:
+        source = live / name
+        if source.exists():
+            if not source.is_file() or source.is_symlink() or getattr(source.lstat(), "st_file_attributes", 0) & 0x400:
+                raise RuntimeError("RECOVERY_SPOOL_FILE_REJECTED")
+            hashes[name] = _file_sha256(source)
+            shutil.copyfile(source, destination / name)
+    for name, expected in hashes.items():
+        if _file_sha256(live / name) != expected:
+            raise RuntimeError("RECOVERY_SPOOL_CHANGED_DURING_COPY")
+    return hashes
+
+
+class _MemoryCrashStore:
+    def __init__(self, record: dict):
+        self.record = copy.deepcopy(record)
+
+    def load(self):
+        return copy.deepcopy(self.record)
+
+    def write(self, record):
+        from agent.service_crash_store import CrashStoreError, validate_record
+
+        if record["revision"] != self.record["revision"]:
+            raise CrashStoreError("STORE_STALE_WRITER")
+        updated = copy.deepcopy(record)
+        updated["revision"] += 1
+        validate_record(updated, updated["service"])
+        self.record = updated
+        return self.load()
+
+
+def _guard_admission_preview(record: dict, *, authorize: bool) -> dict:
+    from agent.service_crash_guard import CrashGuard, CrashPolicy
+    from agent.service_crash_store import authorize_probe_transition
+
+    candidate = authorize_probe_transition(record) if authorize else copy.deepcopy(record)
+    ticks = [0.0]
+    clock = lambda: ticks[0]
+    policy = CrashPolicy()
+    memory = _MemoryCrashStore(candidate)
+    guard = CrashGuard(memory, boot="feedface", policy=policy, clock=clock)
+    ticks[0] = policy.cooldown_seconds + 1.0
+    if not guard.admit():
+        raise RuntimeError("RECOVERY_CRASHGUARD_ADMISSION_REJECTED")
+    admitted = memory.load()
+    return {
+        "state": admitted["state"],
+        "generation": admitted["generation"],
+        "attempts_since_stable": admitted["attempts_since_stable"],
+        "probes_used": admitted["probes_used"],
+        "active_attempt": admitted["active_attempt"],
+    }
+
+
+def _recovery_gate(*, authorize_preview: bool, require_live_safe: bool) -> dict:
+    from agent.service_crash_store import FileCrashStore, default_root
+    from agent.storage.durable_spool import DurableEventSpool, DurableSpoolPolicy
+
+    store = FileCrashStore(default_root(), "CyberDefenderAgent")
+    try:
+        record = store.load()
+    finally:
+        store.close()
+    admission = _guard_admission_preview(record, authorize=authorize_preview)
+    live = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "CyberDefender" / "state" / "spool"
+    raw_count, raw_bytes, pending_before = _strict_spool_snapshot(live)
+    policy = DurableSpoolPolicy()
+    allowed = policy.max_terminal_records if require_live_safe else policy.max_terminal_records + 1
+    if raw_count > allowed:
+        raise RuntimeError("RECOVERY_ACK_COUNT_REJECTED")
+    if require_live_safe and raw_count > policy.max_terminal_records:
+        raise RuntimeError("RECOVERY_LIVE_SPOOL_UNSAFE")
+    with tempfile.TemporaryDirectory(prefix="cd-recovery-gate-") as raw:
+        copied = Path(raw) / "spool"
+        hashes = _copy_spool_for_check(live, copied)
+        checked = DurableEventSpool(copied)
+        health = checked.health_check()
+        pending_after = {item["event_id"] for item in checked.pending_records()}
+        if health["status"] != "HEALTHY" or not health["terminal_state_safe"]:
+            raise RuntimeError("RECOVERY_SPOOL_COPY_UNHEALTHY")
+        if pending_before != pending_after:
+            raise RuntimeError("RECOVERY_PENDING_SET_CHANGED")
+        for name, expected in hashes.items():
+            if _file_sha256(live / name) != expected:
+                raise RuntimeError("RECOVERY_LIVE_SPOOL_CHANGED")
+    return {
+        "status": "RECOVERY_PRESTART_PASS" if require_live_safe else "RECOVERY_PLAN_COPY_PASS",
+        "guard": admission,
+        "spool": {
+            "raw_terminal_records": raw_count,
+            "max_terminal_records": policy.max_terminal_records,
+            "raw_snapshot_bytes": raw_bytes,
+            "max_terminal_state_bytes": policy.max_terminal_state_bytes,
+            "pending_before": len(pending_before),
+            "pending_after": len(pending_after),
+            "pending_preserved": True,
+            "copy_health": "HEALTHY",
+            "live_hashes_unchanged": True,
+        },
+    }
+
+
 def main() -> int:
     dependency_probe = sys.argv[1:] == ["--dependency-probe"]
     authorize_probe = sys.argv[1:] == ["--authorize-probe"]
-    if not dependency_probe and not authorize_probe:
+    recovery_plan = sys.argv[1:] == ["--recovery-plan-copy"]
+    pre_start_check = sys.argv[1:] == ["--pre-start-check"]
+    if not dependency_probe and not authorize_probe and not recovery_plan and not pre_start_check:
         _open_stage()
     _stage("CD_BOOTSTRAP_B00_ENTER")
-    root = Path(__file__).resolve().parent
+    script_dir = Path(__file__).resolve().parent
+    root = script_dir
+    if recovery_plan and not (root / "agent" / "windows_service.py").is_file():
+        source_root = script_dir.parents[1]
+        expected = source_root / "scripts" / "agent_release" / "agent_service_bootstrap.py"
+        if expected.resolve() != Path(__file__).resolve():
+            raise RuntimeError("RECOVERY_SOURCE_ROOT_REJECTED")
+        root = source_root
     if not (root / "agent" / "windows_service.py").is_file():
         raise RuntimeError("pinned Agent package is missing")
     _stage("CD_BOOTSTRAP_B10_ROOT_OK")
@@ -152,7 +328,7 @@ def main() -> int:
     if spec is None or spec.origin is None or Path(spec.origin).resolve().parent.parent != root:
         raise RuntimeError("Agent import escaped protected release root")
     _stage("CD_BOOTSTRAP_B30_ORIGIN_OK")
-    _verify_pinned_dependencies(root, required=dependency_probe or authorize_probe)
+    _verify_pinned_dependencies(root, required=dependency_probe or authorize_probe or pre_start_check)
     if dependency_probe:
         print("PROTECTED_RUNTIME_DEPENDENCY_PROBE_PASS")
         return 0
@@ -161,6 +337,12 @@ def main() -> int:
 
         sys.argv = ["service_crash_store", "authorize-probe", "--service", "CyberDefenderAgent"]
         service_crash_store.main()
+        return 0
+    if recovery_plan:
+        print(json.dumps(_recovery_gate(authorize_preview=True, require_live_safe=False), sort_keys=True, separators=(",", ":")))
+        return 0
+    if pre_start_check:
+        print(json.dumps(_recovery_gate(authorize_preview=False, require_live_safe=True), sort_keys=True, separators=(",", ":")))
         return 0
     # Preserve the known-good `python -m agent.windows_service` dispatch
     # contract: pywin32 observes the service module as __main__, including
