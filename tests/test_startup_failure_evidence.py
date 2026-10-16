@@ -11,14 +11,19 @@ root = Path(__file__).resolve().parents[1]
 diagnostic_path = root / 'agent/service_diagnostics.py'
 tree = ast.parse(diagnostic_path.read_text())
 tree.body = [n for n in tree.body if not (isinstance(n, ast.ImportFrom) and (n.module or '').startswith('agent.'))]
-scope = {'__file__': str(diagnostic_path), 'SERVICES': {'CyberDefenderAgent'}}
+scope = {
+    '__file__': str(diagnostic_path),
+    'SERVICES': {'CyberDefenderAgent'},
+    'normalize_gate_code': lambda value: value if value == 'KEY_NOT_ACTIVE' else 'BOOTSTRAP_UNCLASSIFIED',
+    'failing_component': lambda code: 'key_manager' if code.startswith('KEY_') else None,
+}
 exec(compile(tree, str(diagnostic_path), 'exec'), scope)
 service_path = root / 'agent/windows_service.py'
 tree = ast.parse(service_path.read_text())
 method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == '_run_attempt')
 captured = []
 class RuntimeBootstrapError(RuntimeError):
-    pass
+    gate_code = 'KEY_NOT_ACTIVE'
 class Runner:
     exit_reason = 'UNHANDLED_EXCEPTION'
     def __init__(self, *args, **kwargs): pass
@@ -42,7 +47,10 @@ with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, modules):
            'configure_machine_environment': lambda: {'endpoint_id': temp/'absent'},
            'servicemanager': types.SimpleNamespace(LogInfoMsg=lambda *a: None, LogErrorMsg=lambda *a: None)}
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(service_path), 'exec'), env)
-    guard = types.SimpleNamespace(allow_optional=False, failed=lambda code: captured.append(code))
+    def rejected_failure_record(code):
+        captured.append(code)
+        raise RuntimeError('synthetic authenticated-store rejection')
+    guard = types.SimpleNamespace(allow_optional=False, failed=rejected_failure_record)
     host = types.SimpleNamespace(_stop_event=object(), _runner=None)
     assert env['_run_attempt'](host, guard) is False
     raw_log = (temp/'CyberDefenderAgent.jsonl').read_bytes()
@@ -50,6 +58,8 @@ with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, modules):
     fatal = next(r for r in rows if r['event'] == 'FATAL')
     assert fatal['exception_class'] == 'RuntimeBootstrapError'
     assert fatal['stage'] == 'RUNTIME_RUN'
+    assert fatal['gate_code'] == 'KEY_NOT_ACTIVE'
+    assert fatal['failing_component'] == 'key_manager'
     assert fatal['source']['file'] == 'windows_service.py'
     assert fatal['source']['function'] == '_run_attempt'
     expected_line = next(n.lineno for n in ast.walk(method) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'run')
@@ -58,4 +68,4 @@ with tempfile.TemporaryDirectory() as raw, patch.dict(sys.modules, modules):
     assert all(len(line)+1 <= 512 for line in raw_log.splitlines())
     assert b'SECRET_TEST_TOKEN' not in raw_log and str(root).encode() not in raw_log
     assert captured == ['UNHANDLED_EXCEPTION']
-    print('PASS injected boundary only; bounded sanitized class/stage/location/UTC; failure accounting unchanged')
+    print('PASS injected boundary only; bounded sanitized evidence survives CrashStore rejection')

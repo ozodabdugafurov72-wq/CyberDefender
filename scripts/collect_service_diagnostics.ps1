@@ -13,8 +13,21 @@ foreach($name in $services){
       try {
         $entry=$_ | ConvertFrom-Json
         if($entry.schema -eq 'cd.service-diagnostic.v1' -and $entry.service -eq $name -and
-           $entry.event -in @('READY','STARTING','RUNNING','STOPPED','FATAL','LATCHED','PROBE','UNAVAILABLE','HEALTHY','DEGRADED','STALLED','TELEMETRY_UNAVAILABLE','UNCLASSIFIED')) {
-          [pscustomobject]@{Service=$name;Event=$entry.event}
+           $entry.event -in @('READY','STARTING','RUNNING','STOPPED','EXIT','FATAL','LATCHED','PROBE','UNAVAILABLE','HEALTHY','DEGRADED','STALLED','TELEMETRY_UNAVAILABLE','UNCLASSIFIED')) {
+          $source=$null
+          if($null -ne $entry.source){$source=('{0}:{1}:{2}' -f $entry.source.file,$entry.source.function,$entry.source.line)}
+          [pscustomobject]@{
+            Service=$name
+            Event=$entry.event
+            Utc=$entry.time
+            ExitReason=$entry.exit_reason
+            ExceptionCategory=$entry.exception_category
+            ExceptionClass=$entry.exception_class
+            Stage=$entry.stage
+            GateCode=$entry.gate_code
+            FailingComponent=$entry.failing_component
+            Source=$source
+          }
         }
       } catch { Write-Output 'DIAGNOSTIC_RECORD_REJECTED' }
     }

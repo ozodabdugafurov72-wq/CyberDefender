@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock
 from agent.service_crash_guard import SERVICES
 from agent.service_crash_store import default_root, protected_path
+from agent.runtime_gate_codes import failing_component, normalize_gate_code
 
 _LOCK = Lock()
 _MAX_BYTES = 2 * 1024 * 1024
@@ -60,9 +61,15 @@ def failure_fields(exc: BaseException, stage: str) -> dict:
               "stage": stage if stage in {"STARTUP", "RUNTIME_RUN"} else "UNKNOWN"}
     if name not in known:
         result["class_fingerprint"] = hashlib.sha256(name[:256].encode("utf-8", "replace")).hexdigest()[:16]
+    if name == "RuntimeBootstrapError":
+        gate_code = normalize_gate_code(getattr(exc, "gate_code", None))
+        result["gate_code"] = gate_code
+        component = failing_component(gate_code)
+        if component is not None:
+            result["failing_component"] = component
     trusted = {"windows_service.py": {"_run_attempt"},
                "service_runner.py": {"run"},
-               "main.py": {"build_managed_runtime", "__init__"}}
+               "main.py": {"build_managed_runtime", "__init__", "_initialize"}}
     root = Path(__file__).resolve().parent
     frame = exc.__traceback__
     for _ in range(32):

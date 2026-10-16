@@ -850,7 +850,7 @@ class DurableEventSpool:
             if isinstance(event_id, str)
             and event_id.strip()
         )
-        if len(normalized) > max(1, int(self.policy.max_terminal_records)) + 1:
+        if len(normalized) > max(1, int(self.policy.max_terminal_records)):
             raise SpoolError("ACK terminal state exceeds bounded record limit")
 
         state = {
@@ -1852,6 +1852,25 @@ class DurableEventSpool:
         next_acked = set(self._acked)
         next_acked.add(event_id)
 
+        limit = max(1, int(self.policy.max_terminal_records))
+        if len(next_acked) > limit:
+            # Remove already-terminal records from pending bytes before an old
+            # tombstone is retired.  This prevents resurrection while also
+            # ensuring the authoritative writer never emits limit+1 state.
+            if not self.compact():
+                self._ack_failures += 1
+                return False
+            active_pending = self._read_pending_ids()
+            ordered = self._bounded_unique_order(self._acked_order, self._acked, len(self._acked))
+            for previous in ordered:
+                if previous != event_id and previous not in active_pending:
+                    next_acked.discard(previous)
+                    if len(next_acked) <= limit:
+                        break
+            if len(next_acked) > limit:
+                self._ack_failures += 1
+                return False
+
         try:
             # Atomic durable commit.
             self._persist_ack_state(
@@ -1864,6 +1883,7 @@ class DurableEventSpool:
 
         # Only after durable snapshot commit do we update memory.
         self._acked = next_acked
+        self._acked_order = [item for item in self._acked_order if item in next_acked]
         if event_id not in self._acked_order:
             self._acked_order.append(event_id)
         self._mark_pending_terminal(event_id)

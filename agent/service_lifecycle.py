@@ -51,7 +51,7 @@ def _notify(observer, service, state):
 
 def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(),
                         store_factory=None, boot_factory=boot_identity, observer=notify,
-                        clock=active_time):
+                        clock=active_time, stop_on_attempt_failure=False):
     store=None; guard=None; last_state=None
     monitor_stop=threading.Event(); monitor=None
     try:
@@ -74,17 +74,25 @@ def run_guarded_service(service, stop_event, run_attempt, *, policy=CrashPolicy(
                     result=run_attempt(guard)
                     if not stop_event.is_set() and not getattr(guard, "_failure_marked", False):
                         guard.failed("CLEANUP_UNVERIFIED" if result is False else "ATTEMPT_FAILED")
+                    if result is False and stop_on_attempt_failure and not stop_event.is_set():
+                        state=guard.snapshot()["state"]
+                        if state != last_state: _notify(observer,service,state)
+                        return False
                 state=guard.snapshot()["state"]
             except Exception:
                 try: guard.failed()
                 except Exception: pass
                 state=guard.snapshot()["state"]
+                if stop_on_attempt_failure and not stop_event.is_set():
+                    if state != last_state: _notify(observer,service,state)
+                    return False
             if state != last_state:
                 _notify(observer,service,state); last_state=state
             stop_event.wait(1.0)
         if guard is not None:
             try: guard.stop()
             except Exception: _notify(observer,service,"UNAVAILABLE")
+        return True
     finally:
         monitor_stop.set()
         if monitor is not None: monitor.join(timeout=2)

@@ -45,7 +45,10 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
                 self.assertTrue(initial.append(item))
 
             # Simulate a crash after ACK snapshot commit and before compact().
-            initial._persist_ack_state({item.event_id for item in events})
+            (spool_dir / "acked_state.json").write_text(
+                json.dumps({"schema_version": "1", "status": "ACKED", "acked_ids": [item.event_id for item in events]}),
+                encoding="utf-8",
+            )
 
             repaired = DurableEventSpool(spool_dir, policy=self.policy(2))
             health = repaired.health_check()
@@ -87,7 +90,10 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
 
             # Exact limit+1 crash window: three ACK tombstones for a limit of
             # two, with one unacknowledged event that must survive repair.
-            initial._persist_ack_state({item.event_id for item in events[:3]})
+            (spool_dir / "acked_state.json").write_text(
+                json.dumps({"schema_version": "1", "status": "ACKED", "acked_ids": [item.event_id for item in events[:3]]}),
+                encoding="utf-8",
+            )
             expected_pending = {events[3].event_id}
             original_atomic_write = DurableEventSpool._atomic_write
 

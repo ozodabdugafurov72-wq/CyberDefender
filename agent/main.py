@@ -212,6 +212,7 @@ from agent.storage.durable_spool import (
 from agent.storage.durable_incident_outbox import (
     DurableIncidentOutbox,
 )
+from agent.runtime_gate_codes import health_gate_code, normalize_gate_code
 
 from agent.quarantine import (
     BoundedQuarantineExecutor,
@@ -257,7 +258,9 @@ class RuntimeBootstrapError(RuntimeError):
     autonomous system modification.
     """
 
-    pass
+    def __init__(self, message: str, *, gate_code: str = "BOOTSTRAP_UNCLASSIFIED"):
+        super().__init__(message)
+        self.gate_code = normalize_gate_code(gate_code)
 
 
 # ============================================================
@@ -1041,7 +1044,8 @@ class CyberDefenderRuntime:
         if not encoded:
             raise RuntimeBootstrapError(
                 "CYBERDEFENDER_STORAGE_KEY_B64 "
-                "o'rnatilmagan."
+                "o'rnatilmagan.",
+                gate_code="KEY_NOT_READY",
             )
 
         try:
@@ -1054,14 +1058,16 @@ class CyberDefenderRuntime:
         except Exception as exc:
 
             raise RuntimeBootstrapError(
-                "Storage key invalid Base64."
+                "Storage key invalid Base64.",
+                gate_code="KEY_NOT_READY",
             ) from exc
 
         if len(key) < 32:
 
             raise RuntimeBootstrapError(
                 "Storage key kamida 32 byte "
-                "bo'lishi kerak."
+                "bo'lishi kerak.",
+                gate_code="KEY_NOT_READY",
             )
 
         return key
@@ -1292,10 +1298,16 @@ class CyberDefenderRuntime:
 
         incident_outbox_root = state_root / "incident_outbox"
 
-        self.key_manager = KeyManager(
-            key_root,
-            storage_key,
-        )
+        try:
+            self.key_manager = KeyManager(
+                key_root,
+                storage_key,
+            )
+        except Exception as exc:
+            raise RuntimeBootstrapError(
+                "KeyManager initialization failed.",
+                gate_code="KEY_NOT_READY",
+            ) from exc
 
         if not self.key_manager.is_ready():
 
@@ -1321,7 +1333,8 @@ class CyberDefenderRuntime:
                 else:
                     raise RuntimeBootstrapError(
                         "KeyManager initial key provisioning "
-                        "muvaffaqiyatsiz."
+                        "muvaffaqiyatsiz.",
+                        gate_code="KEY_PROVISION_FAIL",
                     )
 
             elif getattr(
@@ -1331,20 +1344,29 @@ class CyberDefenderRuntime:
             )():
                 raise RuntimeBootstrapError(
                     "KeyManager ACTIVE key mavjud emas. "
-                    "Controlled key provisioning talab qilinadi."
+                    "Controlled key provisioning talab qilinadi.",
+                    gate_code="KEY_NOT_ACTIVE",
                 )
 
             else:
                 raise RuntimeBootstrapError(
-                    "KeyManager READY emas."
+                    "KeyManager READY emas.",
+                    gate_code="KEY_NOT_READY",
                 )
 
-        outbox_integrity_key = self.key_manager.sign(
-            b"CyberDefender/incident-outbox/v1"
-        )
+        try:
+            outbox_integrity_key = self.key_manager.sign(
+                b"CyberDefender/incident-outbox/v1"
+            )
+        except Exception as exc:
+            raise RuntimeBootstrapError(
+                "Incident outbox integrity key derivation failed.",
+                gate_code="KEY_NOT_READY",
+            ) from exc
         if not isinstance(outbox_integrity_key, str):
             raise RuntimeBootstrapError(
-                "Incident outbox integrity key derivation failed."
+                "Incident outbox integrity key derivation failed.",
+                gate_code="KEY_NOT_READY",
             )
         self.incident_outbox = DurableIncidentOutbox(
             incident_outbox_root,
@@ -5535,7 +5557,8 @@ def build_managed_runtime(*, allow_optional_sensors: bool = True) -> "CyberDefen
         config = _load_runtime_config(safety)
         if config is None:
             raise RuntimeBootstrapError(
-                "Managed runtime configuration rejected by fail-safe bootstrap."
+                "Managed runtime configuration rejected by fail-safe bootstrap.",
+                gate_code="CONFIG_REJECTED",
             )
 
         runtime = CyberDefenderRuntime(safety, config, allow_optional_sensors=allow_optional_sensors)
@@ -5546,7 +5569,10 @@ def build_managed_runtime(*, allow_optional_sensors: bool = True) -> "CyberDefen
                 safety.enter_safe_mode("Managed runtime initial health gate failed.")
             except Exception:
                 pass
-            raise RuntimeBootstrapError("Managed runtime initial health gate failed.")
+            raise RuntimeBootstrapError(
+                "Managed runtime initial health gate failed.",
+                gate_code=health_gate_code("runtime"),
+            )
 
         for component_name in (
             "key_manager",
@@ -5564,7 +5590,8 @@ def build_managed_runtime(*, allow_optional_sensors: bool = True) -> "CyberDefen
                 except Exception:
                     pass
                 raise RuntimeBootstrapError(
-                    f"Managed critical health gate failed: {component_name}"
+                    f"Managed critical health gate failed: {component_name}",
+                    gate_code=health_gate_code(component_name),
                 )
 
         return runtime
