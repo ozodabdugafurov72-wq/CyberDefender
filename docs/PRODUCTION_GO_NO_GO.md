@@ -168,5 +168,5 @@
 
 | Claim | Label | Evidence | UTC time |
 |---|---|---|---|
-| Cloud SOC event ingestion is idempotent on tenant, endpoint and event ID: an exact replay at a new valid sequence advances the transactional ACK without duplicating the durable event; changed content for the same event ID fails closed with `EVENT_ID_CONFLICT` and rolls back sequence state. | PATCHED/TESTED | `control_plane/cloud_soc_v2.py`; focused evicted-ACK replay regression | 2026-10-17T08:17:35.931Z |
+| Cloud SOC event ingestion is idempotent on tenant, endpoint and event ID: an exact replay at a new valid sequence advances the transactional ACK without duplicating the durable event; changed content for the same event ID is rejected per event with `EVENT_ID_CONFLICT`, while other valid batch events persist and the acknowledged sequence advances without stalling the endpoint. | PATCHED/TESTED | `control_plane/cloud_soc_v2.py`; focused evicted-ACK replay regression | 2026-10-17T08:17:35.931Z |
 | No Railway service, production data, credential, domain or deployment was changed. | VERIFIED | Local review branch only | 2026-10-17T08:17:35.931Z |

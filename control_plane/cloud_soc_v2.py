@@ -592,6 +592,7 @@ class CloudSocRepository:
                      normalized.get("observed_at"), received, verified.digest, payload_json),
                 )
                 duplicate_events = 0
+                rejected_events: list[dict[str, object]] = []
                 if kind == "HEARTBEAT":
                     self._conn.execute(
                         """UPDATE cloud_endpoints SET last_sequence=?,last_boot_id=?,last_heartbeat_received=?,
@@ -623,7 +624,10 @@ class CloudSocRepository:
                                 and existing_event["priority"] == event["priority"]
                                 and existing_event["payload_json"] == payload_json
                             ):
-                                raise CloudSocError("EVENT_ID_CONFLICT", status=409)
+                                rejected_events.append(
+                                    {"seq": event["seq"], "code": "EVENT_ID_CONFLICT"}
+                                )
+                                continue
                             duplicate_events += 1
                             continue
                         self._conn.execute(
@@ -644,6 +648,13 @@ class CloudSocRepository:
                 if int(count) > MAX_RETENTION_RECORDS_PER_ENDPOINT:
                     raise CloudSocError("RETENTION_LIMIT_REACHED", status=429)
                 self._conn.execute("COMMIT")
+                if kind == "EVENT_BATCH" and rejected_events:
+                    return {
+                        "status": "ACK_WITH_REJECTIONS",
+                        "accepted_through": last,
+                        "duplicates": duplicate_events,
+                        "rejected": rejected_events,
+                    }
                 if kind == "EVENT_BATCH" and duplicate_events == len(normalized["events"]):
                     return {
                         "status": "DUPLICATE_ACK",

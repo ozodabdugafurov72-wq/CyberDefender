@@ -250,13 +250,61 @@ class CloudSocV2SecurityTests(unittest.TestCase):
             ("tenant-a", endpoint_id),
         ).fetchall()
         self.assertEqual(["stable-event-id"], [row["event_id"] for row in rows])
-        with self.assertRaisesRegex(CloudSocError, "EVENT_ID_CONFLICT"):
-            send(4, "batch-conflict", {"rule": "changed"})
+        conflict_batch = {
+            "schema": "cyberdefender.event-batch.v2",
+            "batch_id": "batch-conflict-and-new",
+            "endpoint_id": endpoint_id,
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "first_seq": 4,
+            "last_seq": 5,
+            "events": [
+                {
+                    "event_id": "stable-event-id",
+                    "seq": 4,
+                    "observed_at": self.now[0],
+                    "type": "DETECTION",
+                    "priority": "HIGH",
+                    "payload": {"rule": "changed"},
+                },
+                {
+                    "event_id": "new-event-id",
+                    "seq": 5,
+                    "observed_at": self.now[0],
+                    "type": "INCIDENT",
+                    "priority": "CRITICAL",
+                    "payload": {"risk": 80},
+                },
+            ],
+        }
+        conflict_raw = encoded(conflict_batch)
+        conflict_headers = signature_headers(
+            self.key_a,
+            credential_id=self.enrolled_a["credential_id"],
+            path=path,
+            body=conflict_raw,
+            sequence=5,
+            timestamp=int(self.now[0]),
+        )
+        mixed = self.service.ingest_events(endpoint_id, conflict_raw, conflict_headers)
+        self.assertEqual(
+            {
+                "status": "ACK_WITH_REJECTIONS",
+                "accepted_through": 5,
+                "duplicates": 0,
+                "rejected": [{"seq": 4, "code": "EVENT_ID_CONFLICT"}],
+            },
+            mixed,
+        )
+        rows = self.repo._conn.execute(
+            "SELECT event_id FROM cloud_events WHERE tenant_id=? AND endpoint_id=? ORDER BY event_id",
+            ("tenant-a", endpoint_id),
+        ).fetchall()
+        self.assertEqual(["new-event-id", "stable-event-id"], [row["event_id"] for row in rows])
         endpoint = self.repo._conn.execute(
             "SELECT last_sequence FROM cloud_endpoints WHERE tenant_id=? AND endpoint_id=?",
             ("tenant-a", endpoint_id),
         ).fetchone()
-        self.assertEqual(3, endpoint["last_sequence"])
+        self.assertEqual(5, endpoint["last_sequence"])
 
     def test_stale_heartbeat_cannot_report_online(self):
         self.heartbeat(self.enrolled_a, self.key_a, 1)
