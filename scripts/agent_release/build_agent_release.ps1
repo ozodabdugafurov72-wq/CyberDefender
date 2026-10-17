@@ -29,7 +29,7 @@ foreach($path in @($Repository,$OutputDirectory)) {
 foreach($path in @($Python,$RuntimeZip)) {
     if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw 'BUILD_INPUT_UNAVAILABLE'}
 }
-if((git -C $Repository status --porcelain).Count -ne 0){throw 'SOURCE_TREE_DIRTY'}
+if(@(git -C $Repository status --porcelain).Count -ne 0){throw 'SOURCE_TREE_DIRTY'}
 if((git -C $Repository rev-parse HEAD).Trim() -ne $commitLower){throw 'SOURCE_HEAD_MISMATCH'}
 
 $builder=Join-Path $Repository 'scripts\agent_release\build_pinned_release.py'
