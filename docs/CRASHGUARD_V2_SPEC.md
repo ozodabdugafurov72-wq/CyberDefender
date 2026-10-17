@@ -128,3 +128,9 @@ read-only. V2 records refuse downgrade. Interruption at every step must produce
 either the authenticated old state or an explicitly incomplete migration,
 never a clean state or additional budget.
 
+B4 implements this importer in `agent/crashguard_v2/migration.py`. It reads and
+authenticates v1 fixtures using the v1 serializer and validator, verifies a
+separate signed migration action, stages and rereads an authenticated v2
+record, then provisions v2 once. The source hashes are checked before and
+after. Existing v2 state refuses a second import or downgrade.
+

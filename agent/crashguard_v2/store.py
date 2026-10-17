@@ -201,6 +201,7 @@ def fresh_record(service: str, *, boot_id: str, monotonic_ns: int, wall_time_ns:
         "failure_history": [],
         "last_failure_code": None,
         "runtime_identity": None,
+        "migration": None,
     }
 
 
@@ -252,6 +253,48 @@ def validate_record(record: dict, service: str) -> None:
             _fail("SCHEMA_INVALID")
         digest = identity["executable_sha256"]
         if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            _fail("SCHEMA_INVALID")
+    migration = record["migration"]
+    if migration is not None:
+        migration_fields = {
+            "source_schema",
+            "source_state",
+            "source_revision",
+            "probes_used",
+            "repair_count",
+            "clean_stop",
+            "active_attempt",
+            "recent_failures",
+        }
+        if type(migration) is not dict or set(migration) != migration_fields:
+            _fail("SCHEMA_INVALID")
+        if migration["source_schema"] != "cd.service-crash.v1" or migration["source_state"] not in {
+            "READY", "STARTING", "RUNNING", "LATCHED", "PROBE", "UNAVAILABLE"
+        }:
+            _fail("SCHEMA_INVALID")
+        for name in ("source_revision", "probes_used", "repair_count"):
+            if type(migration[name]) is not int or not 0 <= migration[name] < 2**63:
+                _fail("SCHEMA_INVALID")
+        if migration["source_revision"] > record["revision"] or migration["probes_used"] > 1:
+            _fail("SCHEMA_INVALID")
+        if type(migration["clean_stop"]) is not bool or type(migration["active_attempt"]) is not bool:
+            _fail("SCHEMA_INVALID")
+        if type(migration["recent_failures"]) is not list or len(migration["recent_failures"]) > MAX_HISTORY:
+            _fail("SCHEMA_INVALID")
+        for item in migration["recent_failures"]:
+            if type(item) is not dict or set(item) != {"generation", "boot", "code", "tick"}:
+                _fail("SCHEMA_INVALID")
+            if type(item["generation"]) is not int or not 0 <= item["generation"] <= record["generation"]:
+                _fail("SCHEMA_INVALID")
+            if type(item["boot"]) is not str or len(item["boot"]) > 128 or any(
+                character not in "0123456789abcdef-" for character in item["boot"]
+            ):
+                _fail("SCHEMA_INVALID")
+            if type(item["code"]) is not str or not 1 <= len(item["code"]) <= 64 or not item["code"].isascii():
+                _fail("SCHEMA_INVALID")
+            if type(item["tick"]) not in (int, float) or not math.isfinite(item["tick"]) or not 0 <= item["tick"] <= 10**12:
+                _fail("SCHEMA_INVALID")
+        if record["cumulative_failures"] < len(migration["recent_failures"]):
             _fail("SCHEMA_INVALID")
     if len(_canonical(record)) > MAX_RECORD_BYTES // 2:
         _fail("CRASH_STORE_OVERSIZE")
