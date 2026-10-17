@@ -36,7 +36,6 @@ $builder=Join-Path $Repository 'scripts\agent_release\build_pinned_release.py'
 $provenance=Join-Path $Repository 'scripts\agent_release\verify_git_zip_provenance.py'
 $releaseManager=Join-Path $Repository 'scripts\agent_release\release_manager.py'
 $runtimeManager=Join-Path $Repository 'scripts\agent_release\runtime_manager.py'
-$bootstrap=Join-Path $Repository 'scripts\agent_release\agent_service_bootstrap.py'
 foreach($target in @($zipA,$zipB)) {
     if(-not (Test-Path -LiteralPath $target -PathType Leaf)) {
         [void](Invoke-PythonJson @($builder,'--repo',$Repository,'--commit',$commitLower,'--out',$target))
@@ -54,10 +53,17 @@ $candidateRoot=Join-Path $runtimeVerifyParent $commitLower
 $runtimeRoot=Join-Path $candidateRoot 'runtime'
 [void](New-Item -ItemType Directory -Path $runtimeVerifyParent -ErrorAction Stop)
 try {
+    $bootstrapPlaceholder=Join-Path $runtimeVerifyParent 'agent_service_bootstrap.py'
+    [IO.File]::WriteAllText($bootstrapPlaceholder,"# inert extraction placeholder`n",(New-Object Text.UTF8Encoding($false)))
     [void](Invoke-PythonJson @(
         $releaseManager,'extract','--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower,
-        '--dest',$candidateRoot,'--bootstrap',$bootstrap
+        '--dest',$candidateRoot,'--bootstrap',$bootstrapPlaceholder
     ))
+    $trackedBootstrap=Join-Path $candidateRoot 'scripts\agent_release\agent_service_bootstrap.py'
+    $rootBootstrap=Join-Path $candidateRoot 'agent_service_bootstrap.py'
+    [IO.File]::WriteAllBytes($rootBootstrap,[IO.File]::ReadAllBytes($trackedBootstrap))
+    if((Get-FileHash -Algorithm SHA256 -LiteralPath $rootBootstrap).Hash -ne
+       (Get-FileHash -Algorithm SHA256 -LiteralPath $trackedBootstrap).Hash){throw 'BOOTSTRAP_PROVENANCE_MISMATCH'}
     $runtime=Invoke-PythonJson @($runtimeManager,'extract','--zip',$RuntimeZip,'--sha256',$RuntimeSHA256,'--dest',$runtimeRoot)
     $runtimePython=Join-Path $runtimeRoot 'python.exe'
     $closureScript=Join-Path $candidateRoot 'tests\test_agent_import_closure_v1.py'
