@@ -6,6 +6,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -14,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
 from control_plane.distribution_repository import DistributionRepository
+from control_plane.cloud_soc_v2 import CloudSocError, CloudSocRepository, CloudSocService
 from control_plane.fleet_protocol import FleetProtocolError, SlidingWindowLimiter, validate_token, verify_request
 from control_plane.xdr_compat import (
     CAPABILITY_RESPONSE_EVIDENCE,
@@ -56,6 +58,7 @@ _DOWNLOAD_LIMITER = SlidingWindowLimiter(
     limit=int(os.getenv("CYBERDEFENDER_DOWNLOAD_RATE_LIMIT", "60")),
     window_seconds=60,
 )
+_TENANT_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 def _token() -> str:
@@ -69,6 +72,47 @@ def _token() -> str:
 
 def _read_token() -> str:
     return os.getenv("CYBERDEFENDER_DISTRIBUTION_READ_TOKEN", "").strip()
+
+
+def _v2_read_token(tenant_id: str) -> str:
+    raw = os.getenv("CYBERDEFENDER_CLOUD_SOC_READ_TOKENS_JSON", "").strip()
+    if not raw or len(raw) > 32 * 1024:
+        return ""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(value, dict) or not value or len(value) > 1_000:
+        return ""
+    normalized = {}
+    seen_tokens = set()
+    for tenant, token in value.items():
+        if (not isinstance(tenant, str) or not _TENANT_ID_RE.fullmatch(tenant) or
+                not isinstance(token, str) or not 32 <= len(token.strip()) <= 512 or
+                token.strip() in seen_tokens):
+            return ""
+        normalized[tenant] = token.strip()
+        seen_tokens.add(token.strip())
+    return normalized.get(str(tenant_id).strip().lower(), "")
+
+
+def _cloud_v2_enabled() -> bool:
+    return os.getenv("CYBERDEFENDER_CLOUD_SOC_V2", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _v2_endpoint_path(path: str) -> tuple[str, str] | None:
+    parts = path.strip("/").split("/")
+    if len(parts) == 5 and parts[:3] == ["api", "v2", "endpoints"]:
+        if parts[4] in {"heartbeat", "event-batches"}:
+            return parts[3], parts[4]
+    return None
+
+
+def _v2_owner_tenant(path: str) -> str | None:
+    parts = path.strip("/").split("/")
+    if len(parts) == 6 and parts[:4] == ["api", "v2", "owner", "tenants"] and parts[5] == "fleet":
+        return parts[4]
+    return None
 
 
 def _authorized(value: str | None, expected: str | None = None) -> bool:
@@ -351,6 +395,27 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/health":
             self._json(200, {"status": "ok"})
             return
+        v2_tenant = _v2_owner_tenant(parsed.path)
+        if v2_tenant is not None:
+            if not _cloud_v2_enabled():
+                self._json(404, {"error": "NOT_FOUND"})
+                return
+            if not _private_network_host(self.headers.get("Host")):
+                self._json(404, {"error": "NOT_FOUND"})
+                return
+            if not _authorized(self.headers.get("Authorization"), _v2_read_token(v2_tenant)):
+                self._json(403, {"error": "TENANT_ACCESS_DENIED"})
+                return
+            repository = CloudSocRepository(DB)
+            try:
+                self._json(200, repository.tenant_snapshot(v2_tenant, now=time.time()))
+            except CloudSocError as exc:
+                self._json(exc.status, {"error": exc.code})
+            except sqlite3.Error:
+                self._json(503, {"error": "STORAGE_UNAVAILABLE"})
+            finally:
+                repository.close()
+            return
         if parsed.path in {
             "/api/v1/owner/summary",
             "/api/v1/owner/xdr/ocsf/device-inventory",
@@ -414,6 +479,45 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        v2_endpoint = _v2_endpoint_path(parsed.path)
+        if parsed.path == "/api/v2/enrollment" or v2_endpoint is not None:
+            if not _cloud_v2_enabled():
+                self._json(404, {"error": "NOT_FOUND"})
+                return
+            if self.headers.get_content_type().lower() != "application/json":
+                self._json(415, {"error": "CONTENT_TYPE_REQUIRED"})
+                return
+            if not _AUTH_LIMITER.allow("cloud-v2:" + self._client_key()):
+                self._json(429, {"error": "RATE_LIMITED"})
+                return
+            try:
+                raw, body = self._body()
+            except OverflowError:
+                self.close_connection = True
+                self._json(413, {"error": "REQUEST_TOO_LARGE"})
+                return
+            except ValueError:
+                self._json(400, {"error": "INVALID_REQUEST"})
+                return
+            repository = CloudSocRepository(DB)
+            try:
+                if parsed.path == "/api/v2/enrollment":
+                    self._json(201, repository.enroll(body, now=time.time()))
+                    return
+                service = CloudSocService(repository)
+                endpoint_id, operation = v2_endpoint
+                if operation == "heartbeat":
+                    result = service.ingest_heartbeat(endpoint_id, raw, self.headers)
+                else:
+                    result = service.ingest_events(endpoint_id, raw, self.headers)
+                self._json(200, result)
+            except CloudSocError as exc:
+                self._json(exc.status, {"error": exc.code})
+            except sqlite3.Error:
+                self._json(503, {"error": "STORAGE_UNAVAILABLE"})
+            finally:
+                repository.close()
+            return
         if parsed.path not in {
             "/api/v1/enrollment/register",
             "/api/v1/endpoints/heartbeat",
