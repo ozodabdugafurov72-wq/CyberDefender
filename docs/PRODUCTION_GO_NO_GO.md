@@ -156,3 +156,9 @@
 | Release source `87d8848bcf831ad13b9a0255a31eabe259b0e8a2` produced two byte-identical 609-file ZIPs at SHA-256 `41a9e6ac30b26b0ca29d64c31cb58a8c9fe198bd15dcdcaad10de35b5cb52e52`; complete Git-object-to-ZIP provenance passed 609/609 for both builds. | VERIFIED | Deterministic Git-object builds and provenance verifier | 2026-10-17T08:39:16.5059448Z |
 | Runtime ZIP remains SHA-256 `7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2`; source-commit installer SHA-256 is `8b5b5b5cc4af3e76fcbbf55f5cbe9e0d6d0f550d3e8109cc678bc62f38557f19`. Elevated PLAN remains pending; no APPLY, probe, restart, service mutation or live spool write occurred. | BLOCKED | Hash-pinned local artifacts; operator PLAN gate | 2026-10-17T08:39:16.5059448Z |
 | Canonical builds used only committed Git objects. The separate cloud worktree has 16 unexpected tracked deletions and was read-only in this flow; no restore or clean was run there. Earlier release `b4e4420` was also reconstructed from commit blobs, so those missing working-tree files could not affect it. | VERIFIED | Worktree status/reflog and release-builder contract | 2026-10-17T08:39:16.5059448Z |
+
+## P0 final recovery re-entry
+
+| Claim | Label | Evidence | UTC time |
+|---|---|---|---|
+| WP0 re-entry verified canonical HEAD `0025bc6` and matching remote branches for Agent P0, cloud idempotency, and CrashGuard v2. Required fixes `576bcbb`, `a6de890`, `f919e26`, `7224a95` and `e136271` are ancestors. The preserved six-file ACL gate delta remains uncommitted. Prior source/installer PLAN artifacts are VOID; pinned runtime remains unchanged. | VERIFIED | Targeted git status, ancestry, log and remote-ref checks | 2026-10-17T14:45:03.389Z |
