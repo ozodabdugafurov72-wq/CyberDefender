@@ -1,6 +1,6 @@
 # CyberDefender Cloud SOC v2 contract
 
-Status: review branch only; default disabled; no production deployment.  
+Status: review branch only; default disabled; no production deployment.
 Protocol: `cyberdefender.cloud.v2`
 
 ## Trust and enrollment
