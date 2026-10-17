@@ -89,6 +89,7 @@ class PostPlanFailureBatchTests(unittest.TestCase):
             "Get-FileHash",
             "RedirectStandardOutput",
             "RedirectStandardError",
+            "RecoverStoppedAgent",
             "PLAN_FAIL:",
             "PLAN_PASS",
         ):

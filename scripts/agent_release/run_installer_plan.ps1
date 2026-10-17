@@ -9,6 +9,7 @@ param(
     [Parameter(Mandatory=$true)][string]$RuntimeZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedRuntimeZipSHA256,
     [Parameter(Mandatory=$true)][string]$ResultPath,
+    [switch]$RecoverStoppedAgent,
     [switch]$AcknowledgeCompanionDegraded
 )
 
@@ -52,6 +53,7 @@ try {
         '-ApprovedCommit',$ApprovedCommit,'-RuntimeZip',$RuntimeZip,
         '-ApprovedRuntimeZipSHA256',$ApprovedRuntimeZipSHA256
     )
+    if($RecoverStoppedAgent.IsPresent){$arguments+='-RecoverStoppedAgent'}
     if($AcknowledgeCompanionDegraded.IsPresent){$arguments+='-AcknowledgeCompanionDegraded'}
     $process=Start-Process -FilePath $powershell -ArgumentList $arguments -Wait -PassThru -NoNewWindow `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
