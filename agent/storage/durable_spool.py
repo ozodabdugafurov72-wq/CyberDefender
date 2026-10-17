@@ -190,10 +190,10 @@ class DurableEventSpool:
         self._last_admission_reason: str | None = None
         self._last_capacity_status = "NORMAL"
         self._terminal_state_safe = True
-        # ACK commit may durably reach max_terminal_records + 1 immediately
-        # before pending-file compaction prunes the oldest tombstone.  A crash
-        # in that narrow window is recoverable only by compacting pending
-        # evidence first; the extra tombstone must never be dropped first.
+        # Historical ACK writers could durably reach
+        # max_terminal_records + 1 immediately before pending-file compaction.
+        # Recovery is allowed only with a matching ordered compatibility
+        # journal, and only after pending evidence is compacted.
         self._terminal_repair_required = False
         self._terminal_compactions = 0
         self._terminal_compaction_failures = 0
@@ -594,7 +594,7 @@ class DurableEventSpool:
 
             ack_order = self._bounded_unique_order(self._acked_order, self._acked, limit)
             ack_set = set(ack_order)
-            self._persist_ack_state(ack_set)
+            self._persist_ack_state(ack_set, ordered_ids=ack_order)
             try:
                 self._rewrite_jsonl(
                     self.acked_path,
@@ -797,8 +797,21 @@ class DurableEventSpool:
                     return set()
                 snapshot_ids.update(normalized)
                 if len(normalized) == limit + 1:
+                    repair_order = self._read_legacy_ack_order_for_repair(
+                        snapshot_ids,
+                        expected_records=limit + 1,
+                    )
+                    if repair_order is None:
+                        self._corrupted += 1
+                        self._terminal_state_safe = False
+                        return set()
+                    self._acked_order = repair_order
                     self._terminal_repair_required = True
-                self._acked_order = sorted(snapshot_ids)
+                else:
+                    # New snapshots preserve ACK insertion order. Historical
+                    # bounded snapshots may be sorted, which is safe until a
+                    # new ACK rewrites them with an authoritative order.
+                    self._acked_order = normalized
                 return snapshot_ids
             except Exception:
                 self._corrupted += 1
@@ -826,9 +839,60 @@ class DurableEventSpool:
         self._acked_order = order
         return result
 
+    def _read_legacy_ack_order_for_repair(
+        self,
+        snapshot_ids: set[str],
+        *,
+        expected_records: int,
+    ) -> list[str] | None:
+        """Read exact historical ACK order for a limit+1 repair.
+
+        The atomic snapshot proves membership but historical versions sorted
+        it. The compatibility journal is therefore accepted as ordering
+        evidence only when it is bounded, strictly shaped, duplicate-free and
+        byte-for-byte equivalent by normalized event-id set.
+        """
+
+        if not self.acked_path.exists() or not self._terminal_file_safe(self.acked_path):
+            return None
+        try:
+            if self.acked_path.stat().st_size > max(
+                1, int(self.policy.max_terminal_state_bytes)
+            ):
+                return None
+            order: list[str] = []
+            seen: set[str] = set()
+            scanned = 0
+            with self.acked_path.open("rb") as handle:
+                for raw_line in handle:
+                    scanned += len(raw_line)
+                    if scanned > max(1, int(self.policy.max_terminal_state_bytes)):
+                        return None
+                    line = raw_line.strip()
+                    if not line:
+                        return None
+                    record = json.loads(line.decode("utf-8"))
+                    if not isinstance(record, dict) or set(record) != {"event_id"}:
+                        return None
+                    event_id = record.get("event_id")
+                    if not isinstance(event_id, str) or not event_id.strip():
+                        return None
+                    event_id = event_id.strip()
+                    if event_id in seen or len(order) >= expected_records:
+                        return None
+                    seen.add(event_id)
+                    order.append(event_id)
+            if len(order) != expected_records or seen != snapshot_ids:
+                return None
+            return order
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
+            return None
+
     def _persist_ack_state(
         self,
         acked_ids: set[str],
+        *,
+        ordered_ids: list[str] | None = None,
     ) -> None:
         """
         Atomically persist the complete ACK terminal-state set.
@@ -844,12 +908,23 @@ class DurableEventSpool:
         snapshot intact. A crash after os.replace() leaves the new snapshot.
         """
 
-        normalized = sorted(
+        normalized_set = {
             event_id.strip()
             for event_id in acked_ids
-            if isinstance(event_id, str)
-            and event_id.strip()
-        )
+            if isinstance(event_id, str) and event_id.strip()
+        }
+        if normalized_set != acked_ids:
+            raise SpoolError("ACK terminal state contains invalid identifiers")
+        if ordered_ids is None:
+            normalized = sorted(normalized_set)
+        else:
+            normalized = [
+                event_id.strip()
+                for event_id in ordered_ids
+                if isinstance(event_id, str) and event_id.strip()
+            ]
+            if len(normalized) != len(set(normalized)) or set(normalized) != normalized_set:
+                raise SpoolError("ACK terminal order does not match terminal state")
         if len(normalized) > max(1, int(self.policy.max_terminal_records)):
             raise SpoolError("ACK terminal state exceeds bounded record limit")
 
@@ -930,7 +1005,8 @@ class DurableEventSpool:
         if legacy_ids:
             try:
                 self._persist_ack_state(
-                    legacy_ids
+                    legacy_ids,
+                    ordered_ids=self._acked_order,
                 )
                 self._ack_recoveries += 1
             except Exception:
@@ -1871,10 +1947,18 @@ class DurableEventSpool:
                 self._ack_failures += 1
                 return False
 
+        next_order = [item for item in self._acked_order if item in next_acked]
+        for missing in sorted(next_acked):
+            if missing != event_id and missing not in next_order:
+                next_order.append(missing)
+        if event_id not in next_order:
+            next_order.append(event_id)
+
         try:
             # Atomic durable commit.
             self._persist_ack_state(
-                next_acked
+                next_acked,
+                ordered_ids=next_order,
             )
 
         except Exception:
@@ -1883,9 +1967,7 @@ class DurableEventSpool:
 
         # Only after durable snapshot commit do we update memory.
         self._acked = next_acked
-        self._acked_order = [item for item in self._acked_order if item in next_acked]
-        if event_id not in self._acked_order:
-            self._acked_order.append(event_id)
+        self._acked_order = next_order
         self._mark_pending_terminal(event_id)
 
         # Compatibility/audit journal. Failure here must NOT roll back the

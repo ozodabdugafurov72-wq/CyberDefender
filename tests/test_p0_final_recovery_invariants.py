@@ -13,7 +13,7 @@ from agent.event import SecurityEvent
 from agent.service_crash_guard import CrashPolicy, FAILURE_CODES, fresh_record
 import agent.service_crash_store as crash_store
 from agent.service_lifecycle import run_guarded_service
-from agent.storage.durable_spool import DurableEventSpool, DurableSpoolPolicy
+from agent.storage.durable_spool import DurableEventSpool, DurableSpoolPolicy, SpoolError
 
 
 class MemoryStore:
@@ -36,6 +36,19 @@ class MemoryStore:
 
 
 class FinalRecoveryInvariants(unittest.TestCase):
+    def test_ack_snapshot_exact_production_boundaries(self):
+        with tempfile.TemporaryDirectory(prefix="cd-ack-boundary-") as raw:
+            spool = DurableEventSpool(Path(raw), policy=DurableSpoolPolicy())
+            for count in (0, 1, 16_383, 16_384):
+                ordered = [f"event-{index:05d}" for index in range(count)]
+                spool._persist_ack_state(set(ordered), ordered_ids=ordered)
+                state = json.loads(spool.acked_state_path.read_text(encoding="utf-8"))
+                self.assertEqual(count, len(state["acked_ids"]))
+
+            overflow = [f"event-{index:05d}" for index in range(16_385)]
+            with self.assertRaises(SpoolError):
+                spool._persist_ack_state(set(overflow), ordered_ids=overflow)
+
     def test_ack_writer_never_commits_above_terminal_limit(self):
         policy = DurableSpoolPolicy(
             max_pending_events=8,
