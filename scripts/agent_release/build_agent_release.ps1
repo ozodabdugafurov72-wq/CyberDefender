@@ -36,6 +36,7 @@ $builder=Join-Path $Repository 'scripts\agent_release\build_pinned_release.py'
 $provenance=Join-Path $Repository 'scripts\agent_release\verify_git_zip_provenance.py'
 $releaseManager=Join-Path $Repository 'scripts\agent_release\release_manager.py'
 $runtimeManager=Join-Path $Repository 'scripts\agent_release\runtime_manager.py'
+$bootstrap=Join-Path $Repository 'scripts\agent_release\agent_service_bootstrap.py'
 foreach($target in @($zipA,$zipB)) {
     if(-not (Test-Path -LiteralPath $target -PathType Leaf)) {
         [void](Invoke-PythonJson @($builder,'--repo',$Repository,'--commit',$commitLower,'--out',$target))
@@ -49,10 +50,27 @@ $provA=Invoke-PythonJson @($provenance,'--repo',$Repository,'--zip',$zipA,'--sha
 $provB=Invoke-PythonJson @($provenance,'--repo',$Repository,'--zip',$zipB,'--sha256',$shaB,'--commit',$commitLower)
 $source=Invoke-PythonJson @($releaseManager,'verify','--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower)
 $runtimeVerifyParent=Join-Path $OutputDirectory ('.runtime-verify-' + [Guid]::NewGuid().ToString('N'))
-$runtimeRoot=Join-Path $runtimeVerifyParent 'runtime'
+$candidateRoot=Join-Path $runtimeVerifyParent $commitLower
+$runtimeRoot=Join-Path $candidateRoot 'runtime'
 [void](New-Item -ItemType Directory -Path $runtimeVerifyParent -ErrorAction Stop)
 try {
+    [void](Invoke-PythonJson @(
+        $releaseManager,'extract','--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower,
+        '--dest',$candidateRoot,'--bootstrap',$bootstrap
+    ))
     $runtime=Invoke-PythonJson @($runtimeManager,'extract','--zip',$RuntimeZip,'--sha256',$RuntimeSHA256,'--dest',$runtimeRoot)
+    $runtimePython=Join-Path $runtimeRoot 'python.exe'
+    $closureScript=Join-Path $candidateRoot 'tests\test_agent_import_closure_v1.py'
+    $savedPythonPath=$env:PYTHONPATH
+    try {
+        Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+        $closureOutput=& $runtimePython -I $closureScript --release-root $candidateRoot
+        if($LASTEXITCODE -ne 0){throw 'IMPORT_CLOSURE_FAILED'}
+        $closure=($closureOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        if($closure.status -ne 'IMPORT_CLOSURE_PASS'){throw 'IMPORT_CLOSURE_FAILED'}
+    } finally {
+        if($null -ne $savedPythonPath){$env:PYTHONPATH=$savedPythonPath}
+    }
     $rootPrefix=[IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\')+'\'
     $signedFiles=@((Join-Path $runtimeRoot 'python.exe')) + @(
         Get-ChildItem -LiteralPath $runtimeRoot -Filter *.dll -File -Recurse | Select-Object -ExpandProperty FullName
@@ -70,6 +88,7 @@ try {
     $unsigned=@($signatures | Where-Object status -eq 'NotSigned').Count
     $other=$signatures.Count-$valid-$unsigned
     if($other -ne 0){throw 'RUNTIME_AUTHENTICODE_INVALID'}
+    $closureThirdPartyCount=@($closure.third_party.psobject.Properties).Count
 } finally {
     if(Test-Path -LiteralPath $runtimeVerifyParent){Remove-Item -LiteralPath $runtimeVerifyParent -Recurse -Force}
 }
@@ -93,6 +112,12 @@ $result=[ordered]@{
     runtime_sha256=$RuntimeSHA256.ToLowerInvariant()
     runtime_files=[int]$runtime.files
     runtime_bytes=[int64]$runtime.bytes
+    import_closure_status=$closure.status
+    import_closure_project_modules=[int]$closure.project_modules
+    import_closure_third_party=[int]$closureThirdPartyCount
+    import_closure_pythonpath_present=[bool]$closure.pythonpath_present
+    import_closure_legacy_origin=[bool]$closure.legacy_origin
+    import_closure_user_site_origin=[bool]$closure.user_site_origin
     authenticode_valid=$valid
     authenticode_unsigned=$unsigned
     authenticode_other=$other
