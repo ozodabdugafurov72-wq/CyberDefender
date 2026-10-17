@@ -591,6 +591,7 @@ class CloudSocRepository:
                     (tenant_id, endpoint_id, request_id, kind, first, last, normalized["boot_id"],
                      normalized.get("observed_at"), received, verified.digest, payload_json),
                 )
+                duplicate_events = 0
                 if kind == "HEARTBEAT":
                     self._conn.execute(
                         """UPDATE cloud_endpoints SET last_sequence=?,last_boot_id=?,last_heartbeat_received=?,
@@ -605,13 +606,32 @@ class CloudSocRepository:
                     )
                 else:
                     for event in normalized["events"]:
+                        payload_json = json.dumps(
+                            event["payload"], sort_keys=True, separators=(",", ":")
+                        )
+                        existing_event = self._conn.execute(
+                            """SELECT observed_at,event_type,priority,payload_json
+                               FROM cloud_events
+                               WHERE tenant_id=? AND endpoint_id=? AND event_id=?""",
+                            (tenant_id, endpoint_id, event["event_id"]),
+                        ).fetchone()
+                        if existing_event is not None:
+                            if not (
+                                float(existing_event["observed_at"])
+                                == float(event["observed_at"])
+                                and existing_event["event_type"] == event["type"]
+                                and existing_event["priority"] == event["priority"]
+                                and existing_event["payload_json"] == payload_json
+                            ):
+                                raise CloudSocError("EVENT_ID_CONFLICT", status=409)
+                            duplicate_events += 1
+                            continue
                         self._conn.execute(
                             """INSERT INTO cloud_events(
                               tenant_id,endpoint_id,event_id,sequence,observed_at,received_at,event_type,
                               priority,payload_json) VALUES(?,?,?,?,?,?,?,?,?)""",
                             (tenant_id, endpoint_id, event["event_id"], event["seq"], event["observed_at"],
-                             received, event["type"], event["priority"],
-                             json.dumps(event["payload"], sort_keys=True, separators=(",", ":"))),
+                              received, event["type"], event["priority"], payload_json),
                         )
                     self._conn.execute(
                         "UPDATE cloud_endpoints SET last_sequence=?,last_boot_id=? WHERE tenant_id=? AND endpoint_id=?",
@@ -624,7 +644,16 @@ class CloudSocRepository:
                 if int(count) > MAX_RETENTION_RECORDS_PER_ENDPOINT:
                     raise CloudSocError("RETENTION_LIMIT_REACHED", status=429)
                 self._conn.execute("COMMIT")
-                return {"status": "ACK", "accepted_through": last, "server_time": received}
+                if kind == "EVENT_BATCH" and duplicate_events == len(normalized["events"]):
+                    return {
+                        "status": "DUPLICATE_ACK",
+                        "accepted_through": last,
+                        "duplicates": duplicate_events,
+                    }
+                response = {"status": "ACK", "accepted_through": last, "server_time": received}
+                if duplicate_events:
+                    response["duplicates"] = duplicate_events
+                return response
             except Exception:
                 if self._conn.in_transaction:
                     self._conn.execute("ROLLBACK")

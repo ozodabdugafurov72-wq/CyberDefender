@@ -203,6 +203,61 @@ class CloudSocV2SecurityTests(unittest.TestCase):
         self.assertEqual(reopened["summary"]["online"], 1)
         self.assertEqual(sum(row["count"] for row in reopened["event_summary"]), 2)
 
+    def test_evicted_local_ack_replay_is_idempotent_by_event_id(self):
+        self.heartbeat(self.enrolled_a, self.key_a, 1)
+        endpoint_id = self.enrolled_a["endpoint_id"]
+        path = f"/api/v2/endpoints/{endpoint_id}/event-batches"
+
+        def send(sequence: int, batch_id: str, payload: dict) -> dict:
+            batch = {
+                "schema": "cyberdefender.event-batch.v2",
+                "batch_id": batch_id,
+                "endpoint_id": endpoint_id,
+                "boot_id": "11111111-1111-4111-8111-111111111111",
+                "first_seq": sequence,
+                "last_seq": sequence,
+                "events": [
+                    {
+                        "event_id": "stable-event-id",
+                        "seq": sequence,
+                        "observed_at": self.now[0],
+                        "type": "DETECTION",
+                        "priority": "HIGH",
+                        "payload": payload,
+                    }
+                ],
+            }
+            raw = encoded(batch)
+            headers = signature_headers(
+                self.key_a,
+                credential_id=self.enrolled_a["credential_id"],
+                path=path,
+                body=raw,
+                sequence=sequence,
+                timestamp=int(self.now[0]),
+            )
+            return self.service.ingest_events(endpoint_id, raw, headers)
+
+        self.assertEqual("ACK", send(2, "batch-original", {"rule": "canary"})["status"])
+        duplicate = send(3, "batch-replay", {"rule": "canary"})
+
+        self.assertEqual(
+            {"status": "DUPLICATE_ACK", "accepted_through": 3, "duplicates": 1},
+            duplicate,
+        )
+        rows = self.repo._conn.execute(
+            "SELECT event_id FROM cloud_events WHERE tenant_id=? AND endpoint_id=?",
+            ("tenant-a", endpoint_id),
+        ).fetchall()
+        self.assertEqual(["stable-event-id"], [row["event_id"] for row in rows])
+        with self.assertRaisesRegex(CloudSocError, "EVENT_ID_CONFLICT"):
+            send(4, "batch-conflict", {"rule": "changed"})
+        endpoint = self.repo._conn.execute(
+            "SELECT last_sequence FROM cloud_endpoints WHERE tenant_id=? AND endpoint_id=?",
+            ("tenant-a", endpoint_id),
+        ).fetchone()
+        self.assertEqual(3, endpoint["last_sequence"])
+
     def test_stale_heartbeat_cannot_report_online(self):
         self.heartbeat(self.enrolled_a, self.key_a, 1)
         self.assertEqual(self.repo.tenant_snapshot("tenant-a", now=self.now[0])["summary"]["online"], 1)

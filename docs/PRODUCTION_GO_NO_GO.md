@@ -164,3 +164,9 @@
 | The Owner read boundary now independently rejects stale ONLINE claims, fresh OFFLINE claims, missing live measurements, future-skewed observations and summary/evidence count mismatches. | PATCHED/TESTED | `owner_cloud/distribution_client.py`; focused regressions | 2026-10-17T05:10:00Z |
 | Review-branch Owner login now requires per-account TOTP, persists and rejects reused counters, invalidates pre-MFA sessions, and fails production-like startup when secrets are missing, malformed, shared or incomplete. Secrets remain Railway Variables only. | PATCHED/TESTED | Owner MFA focused security tests | 2026-10-17T05:30:00Z |
 | Managed PostgreSQL, verified backup/restore, multi-replica HA/monitoring, real staging telemetry and Agent RUNNING/3x HEALTHY/STABLE are still evidence gates; none is labeled fixed by source-only changes. | BLOCKED | Production acceptance contract | 2026-10-17T05:30:00Z |
+## 2026-10-17 evicted-ACK replay closure
+
+| Claim | Label | Evidence | UTC time |
+|---|---|---|---|
+| Cloud SOC event ingestion is idempotent on tenant, endpoint and event ID: an exact replay at a new valid sequence advances the transactional ACK without duplicating the durable event; changed content for the same event ID fails closed with `EVENT_ID_CONFLICT` and rolls back sequence state. | PATCHED/TESTED | `control_plane/cloud_soc_v2.py`; focused evicted-ACK replay regression | 2026-10-17T08:17:35.931Z |
+| No Railway service, production data, credential, domain or deployment was changed. | VERIFIED | Local review branch only | 2026-10-17T08:17:35.931Z |
