@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import re
 import tempfile
 import unittest
@@ -11,6 +12,11 @@ from owner_cloud.app import Application, Request
 from owner_cloud.config import Config
 from owner_cloud.security import Account, hash_password
 from owner_cloud.store import OwnerStore
+from owner_cloud.totp import code_at, normalized_secret
+
+
+OWNER_TOTP = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+ADMIN_TOTP = "IFSG22LOFVKGK43UFVGUMQJNJNSXSLJRGIZTI"
 
 
 class FakeDistribution:
@@ -53,6 +59,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
             distribution_read_token="x" * 48,
             allowed_hosts=("owner.test",),
             tenant_id="tenant-test",
+            mfa_secrets={"owner": OWNER_TOTP, "admin": ADMIN_TOTP},
             secure_cookies=True,
             session_ttl_seconds=3600,
             session_idle_seconds=900,
@@ -100,11 +107,13 @@ class OwnerCloudSecurityTests(unittest.TestCase):
             raise AssertionError("CSRF token not found")
         return match.group(1)
 
-    def login(self, username="owner", password="Owner-Test-Password-42!"):
+    def login(self, username="owner", password="Owner-Test-Password-42!", otp=None):
         page = self.request("GET", "/login")
         csrf = self.csrf(page)
         preauth = self.cookie(page, self.config.preauth_cookie_name)
-        body = urlencode({"username": username, "password": password, "csrf_token": csrf})
+        secret = self.config.mfa_secrets.get(username, OWNER_TOTP)
+        body = urlencode({"username": username, "password": password,
+                          "otp": otp or code_at(secret, int(self.now[0] // 30)), "csrf_token": csrf})
         response = self.request("POST", "/login", cookie=preauth, body=body)
         self.assertEqual(response.status, 303)
         return self.cookie(response, self.config.session_cookie_name), response
@@ -132,6 +141,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         state_payload = json.loads(state.body)
         self.assertTrue(state_payload["mode"] == "READ_ONLY")
         self.assertEqual(state_payload["security"]["authentication"], "ENFORCED")
+        self.assertEqual(state_payload["security"]["mfa"], "TOTP_ENFORCED")
         self.assertEqual(state_payload["security"]["server_side_rbac"], "ENFORCED")
         self.assertEqual(state_payload["security"]["csrf"], "ENFORCED")
         self.assertFalse(state_payload["security"]["risk_is_authorization"])
@@ -152,7 +162,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         html = page.body.decode("utf-8")
         for element_id in (
             "xdrStatus", "xdrSchema", "xdrSigned", "xdrReplay", "xdrValidation",
-            "authGate", "rbacGate", "csrfGate", "actionGate", "trustGate",
+            "authGate", "mfaGate", "rbacGate", "csrfGate", "actionGate", "trustGate",
             "responseStatus", "responseTotal", "responseQuarantined", "responseRestored",
             "responseLatency", "responseEvidence", "fleetEvidence", "fleetEvidenceStatus", "eventSummary",
         ):
@@ -206,6 +216,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
                 {
                     "username": "owner",
                     "password": "wrong-password-value",
+                    "otp": "000000",
                     "csrf_token": self.csrf(page),
                 }
             )
@@ -218,6 +229,29 @@ class OwnerCloudSecurityTests(unittest.TestCase):
                 ).status
             )
         self.assertEqual(statuses, [401, 401, 429])
+
+    def test_mfa_is_required_and_totp_replay_is_denied(self):
+        page = self.request("GET", "/login")
+        body = urlencode({"username": "owner", "password": "Owner-Test-Password-42!",
+                          "otp": "000000", "csrf_token": self.csrf(page)})
+        denied = self.request("POST", "/login", cookie=self.cookie(page, self.config.preauth_cookie_name), body=body)
+        self.assertEqual(denied.status, 401)
+        self.now[0] += 30
+        self.login()
+        page = self.request("GET", "/login")
+        replay = urlencode({"username": "owner", "password": "Owner-Test-Password-42!",
+                            "otp": code_at(OWNER_TOTP, int(self.now[0] // 30)), "csrf_token": self.csrf(page)})
+        self.assertEqual(self.request("POST", "/login", cookie=self.cookie(page, self.config.preauth_cookie_name), body=replay).status, 401)
+
+    def test_mfa_secret_aliases_are_canonicalized_before_uniqueness_check(self):
+        canonical = base64.b32encode(b"A" * 21).decode("ascii").rstrip("=")
+        alias = canonical[:-1] + chr(ord(canonical[-1]) + 1)
+        self.assertEqual(normalized_secret(alias), canonical)
+        with self.assertRaisesRegex(ValueError, "unique per account"):
+            Config(**{**self.config.__dict__, "environment": "production",
+                "distribution_private_url": "http://cyberdefender.railway.internal:8080",
+                "allowed_hosts": ("app.cyberdefender-sec.uz",),
+                "mfa_secrets": {"owner": canonical, "admin": alias}}).validate()
 
     def test_client_hash_uses_stable_railway_real_ip(self):
         first = Request(
@@ -281,6 +315,17 @@ class OwnerCloudSecurityTests(unittest.TestCase):
                 }
             ).validate()
 
+        with self.assertRaisesRegex(ValueError, "requires a unique TOTP secret"):
+            Config(
+                **{
+                    **self.config.__dict__,
+                    "environment": "production",
+                    "distribution_private_url": "http://cyberdefender.railway.internal:8080",
+                    "allowed_hosts": ("app.cyberdefender-sec.uz",),
+                    "mfa_secrets": {},
+                }
+            ).validate()
+
     def test_session_and_audit_survive_store_reopen_without_credentials(self):
         session_cookie, _ = self.login()
         second_store = OwnerStore(self.config.db_path)
@@ -288,13 +333,13 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         self.assertTrue(any(row["action"] == "session.login" for row in rows))
         self.assertNotIn("Owner-Test-Password", json.dumps(rows))
         token = session_cookie.split("=", 1)[1]
-        self.assertIsNotNone(
-            second_store.get_session(
-                __import__("owner_cloud.security", fromlist=["token_hash"]).token_hash(token),
-                now=self.now[0],
-                idle_seconds=900,
-            )
+        persisted = second_store.get_session(
+            __import__("owner_cloud.security", fromlist=["token_hash"]).token_hash(token),
+            now=self.now[0],
+            idle_seconds=900,
         )
+        self.assertIsNotNone(persisted)
+        self.assertEqual(persisted["mfa_verified_at"], self.now[0])
 
 
 if __name__ == "__main__":

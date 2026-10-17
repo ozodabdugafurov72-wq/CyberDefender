@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
 from owner_cloud.security import Account, load_accounts
+from owner_cloud.totp import normalized_secret
 
 
 _TENANT_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -25,6 +27,7 @@ class Config:
     distribution_read_token: str
     allowed_hosts: tuple[str, ...]
     tenant_id: str = ""
+    mfa_secrets: dict[str, str] = field(default_factory=dict)
     secure_cookies: bool = True
     session_ttl_seconds: int = 8 * 60 * 60
     session_idle_seconds: int = 30 * 60
@@ -61,6 +64,12 @@ class Config:
                 raise ValueError("at least one allowed host is required")
             if not _TENANT_RE.fullmatch(self.tenant_id):
                 raise ValueError("a canonical owner tenant is required")
+            enabled = {name for name, account in self.accounts.items() if account.enabled}
+            if set(self.mfa_secrets) != enabled:
+                raise ValueError("every enabled owner account requires a unique TOTP secret")
+        normalized = {name: normalized_secret(secret) for name, secret in self.mfa_secrets.items()}
+        if len(set(normalized.values())) != len(normalized):
+            raise ValueError("TOTP secrets must be unique per account")
         if not 300 <= self.session_idle_seconds <= self.session_ttl_seconds:
             raise ValueError("invalid session lifetime")
         if not 900 <= self.session_ttl_seconds <= 24 * 60 * 60:
@@ -75,6 +84,12 @@ class Config:
         if _truthy(os.getenv("DEBUG")) or _truthy(os.getenv("CYBERDEFENDER_DEBUG")):
             raise ValueError("debug mode is forbidden")
         accounts = load_accounts(os.getenv("CYBERDEFENDER_OWNER_ACCOUNTS_JSON", ""))
+        try:
+            raw_mfa = json.loads(os.getenv("CYBERDEFENDER_OWNER_TOTP_SECRETS_JSON", "{}"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid owner TOTP configuration") from exc
+        if not isinstance(raw_mfa, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in raw_mfa.items()):
+            raise ValueError("invalid owner TOTP configuration")
         host_values = {
             value.strip().lower().split(":", 1)[0]
             for value in os.getenv("CYBERDEFENDER_OWNER_ALLOWED_HOSTS", "").split(",")
@@ -94,6 +109,7 @@ class Config:
             distribution_read_token=os.getenv("CYBERDEFENDER_DISTRIBUTION_READ_TOKEN", ""),
             allowed_hosts=tuple(sorted(host_values)),
             tenant_id=os.getenv("CYBERDEFENDER_OWNER_TENANT_ID", "").strip().lower(),
+            mfa_secrets={str(name).strip().lower(): normalized_secret(secret) for name, secret in raw_mfa.items()},
             secure_cookies=not _truthy(os.getenv("CYBERDEFENDER_ALLOW_INSECURE_COOKIES")),
             session_ttl_seconds=int(os.getenv("CYBERDEFENDER_SESSION_TTL_SECONDS", str(8 * 60 * 60))),
             session_idle_seconds=int(os.getenv("CYBERDEFENDER_SESSION_IDLE_SECONDS", str(30 * 60))),

@@ -7,7 +7,7 @@ from typing import Any
 
 
 class OwnerStore:
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path).expanduser().resolve()
@@ -41,6 +41,7 @@ class OwnerStore:
                     created_at REAL NOT NULL,
                     last_seen REAL NOT NULL,
                     expires_at REAL NOT NULL,
+                    mfa_verified_at REAL,
                     revoked_at REAL
                 );
                 CREATE INDEX IF NOT EXISTS idx_owner_sessions_expiry
@@ -52,6 +53,11 @@ class OwnerStore:
                     failure_count INTEGER NOT NULL,
                     locked_until REAL NOT NULL DEFAULT 0,
                     PRIMARY KEY(subject_hash, client_hash)
+                );
+                CREATE TABLE IF NOT EXISTS owner_mfa_state (
+                    username TEXT PRIMARY KEY,
+                    last_counter INTEGER NOT NULL,
+                    updated_at REAL NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS owner_audit (
                     audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,6 +75,9 @@ class OwnerStore:
                 COMMIT;
                 """
             )
+            columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(owner_sessions)")}
+            if "mfa_verified_at" not in columns:
+                conn.execute("ALTER TABLE owner_sessions ADD COLUMN mfa_verified_at REAL")
             row = conn.execute("SELECT COALESCE(MAX(version), 0) AS version FROM owner_schema").fetchone()
             if int(row["version"] or 0) < self.SCHEMA_VERSION:
                 conn.execute(
@@ -112,6 +121,7 @@ class OwnerStore:
         role: str,
         now: float,
         expires_at: float,
+        mfa_verified_at: float,
     ) -> None:
         conn = self._connect()
         try:
@@ -119,10 +129,10 @@ class OwnerStore:
                 """
                 INSERT INTO owner_sessions(
                     token_hash, csrf_hash, username, role, created_at,
-                    last_seen, expires_at, revoked_at
-                ) VALUES(?,?,?,?,?,?,?,NULL)
+                    last_seen, expires_at, mfa_verified_at, revoked_at
+                ) VALUES(?,?,?,?,?,?,?,?,NULL)
                 """,
-                (token_hash, csrf_hash, username, role, now, now, expires_at),
+                (token_hash, csrf_hash, username, role, now, now, expires_at, mfa_verified_at),
             )
         finally:
             conn.close()
@@ -135,6 +145,12 @@ class OwnerStore:
                 (token_hash,),
             ).fetchone()
             if row is None:
+                return None
+            if row["mfa_verified_at"] is None:
+                conn.execute(
+                    "UPDATE owner_sessions SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL",
+                    (now, token_hash),
+                )
                 return None
             if float(row["expires_at"]) <= now or float(row["last_seen"]) + idle_seconds <= now:
                 conn.execute(
@@ -223,6 +239,22 @@ class OwnerStore:
                 "DELETE FROM owner_login_failures WHERE subject_hash=? AND client_hash=?",
                 (subject_hash, client_hash),
             )
+        finally:
+            conn.close()
+
+    def consume_mfa_counter(self, username: str, counter: int, *, now: float) -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO owner_mfa_state(username,last_counter,updated_at) VALUES(?,?,?)
+                ON CONFLICT(username) DO UPDATE SET
+                    last_counter=excluded.last_counter, updated_at=excluded.updated_at
+                WHERE owner_mfa_state.last_counter < excluded.last_counter
+                """,
+                (str(username)[:64], int(counter), float(now)),
+            )
+            return cursor.rowcount == 1
         finally:
             conn.close()
 

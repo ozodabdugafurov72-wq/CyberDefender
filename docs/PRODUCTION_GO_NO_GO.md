@@ -154,3 +154,13 @@
 | The existing v1 fleet protocol remains compatible and all v2 routes return 404 by default. The focused cloud security batch passed 36/36 under the pinned runtime. | VERIFIED | Local focused test output | 2026-10-17T04:31:15Z |
 | Public read-only checks returned Owner health 200, login 200, unauthenticated state 401, HSTS and nosniff; Distribution health returned 200 and nosniff. No Railway setting or deployment was changed. | VERIFIED | Public HTTPS response metadata | 2026-10-17T04:31:15Z |
 | Mandatory MFA, managed PostgreSQL, backup/restore, HA, distributed limits, alerting, staging deployment, one real Agent integration, and Agent RUNNING/3x HEALTHY/STABLE remain open. | BLOCKED | Architecture acceptance gates | 2026-10-17T04:31:15Z |
+
+## 2026-10-17 cloud security follow-up
+
+| Claim | Label | Evidence | UTC time |
+|---|---|---|---|
+| Production Distribution lacks HSTS because its deployed `a33676c` lineage predates the header added after `237d42e`; Railway is not stripping the header. A minimal main-lineage hotfix `834f396` adds HSTS to JSON and download responses and passes 6/6 focused tests. | PATCHED/TESTED | Git ancestry, public HTTPS response, focused hotfix regression | 2026-10-17T05:15:00Z |
+| Staging Distribution source change to hotfix `834f396` is staged, isolated and non-destructive; deployment did not start because the external approval gate rejected `accept-deploy`. Production remains unchanged. | BLOCKED | Railway staged patch `d06b7401-6667-43e1-9226-62c932a8fa86` | 2026-10-17T05:16:00Z |
+| The Owner read boundary now independently rejects stale ONLINE claims, fresh OFFLINE claims, missing live measurements, future-skewed observations and summary/evidence count mismatches. | PATCHED/TESTED | `owner_cloud/distribution_client.py`; focused regressions | 2026-10-17T05:10:00Z |
+| Review-branch Owner login now requires per-account TOTP, persists and rejects reused counters, invalidates pre-MFA sessions, and fails production-like startup when secrets are missing, malformed, shared or incomplete. Secrets remain Railway Variables only. | PATCHED/TESTED | Owner MFA focused security tests | 2026-10-17T05:30:00Z |
+| Managed PostgreSQL, verified backup/restore, multi-replica HA/monitoring, real staging telemetry and Agent RUNNING/3x HEALTHY/STABLE are still evidence gates; none is labeled fixed by source-only changes. | BLOCKED | Production acceptance contract | 2026-10-17T05:30:00Z |

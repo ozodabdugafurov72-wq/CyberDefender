@@ -37,7 +37,7 @@ async function loadState(){
     set("xdrValidation",xdr.runtime_contract_validation===true?"ENFORCED":"UNAVAILABLE");
     set("responseTotal",summary.responses_total??0);set("responseQuarantined",summary.responses_quarantined??0);set("responseRestored",summary.responses_restored??0);
     set("responseLatency",summary.response_latency_ms_max==null?"—":`${Number(summary.response_latency_ms_max).toFixed(3)} ms`);renderResponses(dist.responses||[]);renderFleet(dist.endpoints||[]);renderEvents(dist.event_summary||[]);
-    set("authGate",security.authentication||"UNAVAILABLE");set("rbacGate",security.server_side_rbac||"UNAVAILABLE");
+    set("authGate",security.authentication||"UNAVAILABLE");set("mfaGate",security.mfa||"UNAVAILABLE");set("rbacGate",security.server_side_rbac||"UNAVAILABLE");
     set("csrfGate",security.csrf||"UNAVAILABLE");set("actionGate",security.privileged_actions||"UNAVAILABLE");
     set("trustGate",security.risk_is_authorization===false?"ENFORCED":"UNAVAILABLE");
     set("downloads",summary.downloads_completed);set("updated","Updated "+new Date().toLocaleTimeString());

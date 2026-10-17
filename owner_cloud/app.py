@@ -24,6 +24,7 @@ from owner_cloud.security import (
     verify_password,
 )
 from owner_cloud.store import OwnerStore
+from owner_cloud.totp import verify as verify_totp
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -159,6 +160,7 @@ class Application:
                     "distribution": upstream,
                     "security": {
                         "authentication": "ENFORCED",
+                        "mfa": "TOTP_ENFORCED",
                         "server_side_rbac": "ENFORCED",
                         "csrf": "ENFORCED",
                         "privileged_actions": "DISABLED_READ_ONLY",
@@ -273,6 +275,7 @@ class Application:
 <input type="hidden" name="csrf_token" value="{html.escape(csrf_token, quote=True)}">
 <label>Username<input name="username" maxlength="64" autocomplete="username" required></label>
 <label>Password<input type="password" name="password" maxlength="256" autocomplete="current-password" required></label>
+<label>Authenticator code<input name="otp" inputmode="numeric" pattern="[0-9]{{6}}" maxlength="6" autocomplete="one-time-code" required></label>
 <button type="submit">Sign in securely</button></form>
 <p class="guard">Fail-closed · audited · read-only</p></main></body></html>"""
         return self._html(status, page).add_header(
@@ -287,6 +290,7 @@ class Application:
         form = self._form(request)
         username = form.get("username", "").strip().lower()[:64]
         password = form.get("password", "")
+        otp = form.get("otp", "")
         csrf_token = form.get("csrf_token", "")
         preauth = self._cookies(request).get(self.config.preauth_cookie_name, "")
         if not csrf_token or not preauth or not hmac.compare_digest(token_hash(csrf_token), token_hash(preauth)):
@@ -300,7 +304,12 @@ class Application:
         account = self.config.accounts.get(username)
         password_hash = account.password_hash if account is not None else self._dummy_password_hash
         password_ok = verify_password(password, password_hash)
-        if account is None or not account.enabled or not password_ok:
+        mfa_secret = self.config.mfa_secrets.get(username, "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP")
+        mfa_counter = verify_totp(mfa_secret, otp, now=float(self.clock()))
+        mfa_ok = account is not None and account.enabled and password_ok and mfa_counter is not None
+        if mfa_ok:
+            mfa_ok = self.store.consume_mfa_counter(account.username, mfa_counter, now=float(self.clock()))
+        if account is None or not account.enabled or not password_ok or not mfa_ok:
             locked_until = self.store.record_login_failure(
                 subject_hash,
                 client_hash,
@@ -314,7 +323,7 @@ class Application:
                 return self._json(429, {"error": "LOGIN_LOCKED"}).add_header(
                     "Retry-After", str(self.config.login_lock_seconds)
                 )
-            return self._login_page(status=401, error="Invalid username or password.")
+            return self._login_page(status=401, error="Invalid credentials or authenticator code.")
 
         now = float(self.clock())
         self.store.clear_login_failures(subject_hash, client_hash)
@@ -326,6 +335,7 @@ class Application:
             role=account.role,
             now=now,
             expires_at=now + self.config.session_ttl_seconds,
+            mfa_verified_at=now,
         )
         self._audit(request_id, account.username, account.role, "session.login", "SUCCESS", request)
         return (
@@ -384,7 +394,7 @@ class Application:
 <article><span>Max response</span><b id="responseLatency">—</b></article></div>
 <div id="responseEvidence" class="response-list"><p class="muted">No signed endpoint response evidence received.</p></div></section>
 <section class="panel"><h2>Security gates</h2><ul class="gates">
-<li><b>Authentication</b><span id="authGate">CHECKING</span></li><li><b>Server-side RBAC</b><span id="rbacGate">CHECKING</span></li>
+<li><b>Authentication</b><span id="authGate">CHECKING</span></li><li><b>MFA</b><span id="mfaGate">CHECKING</span></li><li><b>Server-side RBAC</b><span id="rbacGate">CHECKING</span></li>
 <li><b>CSRF</b><span id="csrfGate">CHECKING</span></li><li><b>Privileged actions</b><span id="actionGate">CHECKING</span></li>
 <li><b>Risk ≠ Authorization</b><span id="trustGate">CHECKING</span></li></ul></section>
 <section class="panel owner-only" id="auditPanel" hidden><h2>Recent access audit</h2><div id="audit">Loading…</div></section>

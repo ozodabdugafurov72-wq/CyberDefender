@@ -19,7 +19,7 @@ Production mutation: none
 | Endpoint ingest | HMAC-SHA256 binds method/path/body/timestamp/nonce; nonce persistence rejects replay; payload and clock skew are bounded | Cryptographic request integrity PASS |
 | Endpoint identity | A shared bootstrap secret authenticates all endpoints while `endpoint_id` is client supplied | **NO-GO: cross-endpoint impersonation is possible for any token holder** |
 | Tenant isolation | Distribution tables, endpoint credentials, sessions, and read model have no authoritative tenant binding | **NO-GO** |
-| MFA | No TOTP, WebAuthn, or external IdP MFA assertion is implemented | **NO-GO for production owner access** |
+| MFA | Deployed production is password-only. The review branch requires per-account TOTP and rejects reused counters; existing pre-MFA sessions fail closed after migration | Source gate PASS; deployment and secret provisioning remain NO-GO |
 | Fleet freshness | Server computes online status from persisted `last_seen` with a 90-second window; signed request timestamps and nonces block simple replay | PASS for simple staleness; tenant-bound sequence/ACK is missing |
 | Dashboard refresh | Authenticated bounded polling every 30 seconds | Acceptable initial design; SSE is optional after authorization tests |
 | Privileged response | Cloud route is read-only and returns 403 for response actions | PASS; keep disabled |
@@ -85,6 +85,8 @@ Current decision: **NO-GO**. The current cloud dashboard is suitable only for re
 The review branch now contains a default-disabled Cloud SOC v2 implementation. It provides single-use tenant-bound enrollment, per-endpoint Ed25519 credentials, bounded signed heartbeat/event ingestion, transactional nonce/sequence/idempotency state, rotation/revocation primitives, a tenant-scoped read model, and a dashboard that shows authenticated endpoints and aggregated events without synthetic ONLINE claims. The existing v1 and local ControlPlane contracts are unchanged.
 
 The Owner client independently recomputes freshness from verified receipt timestamps. It rejects ONLINE unless the last verified receipt is inside the advertised window and live measurements exist; it also rejects fresh endpoints labeled OFFLINE, future-skewed observations, and summary counts that differ from endpoint evidence.
+
+Owner authentication on the review branch now requires password plus a per-account RFC 6238 TOTP secret supplied only through `CYBERDEFENDER_OWNER_TOTP_SECRETS_JSON`. Production-like startup rejects missing, shared, malformed, or incomplete secret maps. Accepted counters are persisted transactionally and cannot be reused; sessions carry a persisted MFA verification time, and sessions created before the MFA migration are revoked on first use. WebAuthn/passkey remains a later phishing-resistant upgrade.
 
 Focused security coverage is 36/36 PASS across v2 protocol, HTTP routing, v1 compatibility, Owner upstream validation, and Owner web security. It proves one-time enrollment, signature and endpoint binding, replay 409, bounded duplicate ACK, sequence order, body/event bounds, populated tenant separation, closed event fields, stale-to-OFFLINE behavior, durable reopen, rotation/revocation, default-off routing, private Owner reads, secure sessions/RBAC/CSRF, and strict dashboard input validation.
 
