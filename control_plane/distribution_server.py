@@ -153,11 +153,15 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     def log_message(self, format, *args): return
 
+    def _security_headers(self):
+        self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        self.send_header("X-Content-Type-Options", "nosniff")
+
     def _json(self, status: int, payload: dict):
         raw = json.dumps(payload, separators=(",",":"), ensure_ascii=False).encode("utf-8")
         self.send_response(status); self.send_header("Content-Type","application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw))); self.send_header("Cache-Control","no-store")
-        self.send_header("X-Content-Type-Options","nosniff"); self.end_headers(); self.wfile.write(raw)
+        self._security_headers(); self.end_headers(); self.wfile.write(raw)
 
     def _body(self) -> dict:
         try: length = int(self.headers.get("Content-Length", "0"))
@@ -209,7 +213,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(size)); self.send_header("X-CyberDefender-Download-ID", download_id)
                 self.send_header("X-CyberDefender-SHA256", manifest["sha256"])
                 self.send_header("Digest", manifest["digest"])
-                self.send_header("Cache-Control","no-store"); self.end_headers()
+                self.send_header("Cache-Control","no-store"); self._security_headers(); self.end_headers()
                 with ARTIFACT.open("rb") as f:
                     while True:
                         chunk = f.read(64*1024)

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
+import threading
 import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +16,25 @@ from control_plane.distribution_repository import DistributionRepository
 
 
 class DistributionSecurityContractTests(unittest.TestCase):
+    def test_public_health_has_hsts(self):
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{httpd.server_address[1]}/health", timeout=3
+            ) as response:
+                self.assertEqual(json.load(response), {"status": "ok"})
+                self.assertEqual(
+                    response.headers.get("Strict-Transport-Security"),
+                    "max-age=31536000; includeSubDomains",
+                )
+                self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
     def test_manifest_matches_artifact_and_cache_invalidates(self):
         test_root = Path(".test-tmp").resolve()
         test_root.mkdir(parents=True, exist_ok=True)
