@@ -22,6 +22,8 @@ THIRD_PARTY_MODULES = (
     "pywintypes",
     "servicemanager",
     "win32event",
+    "win32file",
+    "win32security",
     "win32service",
     "win32serviceutil",
 )

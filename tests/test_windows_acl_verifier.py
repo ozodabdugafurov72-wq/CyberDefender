@@ -19,13 +19,15 @@ class WindowsAclVerifierTests(unittest.TestCase):
         self.assertEqual(result["principal_resolution"], "SID_NATIVE")
 
     def test_users_write_modify_acl_and_owner_rights_fail_closed(self) -> None:
-        for mask in (0x2, 0x4, 0x40000000, 0x10000000, 0x40000, 0x80000):
+        for mask in (0x2, 0x4, 0x40, 0x40000000, 0x10000000, 0x40000, 0x80000):
             with self.subTest(mask=mask), self.assertRaises(AclVerificationError):
                 evaluate_acl("S-1-5-18", [(0, mask, "S-1-5-32-545")])
 
     def test_unknown_sid_is_not_resolved_and_unknown_allow_ace_is_denied(self) -> None:
         result = evaluate_acl("S-1-5-18", [(0, 0x00120089, "S-1-5-21-1-2-3-999")])
         self.assertEqual(result["status"], "PASS")
+        with self.assertRaisesRegex(AclVerificationError, "ACL_UNPRIVILEGED_WRITE_OR_CONTROL"):
+            evaluate_acl("S-1-5-18", [(0, 0x40000000, "S-1-5-21-1-2-3-999")])
         with self.assertRaises(AclVerificationError):
             evaluate_acl("S-1-5-18", [(9, 0x1, "S-1-5-21-1-2-3-999")])
 

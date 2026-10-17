@@ -134,7 +134,16 @@ def _verify_pinned_dependencies(root: Path, *, required: bool) -> None:
     if bootstrap_spec is None or bootstrap_spec.origin is None or not Path(bootstrap_spec.origin).resolve(strict=True).is_relative_to(dependency_root):
         raise RuntimeError("pywin32 bootstrap escaped pinned runtime")
     importlib.import_module("pywin32_bootstrap")
-    for name in ("cryptography", "psutil", "win32service"):
+    for name in (
+        "cryptography",
+        "psutil",
+        "pywintypes",
+        "servicemanager",
+        "win32file",
+        "win32security",
+        "win32service",
+        "win32serviceutil",
+    ):
         module = importlib.import_module(name)
         origin = getattr(module, "__file__", None)
         if origin is None or not Path(origin).resolve(strict=True).is_relative_to(dependency_root):

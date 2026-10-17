@@ -18,7 +18,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $Revision=$ApprovedCommit.ToLowerInvariant()
 $AgentName='CyberDefenderAgent'
-$OtherServices=@('CyberDefenderControlPlane')
+$OtherServices=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $ScriptRoot=Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolsRoot=Join-Path $ScriptRoot 'agent_release'
 $Manager=Join-Path $ToolsRoot 'release_manager.py'
@@ -26,7 +26,6 @@ $Provenance=Join-Path $ToolsRoot 'verify_git_zip_provenance.py'
 $SourceRoot=Split-Path -Parent $ScriptRoot
 $Bootstrap=Join-Path $ToolsRoot 'agent_service_bootstrap.py'
 $Probe=Join-Path $ToolsRoot 'isolated_import_probe.py'
-$AclVerifier=Join-Path $ScriptRoot 'verify_windows_acl.py'
 $ProductRoot=Join-Path $env:ProgramFiles 'CyberDefender'
 $OldApp=Join-Path $ProductRoot 'app'
 $LegacyPython=Join-Path $OldApp '.venv\Scripts\python.exe'
@@ -291,6 +290,9 @@ function Get-CompanionDefinition([string]$Name) {
     if($Name -eq 'CyberDefenderControlPlane') {
         return [pscustomobject]@{Port=8785;Uri='http://127.0.0.1:8785/health';Unreachable='COMPANION_CONTROLPLANE_UNREACHABLE'}
     }
+    if($Name -eq 'CyberDefenderOwnerUI') {
+        return [pscustomobject]@{Port=8775;Uri='http://127.0.0.1:8775/health';Unreachable='COMPANION_OWNERUI_UNREACHABLE'}
+    }
     throw 'COMPANION_DEFINITION_MISSING'
 }
 
@@ -336,6 +338,7 @@ function Assert-CompanionBaseline($Baseline) {
     $degraded=@()
     foreach($name in $OtherServices) {
         $entry=$Baseline[$name]
+        if($entry.Name -eq 'CyberDefenderOwnerUI') { continue }
         if($entry.State -ne 'Running' -or -not $entry.ListenerPresent -or $entry.HealthCode -ne 'COMPANION_OK') {
             $code=if($entry.HealthCode -ne 'COMPANION_OK'){$entry.HealthCode}else{'COMPANION_SERVICE_NOT_RUNNING'}
             $degraded+=($name + ':' + $code)
@@ -377,10 +380,19 @@ function Inspect-NoReparse([string]$Path) {
     }
 }
 
-function Inspect-ProtectedPath([string]$Path,[string]$Interpreter) {
-    Require (Test-Path -LiteralPath $AclVerifier -PathType Leaf) 'ACL_VERIFIER_MISSING'
-    & $Interpreter -I $AclVerifier $Path | Out-Host
-    Require ($LASTEXITCODE -eq 0) ('ACL_SECURITY_GATE_FAILED:' + $Path)
+function Inspect-ProtectedPath([string]$Path) {
+    try {
+        Inspect-NoReparse $Path
+        Inspect-ProtectedPathNative $Path
+    } catch {
+        $reason=[string]$_.Exception.Message
+        if($reason -eq 'ACL_OWNER_NOT_PRIVILEGED' -or
+           $reason -eq 'ACL_BROAD_WRITE_OR_CONTROL' -or
+           $reason.StartsWith('REPARSE_PATH:')) {
+            throw ('ACL_VIOLATION:' + $Path)
+        }
+        throw 'ACL_GATE_UNAVAILABLE'
+    }
 }
 
 function Require-Administrator() {
@@ -679,7 +691,7 @@ function Write-Receipt($Original,$Others,$RuntimeEvidence,[int]$AgentPid,[string
 }
 
 # Consolidated read-only precheck.
-foreach($required in ($LegacyPython,$Manager,$Provenance,$Bootstrap,$Probe,$AclVerifier,$ReleaseZip,$RuntimeZip,$LocalToken)) {
+foreach($required in ($LegacyPython,$Manager,$Provenance,$Bootstrap,$Probe,$ReleaseZip,$RuntimeZip,$LocalToken)) {
     Require (Test-Path -LiteralPath $required -PathType Leaf) ('REQUIRED_FILE_MISSING:' + $required)
     Inspect-NoReparse $required
 }
@@ -711,14 +723,18 @@ try {
     $preflightSignature=Get-AuthenticodeSignature -LiteralPath $PreflightPython
     Require ([string]$preflightSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
     Require ([string]$preflightSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
-    Inspect-ProtectedPath $ProductRoot $PreflightPython
+    Inspect-ProtectedPath $ProductRoot
+    Inspect-ProtectedPath $LegacyPython
+    if(Test-Path -LiteralPath $Releases -PathType Container) { Inspect-ProtectedPath $Releases }
+    Inspect-ProtectedPath $PreflightRoot
+    Inspect-ProtectedPath $PreflightPython
     if(Test-Path -LiteralPath $OriginFile -PathType Leaf) {
         $url=(Get-Content -LiteralPath $OriginFile -Raw -Encoding Ascii).Trim().TrimEnd('/')
         Require ($url -eq 'https://cyberdefender-staging.up.railway.app' -or $url -eq 'http://127.0.0.1:8785') 'UNAPPROVED_DISTRIBUTION_ORIGIN'
         if($url -ne 'http://127.0.0.1:8785') {
             Require (Test-Path -LiteralPath $RemoteToken -PathType Leaf) 'REMOTE_FLEET_TOKEN_MISSING'
             Inspect-NoReparse $RemoteToken
-            Inspect-ProtectedPath (Split-Path $RemoteToken -Parent) $PreflightPython
+            Inspect-ProtectedPath (Split-Path $RemoteToken -Parent)
         }
     }
     Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
@@ -731,18 +747,19 @@ try {
         Require (-not (Test-Path -LiteralPath $NewRoot)) 'VERSION_ALREADY_STAGED_REFUSE_OVERWRITE'
         New-Item -ItemType Directory -Path $Releases -Force | Out-Null
         Inspect-NoReparse $Releases
-        Inspect-ProtectedPath $Releases $PreflightPython
+        Inspect-ProtectedPath $Releases
         Run-Checked $PreflightPython @('-I',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
         Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
         Inspect-NoReparse $NewRoot
-        Inspect-ProtectedPath $NewRoot $PreflightPython
+        Inspect-ProtectedPath $NewRoot
         $newRuntime=Join-Path $NewRoot 'runtime'
         New-ProtectedDirectory $newRuntime
         Expand-PinnedRuntimePackage $runtimePackage $newRuntime $newRuntime
         Inspect-NoReparse $newRuntime
-        Inspect-ProtectedPathNative $newRuntime
+        Inspect-ProtectedPath $newRuntime
         Verify-ExtractedRuntime $runtimePackage $newRuntime $newRuntime
         $newPython=Join-Path $newRuntime 'python.exe'
+        Inspect-ProtectedPath $newPython
         $pythonSignature=Get-AuthenticodeSignature -LiteralPath $newPython
         Require ([string]$pythonSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
         Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'

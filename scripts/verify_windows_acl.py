@@ -29,7 +29,7 @@ PRIVILEGED_OWNER_SIDS = frozenset({
 # Includes direct data/append rights, generic write/all, deletion, and ACL or
 # ownership mutation.  Any one of these on a broad principal is unsafe.
 WRITE_OR_CONTROL_MASK = (
-    0x00000002 | 0x00000004 | 0x00000010 | 0x00000100 |
+    0x00000002 | 0x00000004 | 0x00000010 | 0x00000040 | 0x00000100 |
     0x00010000 | 0x00040000 | 0x00080000 | 0x10000000 | 0x40000000
 )
 ALLOW_ACE_TYPES = frozenset({0})
@@ -44,21 +44,21 @@ def evaluate_acl(owner_sid: str, aces: Iterable[tuple[int, int, str]]) -> dict:
     if owner_sid not in PRIVILEGED_OWNER_SIDS:
         raise AclVerificationError("ACL_OWNER_NOT_PRIVILEGED")
     checked = 0
-    broad_write = []
+    unprivileged_write = []
     unsupported = []
     for ace_type, mask, sid in aces:
         checked += 1
         if not isinstance(sid, str) or not sid.startswith("S-"):
             raise AclVerificationError("ACL_SID_INVALID")
         if ace_type in ALLOW_ACE_TYPES:
-            if sid in BROAD_SIDS and int(mask) & WRITE_OR_CONTROL_MASK:
-                broad_write.append(sid)
+            if sid not in PRIVILEGED_OWNER_SIDS and int(mask) & WRITE_OR_CONTROL_MASK:
+                unprivileged_write.append(sid)
         elif ace_type not in DENY_ACE_TYPES:
             unsupported.append(int(ace_type))
     if unsupported:
         raise AclVerificationError("ACL_UNSUPPORTED_ACE_TYPE")
-    if broad_write:
-        raise AclVerificationError("ACL_BROAD_WRITE_OR_CONTROL")
+    if unprivileged_write:
+        raise AclVerificationError("ACL_UNPRIVILEGED_WRITE_OR_CONTROL")
     return {
         "status": "PASS",
         "owner_sid": owner_sid,
@@ -73,6 +73,13 @@ def audit_path(path: Path) -> dict:
         raise AclVerificationError("WINDOWS_ACL_REQUIRED")
     if not path.is_absolute() or not path.exists():
         raise AclVerificationError("ACL_PATH_INVALID")
+    try:
+        for part in (path, *path.parents):
+            info = part.lstat()
+            if getattr(info, "st_file_attributes", 0) & 0x400:
+                raise AclVerificationError("ACL_REPARSE_PATH")
+    except OSError as exc:
+        raise AclVerificationError("ACL_PATH_UNAVAILABLE") from exc
     import win32security as security
 
     try:
@@ -114,6 +121,9 @@ def main() -> int:
     except AclVerificationError as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)}, sort_keys=True))
         return 1
+    except Exception:
+        print(json.dumps({"status": "FAIL", "reason": "ACL_GATE_UNAVAILABLE"}, sort_keys=True))
+        return 2
     print(json.dumps({"status": "PASS", "paths": results}, sort_keys=True))
     return 0
 

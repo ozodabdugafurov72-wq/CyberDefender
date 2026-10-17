@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import subprocess
+import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -62,7 +64,9 @@ class PostPlanFailureBatchTests(unittest.TestCase):
         required = (
             "[switch]$AcknowledgeCompanionDegraded",
             "COMPANION_CONTROLPLANE_UNREACHABLE",
-            "$OtherServices=@('CyberDefenderControlPlane')",
+            "COMPANION_OWNERUI_UNREACHABLE",
+            "$OtherServices=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')",
+            "$entry.Name -eq 'CyberDefenderOwnerUI'",
             "ListenerPresent",
             "COMPANION_LISTENER_CHANGED",
             "companion_degraded_acknowledged",
@@ -74,6 +78,42 @@ class PostPlanFailureBatchTests(unittest.TestCase):
         self.assertNotIn("Start-Service -Name CyberDefenderOwnerUI", source)
         self.assertNotIn("function Verify-LocalCompanions", source)
         self.assertRegex(source, r"catch\s*\{\s*return\s+\[pscustomobject\]")
+
+    def test_plan_wrapper_always_writes_closed_result_and_pins_every_input(self):
+        wrapper = ROOT / "scripts/agent_release/run_installer_plan.ps1"
+        source = wrapper.read_text(encoding="utf-8")
+        for marker in (
+            "ApprovedInstallerSHA256",
+            "ApprovedZipSHA256",
+            "ApprovedRuntimeZipSHA256",
+            "Get-FileHash",
+            "RedirectStandardOutput",
+            "RedirectStandardError",
+            "PLAN_FAIL:",
+            "PLAN_PASS",
+        ):
+            self.assertIn(marker, source)
+        self.assertNotIn("-Verb RunAs", source)
+        with tempfile.TemporaryDirectory(prefix="cd-plan-wrapper-") as raw:
+            result = Path(raw) / "result.txt"
+            completed = subprocess.run(
+                [
+                    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", str(wrapper),
+                    "-InstallerPath", str(Path(raw) / "missing-installer.ps1"),
+                    "-ApprovedInstallerSHA256", "0" * 64,
+                    "-ReleaseZip", str(Path(raw) / "missing-release.zip"),
+                    "-ApprovedZipSHA256", "0" * 64,
+                    "-ApprovedCommit", "0" * 40,
+                    "-RuntimeZip", str(Path(raw) / "missing-runtime.zip"),
+                    "-ApprovedRuntimeZipSHA256", "0" * 64,
+                    "-ResultPath", str(result),
+                ],
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            self.assertEqual(1, completed.returncode)
+            self.assertTrue(result.is_file())
+            self.assertRegex(result.read_text(encoding="utf-8"), r"^PLAN_FAIL:[A-Z0-9_]+\nINSTALLER_EXIT=1\n$")
 
 
 if __name__ == "__main__":

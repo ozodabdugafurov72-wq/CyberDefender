@@ -328,8 +328,8 @@ if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
         after_runtime_extract = self.source.split("Expand-PinnedRuntimePackage $runtimePackage $newRuntime", 1)[1]
         self.assertNotIn("Run-Checked $Python", after_runtime_extract)
         self.assertNotIn("& $Python", after_runtime_extract)
-        self.assertNotIn("Inspect-ProtectedPath $newRuntime", after_runtime_extract)
-        self.assertIn("Inspect-ProtectedPathNative $newRuntime", after_runtime_extract)
+        self.assertIn("Inspect-ProtectedPath $newRuntime", after_runtime_extract)
+        self.assertNotIn("Inspect-ProtectedPathNative $newRuntime", after_runtime_extract)
         self.assertIn("Verify-ExtractedRuntime $runtimePackage $newRuntime", after_runtime_extract)
         self.assertIn("$privileged -notcontains $sid", self.source)
         self.assertIn("sys.argv = [\"service_crash_store\", \"authorize-probe\", \"--service\", \"CyberDefenderAgent\"]", (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8"))
@@ -412,6 +412,27 @@ try{{Inspect-ProtectedPathNative 'C:\\protected';throw 'EXPECTED_ACL_FAILURE'}}c
         )
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("PASS", completed.stdout)
+
+    def test_plan_acl_gate_is_native_strict_and_closed_vocabulary(self) -> None:
+        start = self.source.index("function Inspect-ProtectedPath(")
+        end = self.source.index("function Require-Administrator", start)
+        gate = self.source[start:end]
+        self.assertIn("Inspect-NoReparse $Path", gate)
+        self.assertIn("Inspect-ProtectedPathNative $Path", gate)
+        self.assertIn("ACL_GATE_UNAVAILABLE", gate)
+        self.assertIn("ACL_VIOLATION:", gate)
+        self.assertNotIn("$Interpreter", gate)
+        self.assertNotIn("$AclVerifier", self.source)
+        for protected in (
+            "Inspect-ProtectedPath $ProductRoot",
+            "Inspect-ProtectedPath $LegacyPython",
+            "Inspect-ProtectedPath $PreflightRoot",
+            "Inspect-ProtectedPath $PreflightPython",
+            "Inspect-ProtectedPath $newRuntime",
+            "Inspect-ProtectedPath $newPython",
+        ):
+            self.assertIn(protected, self.source)
+        self.assertNotIn("Inspect-ProtectedPathNative $newRuntime", self.source)
 
     def test_runtime_gate_is_real_and_strict(self) -> None:
         for required in (
