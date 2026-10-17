@@ -56,6 +56,18 @@ checks fail closed. Sharing violations receive bounded backoff. The existing
 protected software key is reused. Recovery-key rotation and revocation are
 explicit transactions; no implicit key regeneration is allowed.
 
+Within one boot, the monotonic observation cannot decrease. Across a changed
+boot identifier, revision and generation remain monotonic while the monotonic
+clock may reset. A wall-clock regression greater than five minutes is marked
+`ROLLBACK_SUSPECTED`; smaller clock corrections earn no recovery credit by
+themselves.
+
+B2 implements this store in `agent/crashguard_v2/store.py`, still unwired.
+Its writer lock is separate from the authenticated status snapshot. The
+snapshot exposes only service, revision, generation, lifecycle, health,
+failure code and update time. It excludes boot identifiers, nonces and runtime
+identity.
+
 ## Failure-code contract (B2 contract)
 
 Guard, store, diagnostics and installer consume one closed vocabulary. It

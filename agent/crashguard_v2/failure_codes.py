@@ -1,0 +1,63 @@
+"""Closed CrashGuard v2 failure vocabulary and staged consumer contracts."""
+from __future__ import annotations
+
+
+FAILURE_CODES = frozenset(
+    {
+        "ACL_REJECTED",
+        "BOOTSTRAP_FAILED",
+        "CRASH_STORE_AUTH_FAILED",
+        "CRASH_STORE_COMMIT_FAILED",
+        "CRASH_STORE_DISK_FULL",
+        "CRASH_STORE_OVERSIZE",
+        "CRASH_STORE_STATUS_PUBLISH_FAILED",
+        "LOCKED_BY_OWNER",
+        "RECOVERY_AUTH_REQUIRED",
+        "RECOVERY_BUDGET_EXHAUSTED",
+        "RECOVERY_VERIFY_FAILED",
+        "REPARSE_REJECTED",
+        "ROLLBACK_SUSPECTED",
+        "RUNTIME_FATAL",
+        "RUNTIME_HEARTBEAT_STALE",
+        "RUNTIME_IMPORT_FAILED",
+        "SCHEMA_INVALID",
+        "SPOOL_TERMINAL_STATE_UNSAFE",
+    }
+)
+
+STORE_FAILURE_CODES = frozenset(
+    {
+        "ACL_REJECTED",
+        "CRASH_STORE_AUTH_FAILED",
+        "CRASH_STORE_COMMIT_FAILED",
+        "CRASH_STORE_DISK_FULL",
+        "CRASH_STORE_OVERSIZE",
+        "CRASH_STORE_STATUS_PUBLISH_FAILED",
+        "LOCKED_BY_OWNER",
+        "REPARSE_REJECTED",
+        "ROLLBACK_SUSPECTED",
+        "SCHEMA_INVALID",
+    }
+)
+GUARD_FAILURE_CODES = frozenset(FAILURE_CODES)
+DIAGNOSTIC_FAILURE_CODES = frozenset(FAILURE_CODES)
+INSTALLER_FAILURE_CODES = frozenset(
+    {
+        "ACL_REJECTED",
+        "BOOTSTRAP_FAILED",
+        "CRASH_STORE_AUTH_FAILED",
+        "CRASH_STORE_COMMIT_FAILED",
+        "CRASH_STORE_STATUS_PUBLISH_FAILED",
+        "LOCKED_BY_OWNER",
+        "RECOVERY_AUTH_REQUIRED",
+        "RECOVERY_BUDGET_EXHAUSTED",
+        "RECOVERY_VERIFY_FAILED",
+        "REPARSE_REJECTED",
+        "ROLLBACK_SUSPECTED",
+        "RUNTIME_FATAL",
+        "RUNTIME_IMPORT_FAILED",
+        "SCHEMA_INVALID",
+        "SPOOL_TERMINAL_STATE_UNSAFE",
+    }
+)
+
