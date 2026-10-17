@@ -89,6 +89,15 @@ Inspection and PLAN debit zero budget. Reboot and clean stop never replenish
 budget. Cumulative failure history never resets; only verified `STABLE` resets
 `attempts_since_stable`. A failed probe preserves its debit and evidence.
 
+B3 implements canonical request parsing, Ed25519 verification, current
+revision/generation and release binding, expiry checks, nonce replay rejection,
+zero-debit planning, and atomic recovery reservation in
+`agent/crashguard_v2/recovery.py`. The implementation remains unwired. A
+32-byte Ed25519 public key is selected from protected provisioned state by a
+bounded key identifier. Rotation must be authorized by the currently active
+recovery key; revocation is monotonic and a revoked key cannot authorize its
+own restoration. Recovery and release-signing keys are separate roles.
+
 ## Boot and health semantics
 
 A boot start of a latched Agent moves to `SAFE_HOLD`, consumes no recovery
