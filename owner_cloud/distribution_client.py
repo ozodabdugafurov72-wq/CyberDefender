@@ -249,11 +249,31 @@ class DistributionClient:
                 raise ValueError("invalid endpoint resource percentage")
             if item.get("status") != "ONLINE" and (item.get("cpu_percent") is not None or item.get("memory_percent") is not None):
                 raise ValueError("stale endpoint exposes live resources")
+            heartbeat = item.get("last_verified_heartbeat")
+            cutoff = float(generated) - float(freshness)
+            if item.get("status") == "ONLINE":
+                if (heartbeat is None or float(heartbeat) < cutoff or item.get("cpu_percent") is None or
+                        item.get("memory_percent") is None or item.get("health_state") == "OFFLINE"):
+                    raise ValueError("unverified online endpoint")
+            elif heartbeat is not None and float(heartbeat) >= cutoff:
+                raise ValueError("fresh endpoint marked offline")
+            observed = item.get("last_observed_at")
+            if observed is not None and heartbeat is not None and float(observed) > float(heartbeat) + 300.0:
+                raise ValueError("invalid endpoint observation time")
             telemetry = item.get("telemetry_status")
             if telemetry not in {"HEALTHY", "DEGRADED", "BLOCKED", "STALE"}:
                 raise ValueError("invalid telemetry status")
             endpoints.append({**item, "endpoint_id": endpoint_id, "hostname": hostname,
                               "runtime_version": validate_runtime_version(item.get("runtime_version"))})
+        actual = {
+            "total": len(endpoints),
+            "online": sum(item["status"] == "ONLINE" for item in endpoints),
+            "offline": sum(item["status"] != "ONLINE" for item in endpoints),
+            "degraded": sum(item["health_state"] == "DEGRADED" for item in endpoints),
+            "critical": sum(item["health_state"] == "CRITICAL" for item in endpoints),
+        }
+        if counts != actual:
+            raise ValueError("fleet summary does not match endpoint evidence")
         event_summary = value.get("event_summary")
         if not isinstance(event_summary, list) or len(event_summary) > 64:
             raise ValueError("invalid event summary")

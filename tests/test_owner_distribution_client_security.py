@@ -142,6 +142,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             value["tenant_id"] = "tenant-b"
         if type(self).mode == "v2-false-online":
             value["endpoints"][0]["status"] = "OFFLINE"
+        if type(self).mode == "v2-stale-online":
+            value["endpoints"][0]["last_verified_heartbeat"] = value["generated_at"] - 91
         if type(self).mode == "invalid-xdr":
             value["xdr"]["signed_ingest"] = False
         if type(self).mode == "invalid-class":
@@ -249,6 +251,9 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
         self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 
         UpstreamHandler.mode = "v2-false-online"
+        self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
+
+        UpstreamHandler.mode = "v2-stale-online"
         self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 
 

@@ -351,6 +351,25 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _request_too_large(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if MAX_BODY < length <= MAX_BODY * 2:
+            self.rfile.read(length)
+        self._json(413, {"error": "REQUEST_TOO_LARGE"})
+        self.wfile.flush()
+        self.close_connection = True
+
+    def _discard_bounded_body(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return
+        if 0 < length <= MAX_BODY:
+            self.rfile.read(length)
+
     def _body(self) -> tuple[bytes, dict]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -482,6 +501,7 @@ class Handler(BaseHTTPRequestHandler):
         v2_endpoint = _v2_endpoint_path(parsed.path)
         if parsed.path == "/api/v2/enrollment" or v2_endpoint is not None:
             if not _cloud_v2_enabled():
+                self._discard_bounded_body()
                 self._json(404, {"error": "NOT_FOUND"})
                 return
             if self.headers.get_content_type().lower() != "application/json":
@@ -493,8 +513,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 raw, body = self._body()
             except OverflowError:
-                self.close_connection = True
-                self._json(413, {"error": "REQUEST_TOO_LARGE"})
+                self._request_too_large()
                 return
             except ValueError:
                 self._json(400, {"error": "INVALID_REQUEST"})
@@ -537,8 +556,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             raw, body = self._body()
         except OverflowError:
-            self.close_connection = True
-            self._json(413, {"error": "REQUEST_TOO_LARGE"})
+            self._request_too_large()
             return
         except ValueError:
             self._json(400, {"error": "INVALID_REQUEST"})

@@ -84,6 +84,8 @@ Current decision: **NO-GO**. The current cloud dashboard is suitable only for re
 
 The review branch now contains a default-disabled Cloud SOC v2 implementation. It provides single-use tenant-bound enrollment, per-endpoint Ed25519 credentials, bounded signed heartbeat/event ingestion, transactional nonce/sequence/idempotency state, rotation/revocation primitives, a tenant-scoped read model, and a dashboard that shows authenticated endpoints and aggregated events without synthetic ONLINE claims. The existing v1 and local ControlPlane contracts are unchanged.
 
+The Owner client independently recomputes freshness from verified receipt timestamps. It rejects ONLINE unless the last verified receipt is inside the advertised window and live measurements exist; it also rejects fresh endpoints labeled OFFLINE, future-skewed observations, and summary counts that differ from endpoint evidence.
+
 Focused security coverage is 36/36 PASS across v2 protocol, HTTP routing, v1 compatibility, Owner upstream validation, and Owner web security. It proves one-time enrollment, signature and endpoint binding, replay 409, bounded duplicate ACK, sequence order, body/event bounds, populated tenant separation, closed event fields, stale-to-OFFLINE behavior, durable reopen, rotation/revocation, default-off routing, private Owner reads, secure sessions/RBAC/CSRF, and strict dashboard input validation.
 
 Railway production and staging use environment-specific service and volume instances even where the UI displays the same logical volume resource ID. No environment variable, volume, domain, deployment, credential, database, or production service was changed during this work.
