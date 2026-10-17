@@ -13,7 +13,10 @@ import sys
 
 
 THIRD_PARTY_MODULES = (
+    "_cffi_backend",
+    "cffi",
     "cryptography",
+    "pycparser",
     "psutil",
     "pythoncom",
     "pywintypes",
