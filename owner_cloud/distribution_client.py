@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import quote
 
 from control_plane.xdr_compat import (
     normalize_capabilities,
@@ -30,9 +32,14 @@ class DistributionClient:
     })
     _RESOURCE_STATES = frozenset({"UNKNOWN", "NORMAL", "DEGRADED", "CRITICAL"})
 
-    def __init__(self, base_url: str, token: str, *, timeout: float = 3.0):
+    _TENANT_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+
+    def __init__(self, base_url: str, token: str, *, tenant_id: str = "", timeout: float = 3.0):
         self.base_url = str(base_url).rstrip("/")
         self.token = str(token)
+        self.tenant_id = str(tenant_id).strip().lower()
+        if self.tenant_id and not self._TENANT_RE.fullmatch(self.tenant_id):
+            raise ValueError("invalid tenant")
         self.timeout = max(0.5, min(float(timeout), 10.0))
         self._opener = urllib.request.build_opener(_NoRedirect)
 
@@ -183,11 +190,112 @@ class DistributionClient:
             "xdr": xdr,
         }
 
+    @classmethod
+    def _normalized_v2_state(cls, value: Any, *, tenant_id: str) -> dict[str, Any]:
+        if not isinstance(value, dict) or value.get("schema") != "cyberdefender.fleet-read-model.v2":
+            raise ValueError("fleet read model required")
+        if value.get("tenant_id") != tenant_id or value.get("read_only") is not True:
+            raise ValueError("tenant read boundary mismatch")
+        if value.get("privileged_actions") != "DISABLED":
+            raise ValueError("privileged actions must remain disabled")
+        generated = value.get("generated_at")
+        freshness = value.get("online_after_seconds")
+        if (isinstance(generated, bool) or not isinstance(generated, (int, float)) or
+                not math.isfinite(float(generated)) or float(generated) < 0):
+            raise ValueError("invalid read model timestamp")
+        if (isinstance(freshness, bool) or not isinstance(freshness, (int, float)) or
+                not 30 <= float(freshness) <= 300):
+            raise ValueError("invalid freshness window")
+        raw_summary = value.get("summary")
+        if not isinstance(raw_summary, dict) or set(raw_summary) != {"total", "online", "offline", "degraded", "critical"}:
+            raise ValueError("invalid fleet summary")
+        counts = {}
+        for name, item in raw_summary.items():
+            if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+                raise ValueError("invalid fleet summary")
+            counts[name] = item
+        if counts["online"] + counts["offline"] != counts["total"]:
+            raise ValueError("inconsistent fleet summary")
+        raw_endpoints = value.get("endpoints")
+        if not isinstance(raw_endpoints, list) or len(raw_endpoints) > 100:
+            raise ValueError("invalid endpoint list")
+        endpoints = []
+        endpoint_fields = {
+            "endpoint_id", "hostname", "status", "health_state", "service_state", "resource_state",
+            "runtime_version", "last_verified_heartbeat", "last_observed_at", "component_failures",
+            "cycle", "cpu_percent", "memory_percent", "telemetry_status",
+        }
+        for item in raw_endpoints:
+            if not isinstance(item, dict) or set(item) != endpoint_fields:
+                raise ValueError("invalid endpoint fields")
+            endpoint_id = validate_endpoint_id(item.get("endpoint_id"))
+            hostname = validate_hostname(item.get("hostname"))
+            if item.get("status") not in {"ONLINE", "OFFLINE", "REVOKED"}:
+                raise ValueError("invalid endpoint status")
+            if item.get("health_state") not in {"UNKNOWN", "HEALTHY", "DEGRADED", "CRITICAL", "OFFLINE"}:
+                raise ValueError("invalid endpoint health")
+            if item.get("service_state") not in cls._SERVICE_STATES or item.get("resource_state") not in cls._RESOURCE_STATES:
+                raise ValueError("invalid endpoint runtime state")
+            for name in ("component_failures", "cycle"):
+                current = item.get(name)
+                if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+                    raise ValueError("invalid endpoint counter")
+            for name in ("last_verified_heartbeat", "last_observed_at", "cpu_percent", "memory_percent"):
+                current = item.get(name)
+                if current is not None and (isinstance(current, bool) or not isinstance(current, (int, float)) or
+                                            not math.isfinite(float(current)) or float(current) < 0):
+                    raise ValueError("invalid endpoint measurement")
+            if any(item.get(name) is not None and float(item[name]) > 100 for name in ("cpu_percent", "memory_percent")):
+                raise ValueError("invalid endpoint resource percentage")
+            if item.get("status") != "ONLINE" and (item.get("cpu_percent") is not None or item.get("memory_percent") is not None):
+                raise ValueError("stale endpoint exposes live resources")
+            telemetry = item.get("telemetry_status")
+            if telemetry not in {"HEALTHY", "DEGRADED", "BLOCKED", "STALE"}:
+                raise ValueError("invalid telemetry status")
+            endpoints.append({**item, "endpoint_id": endpoint_id, "hostname": hostname,
+                              "runtime_version": validate_runtime_version(item.get("runtime_version"))})
+        event_summary = value.get("event_summary")
+        if not isinstance(event_summary, list) or len(event_summary) > 64:
+            raise ValueError("invalid event summary")
+        normalized_events = []
+        for row in event_summary:
+            if (not isinstance(row, dict) or set(row) != {"event_type", "priority", "count"} or
+                    not isinstance(row["event_type"], str) or len(row["event_type"]) > 64 or
+                    row["priority"] not in {"LOW", "NORMAL", "HIGH", "CRITICAL"} or
+                    isinstance(row["count"], bool) or not isinstance(row["count"], int) or row["count"] < 0):
+                raise ValueError("invalid event summary")
+            normalized_events.append(dict(row))
+        return {
+            "status": "HEALTHY",
+            "tenant_id": tenant_id,
+            "summary": {
+                "downloads_total": 0, "downloads_completed": 0, "downloads_failed": 0,
+                "endpoints_total": counts["total"], "installed": counts["total"], "pending": 0,
+                "install_failed": 0, "revoked": sum(1 for item in endpoints if item["status"] == "REVOKED"),
+                "online": counts["online"], "offline": counts["offline"],
+                "degraded": counts["degraded"], "critical": counts["critical"],
+                "responses_total": 0, "responses_quarantined": 0, "responses_restored": 0,
+                "response_latency_ms_max": None,
+            },
+            "endpoints": endpoints,
+            "responses": [],
+            "event_summary": normalized_events,
+            "read_only": True,
+            "generated_at": float(generated),
+            "xdr": {
+                "status": "READY", "schema": "OCSF", "schema_version": "1.9.0",
+                "ingest_protocol": "cyberdefender.cloud.v2", "signed_ingest": True,
+                "replay_protection": True, "runtime_contract_validation": True,
+                "event_classes": [{"class_uid": 5001, "class_name": "Device Inventory Info", "activity_id": 2}],
+            },
+        }
+
     def state(self) -> dict[str, Any]:
         if not self.base_url or not self.token:
             return {"status": "UNAVAILABLE", "reason": "NOT_CONFIGURED"}
+        path = ("/api/v2/owner/tenants/" + quote(self.tenant_id, safe="") + "/fleet") if self.tenant_id else "/api/v1/owner/summary"
         request = urllib.request.Request(
-            self.base_url + "/api/v1/owner/summary",
+            self.base_url + path,
             headers={
                 "Accept": "application/json",
                 "Authorization": "Bearer " + self.token,
@@ -202,7 +310,8 @@ class DistributionClient:
                 if response.status != 200 or len(raw) > self.MAX_RESPONSE or content_type != "application/json":
                     return {"status": "UNAVAILABLE", "reason": "UPSTREAM_RESPONSE_REJECTED"}
             value = json.loads(raw.decode("utf-8"))
-            value = self._normalized_state(value)
+            value = (self._normalized_v2_state(value, tenant_id=self.tenant_id)
+                     if self.tenant_id else self._normalized_state(value))
             value["transport"] = "RAILWAY_PRIVATE_AUTHENTICATED"
             return value
         except urllib.error.HTTPError as exc:

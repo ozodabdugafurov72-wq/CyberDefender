@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from owner_cloud.security import Account, load_accounts
+
+
+_TENANT_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 def _truthy(value: str | None) -> bool:
@@ -20,6 +24,7 @@ class Config:
     distribution_private_url: str
     distribution_read_token: str
     allowed_hosts: tuple[str, ...]
+    tenant_id: str = ""
     secure_cookies: bool = True
     session_ttl_seconds: int = 8 * 60 * 60
     session_idle_seconds: int = 30 * 60
@@ -54,6 +59,8 @@ class Config:
                 raise ValueError("distribution read token must contain at least 32 characters")
             if not self.allowed_hosts:
                 raise ValueError("at least one allowed host is required")
+            if not _TENANT_RE.fullmatch(self.tenant_id):
+                raise ValueError("a canonical owner tenant is required")
         if not 300 <= self.session_idle_seconds <= self.session_ttl_seconds:
             raise ValueError("invalid session lifetime")
         if not 900 <= self.session_ttl_seconds <= 24 * 60 * 60:
@@ -86,6 +93,7 @@ class Config:
             distribution_private_url=os.getenv("CYBERDEFENDER_DISTRIBUTION_PRIVATE_URL", "").rstrip("/"),
             distribution_read_token=os.getenv("CYBERDEFENDER_DISTRIBUTION_READ_TOKEN", ""),
             allowed_hosts=tuple(sorted(host_values)),
+            tenant_id=os.getenv("CYBERDEFENDER_OWNER_TENANT_ID", "").strip().lower(),
             secure_cookies=not _truthy(os.getenv("CYBERDEFENDER_ALLOW_INSECURE_COOKIES")),
             session_ttl_seconds=int(os.getenv("CYBERDEFENDER_SESSION_TTL_SECONDS", str(8 * 60 * 60))),
             session_idle_seconds=int(os.getenv("CYBERDEFENDER_SESSION_IDLE_SECONDS", str(30 * 60))),

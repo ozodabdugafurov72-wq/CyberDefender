@@ -78,6 +78,7 @@ class Application:
         self.distribution = distribution or DistributionClient(
             config.distribution_private_url,
             config.distribution_read_token,
+            tenant_id=config.tenant_id,
         )
         self.clock = clock
         self.login_limiter = SlidingWindowLimiter(
@@ -366,8 +367,13 @@ class Application:
 <article><span>Transport</span><b id="transport">PRIVATE</b></article></section>
 <section class="panel"><div class="panel-title"><h2>Fleet summary</h2><span id="updated">Awaiting private API</span></div>
 <div class="grid compact"><article><span>Endpoints</span><b id="endpoints">—</b></article>
-<article><span>Online</span><b id="online">—</b></article><article><span>Critical</span><b id="critical">—</b></article>
+<article><span>Online</span><b id="online">—</b></article><article><span>Offline</span><b id="offline">—</b></article>
+<article><span>Degraded</span><b id="degraded">—</b></article><article><span>Critical</span><b id="critical">—</b></article>
 <article><span>Downloads</span><b id="downloads">—</b></article></div></section>
+<section class="panel"><div class="panel-title"><h2>Authenticated endpoint evidence</h2><span id="fleetEvidenceStatus">AWAITING VERIFIED TELEMETRY</span></div>
+<div id="fleetEvidence" class="response-list"><p class="muted">No authenticated endpoint evidence received.</p></div></section>
+<section class="panel"><div class="panel-title"><h2>Security event summary</h2><span>AGGREGATED · READ ONLY</span></div>
+<div id="eventSummary" class="event-list"><p class="muted">No authenticated security events received.</p></div></section>
 <section class="panel"><h2>XDR interoperability</h2><ul class="gates">
 <li><b>Compatibility</b><span id="xdrStatus">CHECKING</span></li><li><b>Schema</b><span id="xdrSchema">—</span></li>
 <li><b>Signed ingest</b><span id="xdrSigned">CHECKING</span></li><li><b>Replay protection</b><span id="xdrReplay">CHECKING</span></li>

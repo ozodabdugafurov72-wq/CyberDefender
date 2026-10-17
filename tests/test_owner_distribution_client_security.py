@@ -78,6 +78,35 @@ def valid_state():
     }
 
 
+def valid_v2_state():
+    return {
+        "schema": "cyberdefender.fleet-read-model.v2",
+        "tenant_id": "tenant-a",
+        "generated_at": 1_900_000_001.0,
+        "online_after_seconds": 90.0,
+        "summary": {"total": 1, "online": 1, "offline": 0, "degraded": 0, "critical": 0},
+        "endpoints": [{
+            "endpoint_id": "11111111-1111-4111-8111-111111111111",
+            "hostname": "endpoint.example",
+            "status": "ONLINE",
+            "health_state": "HEALTHY",
+            "service_state": "RUNNING",
+            "resource_state": "NORMAL",
+            "runtime_version": "2.4",
+            "last_verified_heartbeat": 1_900_000_001.0,
+            "last_observed_at": 1_900_000_000.0,
+            "component_failures": 0,
+            "cycle": 7,
+            "cpu_percent": 12.5,
+            "memory_percent": 42.0,
+            "telemetry_status": "HEALTHY",
+        }],
+        "event_summary": [{"event_type": "DETECTION", "priority": "HIGH", "count": 1}],
+        "read_only": True,
+        "privileged_actions": "DISABLED",
+    }
+
+
 class SinkHandler(BaseHTTPRequestHandler):
     hits = 0
     authorization = None
@@ -108,7 +137,11 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        value = valid_state()
+        value = valid_v2_state() if type(self).mode.startswith("v2") else valid_state()
+        if type(self).mode == "v2-cross-tenant":
+            value["tenant_id"] = "tenant-b"
+        if type(self).mode == "v2-false-online":
+            value["endpoints"][0]["status"] = "OFFLINE"
         if type(self).mode == "invalid-xdr":
             value["xdr"]["signed_ingest"] = False
         if type(self).mode == "invalid-class":
@@ -198,6 +231,25 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
         self.assertEqual(rejected, {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
         self.assertEqual(SinkHandler.hits, 0)
         self.assertIsNone(SinkHandler.authorization)
+
+    def test_v2_read_model_is_tenant_scoped_and_rejects_false_online_data(self):
+        UpstreamHandler.mode = "v2"
+        client = DistributionClient(
+            self.base_url,
+            "read-token-0123456789-abcdef-0123456789",
+            tenant_id="tenant-a",
+        )
+        state = client.state()
+        self.assertEqual(state["tenant_id"], "tenant-a")
+        self.assertEqual(state["summary"]["online"], 1)
+        self.assertEqual(state["event_summary"][0]["event_type"], "DETECTION")
+        self.assertEqual(state["responses"], [])
+
+        UpstreamHandler.mode = "v2-cross-tenant"
+        self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
+
+        UpstreamHandler.mode = "v2-false-online"
+        self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
 
 
 if __name__ == "__main__":

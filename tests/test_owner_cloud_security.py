@@ -52,6 +52,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
             distribution_private_url="http://127.0.0.1:1",
             distribution_read_token="x" * 48,
             allowed_hosts=("owner.test",),
+            tenant_id="tenant-test",
             secure_cookies=True,
             session_ttl_seconds=3600,
             session_idle_seconds=900,
@@ -153,7 +154,7 @@ class OwnerCloudSecurityTests(unittest.TestCase):
             "xdrStatus", "xdrSchema", "xdrSigned", "xdrReplay", "xdrValidation",
             "authGate", "rbacGate", "csrfGate", "actionGate", "trustGate",
             "responseStatus", "responseTotal", "responseQuarantined", "responseRestored",
-            "responseLatency", "responseEvidence",
+            "responseLatency", "responseEvidence", "fleetEvidence", "fleetEvidenceStatus", "eventSummary",
         ):
             self.assertIn(f'id="{element_id}"', html)
         self.assertNotIn('<span class="pass">PASS</span>', html)
@@ -266,6 +267,17 @@ class OwnerCloudSecurityTests(unittest.TestCase):
                     "environment": "production",
                     "distribution_private_url": "https://cyberdefender-production.up.railway.app",
                     "allowed_hosts": ("app.cyberdefender-sec.uz",),
+                }
+            ).validate()
+
+        with self.assertRaisesRegex(ValueError, "canonical owner tenant"):
+            Config(
+                **{
+                    **self.config.__dict__,
+                    "environment": "production",
+                    "distribution_private_url": "http://cyberdefender.railway.internal:8080",
+                    "allowed_hosts": ("app.cyberdefender-sec.uz",),
+                    "tenant_id": "",
                 }
             ).validate()
 
