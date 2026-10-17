@@ -79,3 +79,13 @@ Production Cloud SOC is GO only when all conditions below have recorded evidence
 - the Windows Agent independently reaches RUNNING, 3× HEALTHY, and the full STABLE window.
 
 Current decision: **NO-GO**. The current cloud dashboard is suitable only for read-only staged validation until MFA, tenant-bound endpoint identity, durable cloud operations, and the local Agent health gates pass.
+
+## 2026-10-17 review-branch implementation update
+
+The review branch now contains a default-disabled Cloud SOC v2 implementation. It provides single-use tenant-bound enrollment, per-endpoint Ed25519 credentials, bounded signed heartbeat/event ingestion, transactional nonce/sequence/idempotency state, rotation/revocation primitives, a tenant-scoped read model, and a dashboard that shows authenticated endpoints and aggregated events without synthetic ONLINE claims. The existing v1 and local ControlPlane contracts are unchanged.
+
+Focused security coverage is 36/36 PASS across v2 protocol, HTTP routing, v1 compatibility, Owner upstream validation, and Owner web security. It proves one-time enrollment, signature and endpoint binding, replay 409, bounded duplicate ACK, sequence order, body/event bounds, populated tenant separation, closed event fields, stale-to-OFFLINE behavior, durable reopen, rotation/revocation, default-off routing, private Owner reads, secure sessions/RBAC/CSRF, and strict dashboard input validation.
+
+Railway production and staging use environment-specific service and volume instances even where the UI displays the same logical volume resource ID. No environment variable, volume, domain, deployment, credential, database, or production service was changed during this work.
+
+This is not production-ready storage: the implementation uses SQLite as a focused transactional reference and single-node staging candidate. Mandatory MFA, managed PostgreSQL migration, encrypted backup/restore drill, HA, distributed rate limiting, alert delivery, release digest attestation, a real Agent-to-staging proof, and local Agent HEALTHY/STABLE remain open. Production and university rollout stay **NO-GO**.
