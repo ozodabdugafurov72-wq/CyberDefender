@@ -3,7 +3,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Repository,
     [Parameter(Mandatory=$true)][string]$Python,
-    [Parameter(Mandatory=$true)][string]$RuntimeRoot,
     [Parameter(Mandatory=$true)][string]$RuntimeZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$RuntimeSHA256,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$Commit,
@@ -24,7 +23,7 @@ function Invoke-PythonJson([string[]]$Arguments) {
     return (($output -join "`n") | ConvertFrom-Json -ErrorAction Stop)
 }
 
-foreach($path in @($Repository,$RuntimeRoot,$OutputDirectory)) {
+foreach($path in @($Repository,$OutputDirectory)) {
     if(-not (Test-Path -LiteralPath $path -PathType Container)){throw 'BUILD_DIRECTORY_UNAVAILABLE'}
 }
 foreach($path in @($Python,$RuntimeZip)) {
@@ -49,22 +48,31 @@ if($shaA -ne $shaB){throw 'DETERMINISTIC_BUILD_MISMATCH'}
 $provA=Invoke-PythonJson @($provenance,'--repo',$Repository,'--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower)
 $provB=Invoke-PythonJson @($provenance,'--repo',$Repository,'--zip',$zipB,'--sha256',$shaB,'--commit',$commitLower)
 $source=Invoke-PythonJson @($releaseManager,'verify','--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower)
-$runtime=Invoke-PythonJson @($runtimeManager,'verify','--zip',$RuntimeZip,'--sha256',$RuntimeSHA256)
-
-$signedFiles=@((Join-Path $RuntimeRoot 'python.exe')) + @(
-    Get-ChildItem -LiteralPath $RuntimeRoot -Filter *.dll -File -Recurse | Select-Object -ExpandProperty FullName
-)
-$signatures=@(foreach($file in $signedFiles) {
-    $signature=Get-AuthenticodeSignature -LiteralPath $file
-    [ordered]@{
-        name=[IO.Path]::GetRelativePath($RuntimeRoot,$file).Replace('\','/')
-        status=$signature.Status.ToString()
-    }
-})
-$valid=@($signatures | Where-Object status -eq 'Valid').Count
-$unsigned=@($signatures | Where-Object status -eq 'NotSigned').Count
-$other=$signatures.Count-$valid-$unsigned
-if($other -ne 0){throw 'RUNTIME_AUTHENTICODE_INVALID'}
+$runtimeVerifyParent=Join-Path $OutputDirectory ('.runtime-verify-' + [Guid]::NewGuid().ToString('N'))
+$runtimeRoot=Join-Path $runtimeVerifyParent 'runtime'
+[void](New-Item -ItemType Directory -Path $runtimeVerifyParent -ErrorAction Stop)
+try {
+    $runtime=Invoke-PythonJson @($runtimeManager,'extract','--zip',$RuntimeZip,'--sha256',$RuntimeSHA256,'--dest',$runtimeRoot)
+    $rootPrefix=[IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\')+'\'
+    $signedFiles=@((Join-Path $runtimeRoot 'python.exe')) + @(
+        Get-ChildItem -LiteralPath $runtimeRoot -Filter *.dll -File -Recurse | Select-Object -ExpandProperty FullName
+    )
+    $signatures=@(foreach($file in $signedFiles) {
+        $full=[IO.Path]::GetFullPath($file)
+        if(-not $full.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase)){throw 'RUNTIME_INVENTORY_ESCAPE'}
+        $signature=Get-AuthenticodeSignature -LiteralPath $full
+        [ordered]@{
+            name=$full.Substring($rootPrefix.Length).Replace('\','/')
+            status=$signature.Status.ToString()
+        }
+    })
+    $valid=@($signatures | Where-Object status -eq 'Valid').Count
+    $unsigned=@($signatures | Where-Object status -eq 'NotSigned').Count
+    $other=$signatures.Count-$valid-$unsigned
+    if($other -ne 0){throw 'RUNTIME_AUTHENTICODE_INVALID'}
+} finally {
+    if(Test-Path -LiteralPath $runtimeVerifyParent){Remove-Item -LiteralPath $runtimeVerifyParent -Recurse -Force}
+}
 
 $installer=Join-Path $Repository 'scripts\install_agent_release.ps1'
 $wrapper=Join-Path $Repository 'scripts\agent_release\run_installer_plan.ps1'
