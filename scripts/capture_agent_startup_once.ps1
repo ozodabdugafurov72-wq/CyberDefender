@@ -40,9 +40,10 @@ function Read-CaptureStages([string]$Path){
   $rows=@();$lines=@(Get-Content -LiteralPath $Path -Encoding Ascii -ErrorAction Stop | ForEach-Object {[string]$_})
   Require ($lines.Count -le 64) 'CAPTURE_STAGE_COUNT_EXCEEDED'
   foreach($line in $lines){
-    $parts=$line.Split(@('|'),2);Require ($parts.Count -eq 2) 'CAPTURE_STAGE_FILE_INVALID'
-    $stamp=[DateTimeOffset]::MinValue;Require ([DateTimeOffset]::TryParse($parts[0],[ref]$stamp)) 'CAPTURE_STAGE_FILE_INVALID';Require (Stage-Code-Valid $parts[1]) 'CAPTURE_STAGE_FILE_INVALID'
-    $rows+=[pscustomobject]@{utc=[string]$stamp.UtcDateTime.ToString('o');code=[string]$parts[1]}
+    $at=$line.IndexOf('|');Require ($at -gt 0 -and $at -lt ($line.Length-1)) 'CAPTURE_STAGE_FILE_INVALID'
+    $stampText=[string]$line.Substring(0,$at);$code=[string]$line.Substring($at+1)
+    $stamp=[DateTimeOffset]::MinValue;Require ([DateTimeOffset]::TryParse($stampText,[ref]$stamp)) 'CAPTURE_STAGE_FILE_INVALID';Require (Stage-Code-Valid $code) 'CAPTURE_STAGE_FILE_INVALID'
+    $rows+=[pscustomobject]@{utc=[string]$stamp.UtcDateTime.ToString('o');code=$code}
   }
   return $rows
 }

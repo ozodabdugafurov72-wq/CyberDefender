@@ -22,6 +22,10 @@ def _load_clone_helper():
 
 
 class WP4CaptureStallContractTests(unittest.TestCase):
+    def test_stage_parser_avoids_ps51_split_overload_ambiguity(self) -> None:
+        self.assertNotIn("$line.Split(@('|'),2)", LAUNCHER)
+        self.assertIn("$at=$line.IndexOf('|')", LAUNCHER)
+
     def test_closed_summary_schema_is_bounded_and_string_only(self) -> None:
         required = {
             "run",
