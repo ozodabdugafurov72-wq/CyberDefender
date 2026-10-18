@@ -34,25 +34,47 @@ WRITE_OR_CONTROL_MASK = (
 )
 ALLOW_ACE_TYPES = frozenset({0})
 DENY_ACE_TYPES = frozenset({1})
+CREATOR_SIDS = frozenset({
+    "S-1-3-0",  # CREATOR OWNER
+    "S-1-3-1",  # CREATOR GROUP
+})
+INHERIT_ONLY_ACE = 0x08
+INHERITED_ACE = 0x10
 
 
 class AclVerificationError(RuntimeError):
     pass
 
 
-def evaluate_acl(owner_sid: str, aces: Iterable[tuple[int, int, str]]) -> dict:
+def evaluate_acl(owner_sid: str, aces: Iterable[tuple[int, int, str] | tuple[int, int, int, str]]) -> dict:
     if owner_sid not in PRIVILEGED_OWNER_SIDS:
         raise AclVerificationError("ACL_OWNER_NOT_PRIVILEGED")
     checked = 0
     unprivileged_write = []
     unsupported = []
-    for ace_type, mask, sid in aces:
+    inherit_only_creator_aces = 0
+    for raw_ace in aces:
+        if len(raw_ace) == 3:
+            ace_type, mask, sid = raw_ace
+            ace_flags = 0
+        elif len(raw_ace) == 4:
+            ace_type, ace_flags, mask, sid = raw_ace
+        else:
+            raise AclVerificationError("ACL_ACE_INVALID")
         checked += 1
         if not isinstance(sid, str) or not sid.startswith("S-"):
             raise AclVerificationError("ACL_SID_INVALID")
         if ace_type in ALLOW_ACE_TYPES:
             if sid not in PRIVILEGED_OWNER_SIDS and int(mask) & WRITE_OR_CONTROL_MASK:
-                unprivileged_write.append(sid)
+                inherited_inherit_only = (
+                    sid in CREATOR_SIDS
+                    and int(ace_flags) & INHERIT_ONLY_ACE
+                    and int(ace_flags) & INHERITED_ACE
+                )
+                if inherited_inherit_only:
+                    inherit_only_creator_aces += 1
+                else:
+                    unprivileged_write.append(sid)
         elif ace_type not in DENY_ACE_TYPES:
             unsupported.append(int(ace_type))
     if unsupported:
@@ -64,6 +86,7 @@ def evaluate_acl(owner_sid: str, aces: Iterable[tuple[int, int, str]]) -> dict:
         "owner_sid": owner_sid,
         "aces_checked": checked,
         "broad_write_blocked": True,
+        "inherit_only_creator_aces_ignored": inherit_only_creator_aces,
         "principal_resolution": "SID_NATIVE",
     }
 
@@ -95,16 +118,17 @@ def audit_path(path: Path) -> dict:
     if owner is None or dacl is None:
         raise AclVerificationError("ACL_NULL_SECURITY_DESCRIPTOR")
     owner_sid = security.ConvertSidToStringSid(owner)
-    aces: list[tuple[int, int, str]] = []
+    aces: list[tuple[int, int, int, str]] = []
     for index in range(dacl.GetAceCount()):
         ace = dacl.GetAce(index)
         try:
             ace_type = int(ace[0][0])
+            ace_flags = int(ace[0][1])
             mask = int(ace[1])
             sid = security.ConvertSidToStringSid(ace[2])
         except Exception as exc:
             raise AclVerificationError("ACL_ACE_INVALID") from exc
-        aces.append((ace_type, mask, sid))
+        aces.append((ace_type, ace_flags, mask, sid))
     result = evaluate_acl(owner_sid, aces)
     result["path"] = str(path)
     return result
