@@ -26,6 +26,24 @@ class WP4CaptureStallContractTests(unittest.TestCase):
         self.assertNotIn("$line.Split(@('|'),2)", LAUNCHER)
         self.assertIn("$at=$line.IndexOf('|')", LAUNCHER)
 
+    def test_archive_and_clone_stage_boundaries_are_distinct(self) -> None:
+        helper = CLONE_HELPER_PATH.read_text(encoding="utf-8")
+        source_begin = LAUNCHER.index("Write-CaptureStage $stageFile 'source_extract_begin'")
+        source_expand = LAUNCHER.index("Expand-Archive -LiteralPath $source")
+        runtime_begin = LAUNCHER.index("Write-CaptureStage $stageFile 'runtime_extract_begin'")
+        runtime_expand = LAUNCHER.index("Expand-Archive -LiteralPath $runtime")
+        runtime_done = LAUNCHER.index("Write-CaptureStage $stageFile 'runtime_extract_done'")
+        clone_call = LAUNCHER.index("$cloneHelper --live-state")
+        self.assertLess(source_begin, source_expand)
+        self.assertLess(source_expand, runtime_begin)
+        self.assertLess(runtime_begin, runtime_expand)
+        self.assertLess(runtime_expand, runtime_done)
+        self.assertLess(runtime_done, clone_call)
+        self.assertNotIn("Write-CaptureStage $stageFile 'clone_begin'", LAUNCHER)
+        self.assertIn('append_marker(stage_file, "clone_begin")', helper)
+        self.assertIn("elseif($last -match '^source_extract'){'source_extract'}", LAUNCHER)
+        self.assertIn("elseif($last -match '^runtime_extract'){'runtime_extract'}", LAUNCHER)
+
     def test_closed_summary_schema_is_bounded_and_string_only(self) -> None:
         required = {
             "run",
