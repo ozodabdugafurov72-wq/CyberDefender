@@ -49,11 +49,24 @@ if(-not $Worker){
   $settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 3) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   try{
     Register-ScheduledTask -TaskName $task -Action $action -Principal $principalSpec -Settings $settings | Out-Null
+    $startedAt=Get-Date
     Start-ScheduledTask -TaskName $task
     $deadline=(Get-Date).AddMinutes(3)
-    do{Start-Sleep -Milliseconds 500;$state=(Get-ScheduledTask -TaskName $task).State}while($state -eq 'Running' -and (Get-Date) -lt $deadline)
-    Require ($state -ne 'Running') 'CAPTURE_SYSTEM_TASK_TIMEOUT'
+    $observedStart=$false
     $sanitized=Join-Path $runRoot 'sanitized.json'
+    do {
+      Start-Sleep -Milliseconds 250
+      $state=(Get-ScheduledTask -TaskName $task -ErrorAction Stop).State
+      $taskInfo=Get-ScheduledTaskInfo -TaskName $task -ErrorAction Stop
+      if($state -eq 'Running' -or $taskInfo.LastRunTime -ge $startedAt.AddSeconds(-1)){$observedStart=$true}
+      if($observedStart -and $state -ne 'Running'){
+        Require ([int]$taskInfo.LastTaskResult -eq 0) 'CAPTURE_SYSTEM_TASK_FAILED'
+        break
+      }
+    } while((Get-Date) -lt $deadline)
+    Require $observedStart 'CAPTURE_SYSTEM_TASK_NOT_STARTED'
+    Require ($state -ne 'Running') 'CAPTURE_SYSTEM_TASK_TIMEOUT'
+    Require ([int]$taskInfo.LastTaskResult -eq 0) 'CAPTURE_SYSTEM_TASK_FAILED'
     Require (Test-Path -LiteralPath $sanitized -PathType Leaf) 'CAPTURE_SANITIZED_RESULT_MISSING'
     Get-Content -LiteralPath $sanitized -Raw -Encoding UTF8
   } finally {
