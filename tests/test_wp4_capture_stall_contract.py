@@ -44,6 +44,12 @@ class WP4CaptureStallContractTests(unittest.TestCase):
         self.assertIn("elseif($last -match '^source_extract'){'source_extract'}", LAUNCHER)
         self.assertIn("elseif($last -match '^runtime_extract'){'runtime_extract'}", LAUNCHER)
 
+    def test_archive_extraction_has_separate_bounded_budget(self) -> None:
+        self.assertIn("[int]$ArchiveTimeoutSeconds=180", LAUNCHER)
+        self.assertIn("-ArchiveTimeoutSeconds", LAUNCHER)
+        self.assertIn("$stageBudget=if($last -match '^(?:source|runtime)_extract_begin$'){$ArchiveTimeoutSeconds}else{$StageTimeoutSeconds}", LAUNCHER)
+        self.assertIn("$ArchiveTimeoutSeconds -ge 60 -and $ArchiveTimeoutSeconds -le 240", LAUNCHER)
+
     def test_closed_summary_schema_is_bounded_and_string_only(self) -> None:
         required = {
             "run",
