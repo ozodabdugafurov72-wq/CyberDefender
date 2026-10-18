@@ -116,9 +116,15 @@ def _stage(code: str) -> None:
                 _STAGE_BYTES = before
 
 
-def _verify_pinned_dependencies(root: Path, *, required: bool) -> None:
-    runtime_root = (root / "runtime").resolve()
-    if Path(sys.executable).resolve().parent != runtime_root:
+def _verify_pinned_dependencies(
+    root: Path,
+    *,
+    required: bool,
+    allow_detached_runtime: bool = False,
+) -> None:
+    expected_runtime_root = (root / "runtime").resolve()
+    runtime_root = Path(sys.executable).resolve().parent
+    if runtime_root != expected_runtime_root and not allow_detached_runtime:
         if required:
             raise RuntimeError("dependency probe is not using the pinned runtime")
         return
@@ -337,7 +343,11 @@ def main() -> int:
     if spec is None or spec.origin is None or Path(spec.origin).resolve().parent.parent != root:
         raise RuntimeError("Agent import escaped protected release root")
     _stage("CD_BOOTSTRAP_B30_ORIGIN_OK")
-    _verify_pinned_dependencies(root, required=dependency_probe or authorize_probe or pre_start_check)
+    _verify_pinned_dependencies(
+        root,
+        required=dependency_probe or authorize_probe or recovery_plan or pre_start_check,
+        allow_detached_runtime=recovery_plan,
+    )
     if dependency_probe:
         print("PROTECTED_RUNTIME_DEPENDENCY_PROBE_PASS")
         return 0
