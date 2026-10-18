@@ -113,11 +113,13 @@ Require ([IO.Path]::GetFullPath($WorkRoot).StartsWith(([IO.Path]::GetFullPath((J
 $stageFile=Join-Path $WorkRoot 'worker-stages.log'
 Write-CaptureStage $stageFile 'worker_started'
 Restrict-Path $WorkRoot $true
+Restrict-Path $stageFile $false
 $candidate=Join-Path $WorkRoot 'candidate';$clone=Join-Path $WorkRoot 'clone';$evidence=Join-Path $WorkRoot 'evidence'
 $liveState=Join-Path $env:ProgramData 'CyberDefender\state';$liveKey=Join-Path $env:ProgramData 'CyberDefender\secrets\storage_key.b64'
 $candidateExit=$null
 try {
   New-Item -ItemType Directory -Path $candidate,$clone,$evidence | Out-Null; Restrict-Path $WorkRoot $true
+  Restrict-Path $stageFile $false
   Require (Test-Path -LiteralPath $liveState -PathType Container) 'CAPTURE_LIVE_STATE_MISSING'
   Require (Test-Path -LiteralPath $liveKey -PathType Leaf) 'CAPTURE_LIVE_KEY_MISSING'
   Write-CaptureStage $stageFile 'key_ready'
@@ -156,3 +158,5 @@ $candidateResult=Get-Content -LiteralPath $result -Raw -Encoding UTF8 | ConvertF
 $summary=[ordered]@{status=$candidateResult.status;exception_class=$candidateResult.exception_class;stage=$candidateResult.stage;gate_code=$candidateResult.gate_code;failing_component=$candidateResult.failing_component;runtime_status=$candidateResult.runtime_status;component_failures=$candidateResult.component_failures;candidate_exit=$candidateExit;live_hashes_match=$true;clone_exists_after=$false;trace_retained_system_only=$true}
 $summary | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $WorkRoot 'sanitized.json') -Encoding utf8
 Restrict-Path $WorkRoot $true
+Restrict-Path $stageFile $false
+Restrict-Path (Join-Path $WorkRoot 'sanitized.json') $false

@@ -30,6 +30,8 @@ class StartupCaptureStageEvidenceTests(unittest.TestCase):
         ):
             self.assertIn(token, LAUNCHER)
         worker_tail = LAUNCHER[LAUNCHER.index("CAPTURE_SYSTEM_REQUIRED") :]
+        self.assertIn("Restrict-Path $stageFile $false", worker_tail)
+        self.assertLess(worker_tail.index("Write-CaptureStage $stageFile 'worker_started'"), worker_tail.index("Restrict-Path $stageFile $false"))
         self.assertLess(worker_tail.index("try {"), worker_tail.index("New-Item -ItemType Directory -Path $candidate,$clone,$evidence"))
         self.assertLess(worker_tail.index("try {"), worker_tail.index("Tree-Digest $liveState"))
         self.assertLess(worker_tail.index("finally {"), worker_tail.index("CAPTURE_CLONE_DELETE_FAILED"))
