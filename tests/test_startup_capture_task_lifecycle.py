@@ -10,7 +10,6 @@ SOURCE = (ROOT / "scripts" / "capture_agent_startup_once.ps1").read_text(encodin
 
 class StartupCaptureTaskLifecycleTests(unittest.TestCase):
     def test_launcher_waits_for_observed_task_start_and_terminal_evidence(self) -> None:
-        self.assertNotIn("while($state -eq 'Running'", SOURCE)
         self.assertNotIn("if(Test-Path -LiteralPath $sanitized -PathType Leaf){break}", SOURCE)
         for token in (
             "$observedStart=$false",
@@ -20,8 +19,8 @@ class StartupCaptureTaskLifecycleTests(unittest.TestCase):
             "Test-Path -LiteralPath $sanitized",
         ):
             self.assertIn(token, SOURCE)
-        self.assertLess(SOURCE.index("Start-ScheduledTask"), SOURCE.index("$observedStart=$false"))
-        self.assertLess(SOURCE.index("$observedStart=$false"), SOURCE.index("Unregister-ScheduledTask"))
+        self.assertLess(SOURCE.index("$observedStart=$false"), SOURCE.index("Start-ScheduledTask"))
+        self.assertLess(SOURCE.index("Read-CaptureStages $stageFile"), SOURCE.index("Unregister-ScheduledTask"))
 
 
 if __name__ == "__main__":

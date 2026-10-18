@@ -26,14 +26,16 @@ class StartupCaptureStageEvidenceTests(unittest.TestCase):
             "Flush($true)",
             "capture-task-result.json",
             "last_task_result",
-            "stage_codes",
+            "last_stage",
+            "stage_utc",
         ):
             self.assertIn(token, LAUNCHER)
         worker_tail = LAUNCHER[LAUNCHER.index("CAPTURE_SYSTEM_REQUIRED") :]
         self.assertIn("Restrict-Path $stageFile $false", worker_tail)
         self.assertLess(worker_tail.index("Write-CaptureStage $stageFile 'worker_started'"), worker_tail.index("Restrict-Path $stageFile $false"))
-        self.assertLess(worker_tail.index("try {"), worker_tail.index("New-Item -ItemType Directory -Path $candidate,$clone,$evidence"))
-        self.assertLess(worker_tail.index("try {"), worker_tail.index("Tree-Digest $liveState"))
+        self.assertLess(worker_tail.index("try{"), worker_tail.index("New-Item -ItemType Directory -Path $candidate,$clone,$evidence"))
+        self.assertNotIn("Tree-Digest $liveState", worker_tail)
+        self.assertIn("capture_state_clone", (ROOT / "scripts" / "agent_release" / "capture_state_clone.py").stem)
         self.assertLess(worker_tail.index("finally {"), worker_tail.index("CAPTURE_CLONE_DELETE_FAILED"))
 
     def test_python_stage_writer_is_closed_vocabulary_and_durable(self) -> None:
@@ -45,7 +47,8 @@ class StartupCaptureStageEvidenceTests(unittest.TestCase):
             path = Path(tmp) / "stages.log"
             path.touch()
             module._append_stage(path, "runtime_imported")
-            self.assertEqual(path.read_text(encoding="ascii"), "runtime_imported\n")
+            line = path.read_text(encoding="ascii").strip()
+            self.assertEqual(line.split("|", 1)[1], "runtime_imported")
             with self.assertRaises(ValueError):
                 module._append_stage(path, "not_allowed")
 

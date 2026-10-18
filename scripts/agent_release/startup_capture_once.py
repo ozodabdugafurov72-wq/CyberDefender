@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,8 @@ _STAGES = frozenset({"runtime_imported", "gate_result"})
 def _append_stage(path: Path, stage: str) -> None:
     if stage not in _STAGES:
         raise ValueError("CAPTURE_STAGE_CODE_REJECTED")
-    raw = (stage + "\n").encode("ascii")
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    raw = f"{stamp}|{stage}\n".encode("ascii")
     fd = os.open(path, os.O_WRONLY | os.O_APPEND)
     try:
         os.write(fd, raw)
