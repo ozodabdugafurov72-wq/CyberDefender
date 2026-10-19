@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -2035,11 +2036,24 @@ class DurableEventSpool:
             next_order.append(event_id)
 
         try:
-            # Atomic durable commit.
-            self._persist_ack_state(
-                next_acked,
-                ordered_ids=next_order,
-            )
+            # Atomic durable commit. Windows security/indexing readers can
+            # briefly deny the final replace immediately after an append.
+            # Retry only closed sharing/access errors, for a bounded 350 ms;
+            # no ACK is reported until the authoritative snapshot commits.
+            for attempt in range(4):
+                try:
+                    self._persist_ack_state(
+                        next_acked,
+                        ordered_ids=next_order,
+                    )
+                    break
+                except OSError as exc:
+                    retryable = isinstance(exc, PermissionError) or getattr(
+                        exc, "winerror", None
+                    ) in {5, 32, 33}
+                    if not retryable or attempt >= 3:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
 
         except Exception:
             self._ack_failures += 1

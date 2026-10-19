@@ -333,6 +333,69 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
             self.assertEqual(ack_before, spool.acked_state_path.read_bytes())
             self.assertEqual(1, spool.get_stats()["ack_failures"])
 
+    def test_production_full_window_retries_transient_ack_snapshot_sharing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-prod-full-window-") as root:
+            spool_dir = Path(root) / "spool"
+            spool_dir.mkdir(parents=True)
+            policy = DurableSpoolPolicy()
+            historical = [
+                f"historical-{index:05d}"
+                for index in range(policy.max_terminal_records)
+            ]
+            (spool_dir / "acked_state.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "status": "ACKED",
+                        "acked_ids": historical,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            for name in ("pending.jsonl", "acked.jsonl", "quarantined.jsonl"):
+                (spool_dir / name).touch()
+
+            spool = DurableEventSpool(spool_dir, policy=policy)
+            self.assertEqual(policy.max_terminal_records, len(spool._acked))
+            original_atomic_write = spool._atomic_write
+            snapshot_calls = 0
+            injected_failures = 0
+
+            def transient_snapshot_sharing(path: Path, payload: bytes) -> None:
+                nonlocal snapshot_calls, injected_failures
+                if path == spool.acked_state_path:
+                    snapshot_calls += 1
+                    if snapshot_calls % 2 == 1:
+                        injected_failures += 1
+                        raise PermissionError("simulated transient ACK snapshot sharing")
+                original_atomic_write(path, payload)
+
+            with mock.patch.object(
+                spool, "_atomic_write", side_effect=transient_snapshot_sharing
+            ):
+                for index in range(5):
+                    current = event(100 + index)
+                    self.assertTrue(spool.append(current))
+                    self.assertEqual(1, spool.replay(lambda _event: True))
+
+            stats = spool.get_stats()
+            self.assertEqual(5, injected_failures)
+            self.assertEqual(5, stats["ack_operations"])
+            self.assertEqual(5, stats["ack_commits"])
+            self.assertEqual(0, stats["ack_failures"])
+            self.assertEqual(policy.max_terminal_records, stats["acked"])
+            self.assertEqual([], spool.pending_records())
+
+            restarted = DurableEventSpool(spool_dir, policy=policy)
+            restarted_health = restarted.health_check()
+            self.assertEqual("HEALTHY", restarted_health["status"])
+            self.assertTrue(restarted_health["terminal_state_safe"])
+            self.assertEqual(policy.max_terminal_records, restarted_health["acked"])
+            self.assertEqual([], restarted.pending_records())
+            restarted_stats = restarted.get_stats()
+            self.assertEqual(0, restarted_stats["ack_operations"])
+            self.assertEqual(0, restarted_stats["ack_failures"])
+
 
 if __name__ == "__main__":
     unittest.main()
