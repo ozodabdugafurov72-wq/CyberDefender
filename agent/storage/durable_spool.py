@@ -1895,8 +1895,13 @@ class DurableEventSpool:
 
         # Terminal-state precedence.
         if event_id in self._acked:
-            self._ack_rejected += 1
-            return False
+            # Recovery publication is at-least-once: a bounded sweep can
+            # enqueue the same record again before the first delivery's
+            # durable ACK becomes visible to the next sweep.  The
+            # authoritative ACK snapshot already proves this exact id is
+            # terminal, so reconfirmation is an idempotent success.  Unknown
+            # or non-pending ids still take the fail-closed paths below.
+            return True
 
         if event_id in self._quarantined:
             self._ack_rejected += 1

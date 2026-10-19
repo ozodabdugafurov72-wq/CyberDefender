@@ -240,6 +240,35 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
             self.assertEqual("HEALTHY", restarted.health_check()["status"])
             self.assertEqual([], restarted.pending_records())
 
+    def test_duplicate_recovery_ack_is_idempotent_after_terminal_compaction(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-recovery-duplicate-") as root:
+            spool_dir = Path(root) / "spool"
+            spool = DurableEventSpool(spool_dir, policy=self.policy(2))
+            events = [event(index) for index in range(3)]
+            for item in events:
+                self.assertTrue(spool.append(item))
+            self.assertTrue(spool.ack(events[0].event_id))
+            self.assertTrue(spool.ack(events[1].event_id))
+
+            original_rewrite = spool._rewrite_jsonl
+
+            def sharing_violation(path: Path, records: list[dict]) -> None:
+                if path == spool.acked_path:
+                    raise PermissionError("simulated compatibility-journal sharing violation")
+                original_rewrite(path, records)
+
+            with mock.patch.object(spool, "_rewrite_jsonl", side_effect=sharing_violation):
+                self.assertTrue(spool.ack(events[2].event_id))
+
+            # The recovery cursor can publish the same pending record twice
+            # before the first delivery's durable ACK becomes visible to its
+            # next bounded sweep.  Reconfirming an already durable ACK must be
+            # idempotent rather than reported as a consumer failure.
+            self.assertTrue(spool.ack(events[2].event_id))
+            self.assertEqual([], spool.pending_records())
+            self.assertLessEqual(len(spool._acked), 2)
+            self.assertEqual(1, spool.health_check()["terminal_compatibility_failures"])
+
 
 if __name__ == "__main__":
     unittest.main()
