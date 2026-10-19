@@ -40,10 +40,14 @@ with tempfile.TemporaryDirectory(prefix="cd-prestart-gate-") as raw:
     state = {"schema_version": "1", "status": "ACKED", "acked_ids": ["a", "b"]}
     (spool / "acked_state.json").write_text(json.dumps(state), encoding="utf-8")
     (spool / "pending.jsonl").write_text(
-        json.dumps({"event_id": "pending-1", "event": {}}) + "\n",
+        json.dumps({"event_id": "a", "event": {}}) + "\n"
+        + json.dumps({"event_id": "pending-1", "event": {}}) + "\n",
         encoding="utf-8",
     )
     count, size, pending = _strict_spool_snapshot(spool)
+    # A physical row that is already present in the authoritative ACK
+    # snapshot is dead journal data, not an active pending event.  PLAN must
+    # compare the logical set that DurableEventSpool will expose on its copy.
     assert count == 2 and size > 0 and pending == {"pending-1"}
 
 installer = (root / "scripts/install_agent_release.ps1").read_text(encoding="utf-8-sig")

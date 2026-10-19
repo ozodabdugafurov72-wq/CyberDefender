@@ -186,9 +186,10 @@ def _strict_spool_snapshot(spool_dir: Path) -> tuple[int, int, set[str]]:
         or state["status"] != "ACKED"
         or type(state["acked_ids"]) is not list
         or any(type(item) is not str or not item.strip() for item in state["acked_ids"])
-        or len(set(state["acked_ids"])) != len(state["acked_ids"])
+        or len({item.strip() for item in state["acked_ids"]}) != len(state["acked_ids"])
     ):
         raise RuntimeError("RECOVERY_ACK_SNAPSHOT_SCHEMA_REJECTED")
+    acked_ids = {item.strip() for item in state["acked_ids"]}
     if pending.stat().st_size > policy.max_recovery_scan_bytes:
         raise RuntimeError("RECOVERY_PENDING_SIZE_REJECTED")
     pending_ids: set[str] = set()
@@ -203,7 +204,13 @@ def _strict_spool_snapshot(spool_dir: Path) -> tuple[int, int, set[str]]:
             event_id = record.get("event_id") if type(record) is dict else None
             if type(event_id) is not str or not event_id.strip():
                 raise RuntimeError("RECOVERY_PENDING_SCHEMA_REJECTED")
-            pending_ids.add(event_id)
+            event_id = event_id.strip()
+            # pending.jsonl is an append journal.  Rows made terminal by the
+            # authoritative ACK snapshot can remain until bounded compaction;
+            # they are no longer part of the logical pending set exposed by
+            # DurableEventSpool on the evidence copy.
+            if event_id not in acked_ids:
+                pending_ids.add(event_id)
             if len(pending_ids) > policy.max_pending_events:
                 raise RuntimeError("RECOVERY_PENDING_COUNT_REJECTED")
     return len(state["acked_ids"]), len(raw), pending_ids
