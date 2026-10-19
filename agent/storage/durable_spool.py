@@ -504,6 +504,54 @@ class DurableEventSpool:
         except OSError:
             return 0
 
+    def _bounded_physical_pending_ids(self) -> set[str] | None:
+        """Return strictly validated physical journal membership.
+
+        This is a proof surface for bounded terminal-tombstone retirement,
+        not the logical pending view.  Any malformed, partial or over-limit
+        journal returns ``None`` so callers fall back to fail-closed
+        compaction instead of assuming an identifier is absent.
+        """
+        try:
+            if not self.pending_path.exists():
+                return set()
+            physical = int(self.pending_path.stat().st_size)
+            byte_limit = max(1, int(self.policy.max_recovery_scan_bytes))
+            record_limit = max(
+                1,
+                int(self.policy.max_pending_events)
+                + int(self.policy.max_terminal_records),
+            )
+            if physical > byte_limit:
+                return None
+            result: set[str] = set()
+            scanned = 0
+            records = 0
+            with self.pending_path.open("rb") as handle:
+                for raw in handle:
+                    scanned += len(raw)
+                    records += 1
+                    if (
+                        scanned > byte_limit
+                        or records > record_limit
+                        or len(raw) > max(1, int(self.policy.max_event_bytes))
+                        or not raw.endswith(b"\n")
+                        or not raw.strip()
+                    ):
+                        return None
+                    record = json.loads(raw.decode("utf-8"))
+                    event_id = record.get("event_id") if isinstance(record, dict) else None
+                    if not isinstance(event_id, str) or not event_id.strip():
+                        return None
+                    result.add(event_id.strip())
+                    if len(result) > record_limit:
+                        return None
+            if scanned != physical:
+                return None
+            return result
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
+            return None
+
     def _record_payload(self, event: SecurityEvent, admission: dict | None = None) -> tuple[dict[str, Any], bytes]:
         record = {
             "event_id": event.event_id,
@@ -668,6 +716,15 @@ class DurableEventSpool:
                 physical = self._physical_pending_bytes()
                 if physical > max(1, int(self.policy.max_recovery_scan_bytes)):
                     self._scan_limit_exceeded += 1
+                    self._compaction_failures += 1
+                    return False
+
+                # Compaction is destructive to dead journal rows, so it may
+                # proceed only after every physical row has passed the same
+                # bounded structural scan used by terminal retirement.  An
+                # incomplete or malformed scan must preserve the original
+                # bytes and fail closed rather than rewrite a partial view.
+                if self._bounded_physical_pending_ids() is None:
                     self._compaction_failures += 1
                     return False
 
@@ -1934,6 +1991,24 @@ class DurableEventSpool:
         next_acked.add(event_id)
 
         limit = max(1, int(self.policy.max_terminal_records))
+        if len(next_acked) > limit:
+            # A bounded ACK window does not require rewriting pending.jsonl
+            # when an old tombstone is provably absent from the physical
+            # journal.  This avoids turning a transient Windows sharing lock
+            # into a false consumer failure while preserving resurrection
+            # safety: malformed or unbounded evidence cannot authorize the
+            # fast path and falls through to the existing compaction gate.
+            physical_pending = self._bounded_physical_pending_ids()
+            if physical_pending is not None:
+                ordered = self._bounded_unique_order(
+                    self._acked_order, self._acked, len(self._acked)
+                )
+                for previous in ordered:
+                    if previous != event_id and previous not in physical_pending:
+                        next_acked.discard(previous)
+                        if len(next_acked) <= limit:
+                            break
+
         if len(next_acked) > limit:
             # Remove already-terminal records from pending bytes before an old
             # tombstone is retired.  This prevents resurrection while also

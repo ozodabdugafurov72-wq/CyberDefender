@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -268,6 +269,69 @@ class DurableSpoolCrashWindowRepairTests(unittest.TestCase):
             self.assertEqual([], spool.pending_records())
             self.assertLessEqual(len(spool._acked), 2)
             self.assertEqual(1, spool.health_check()["terminal_compatibility_failures"])
+
+    def test_full_terminal_window_acks_across_cycles_without_pending_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-full-window-live-") as root:
+            spool_dir = Path(root) / "spool"
+            spool = DurableEventSpool(spool_dir, policy=self.policy(3))
+            historical = [event(index) for index in range(3)]
+            for item in historical:
+                self.assertTrue(spool.append(item))
+                self.assertTrue(spool.ack(item.event_id))
+            self.assertTrue(spool.compact())
+            self.assertEqual([], spool.pending_records())
+
+            original_atomic_write = spool._atomic_write
+
+            def pending_rewrite_locked(path: Path, payload: bytes) -> None:
+                if path == spool.pending_path:
+                    raise PermissionError("simulated transient live pending-file sharing")
+                original_atomic_write(path, payload)
+
+            # A full terminal window must not force a pending-file replacement
+            # when a retired tombstone has no physical pending row.  This is
+            # exercised over multiple runtime-like cycles so dead rows from a
+            # prior successful ACK remain in the append journal.
+            with mock.patch.object(
+                spool, "_atomic_write", side_effect=pending_rewrite_locked
+            ):
+                for index in range(3, 6):
+                    current = event(index)
+                    self.assertTrue(spool.append(current))
+                    self.assertTrue(spool.ack(current.event_id))
+
+            stats = spool.get_stats()
+            self.assertEqual(0, stats["ack_failures"])
+            self.assertLessEqual(stats["acked"], 3)
+            self.assertTrue(stats["terminal_state_safe"])
+            self.assertEqual([], spool.pending_records())
+            restarted = DurableEventSpool(spool_dir, policy=self.policy(3))
+            self.assertEqual("HEALTHY", restarted.health_check()["status"])
+            self.assertEqual([], restarted.pending_records())
+
+    def test_full_terminal_window_malformed_pending_preserves_bytes_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="cd-spool-full-window-corrupt-") as root:
+            spool_dir = Path(root) / "spool"
+            spool = DurableEventSpool(spool_dir, policy=self.policy(3))
+            historical = [event(index) for index in range(3)]
+            for item in historical:
+                self.assertTrue(spool.append(item))
+                self.assertTrue(spool.ack(item.event_id))
+            self.assertTrue(spool.compact())
+
+            current = event(3)
+            self.assertTrue(spool.append(current))
+            with spool.pending_path.open("ab") as handle:
+                handle.write(b'{"event_id":')
+                handle.flush()
+                os.fsync(handle.fileno())
+            pending_before = spool.pending_path.read_bytes()
+            ack_before = spool.acked_state_path.read_bytes()
+
+            self.assertFalse(spool.ack(current.event_id))
+            self.assertEqual(pending_before, spool.pending_path.read_bytes())
+            self.assertEqual(ack_before, spool.acked_state_path.read_bytes())
+            self.assertEqual(1, spool.get_stats()["ack_failures"])
 
 
 if __name__ == "__main__":
