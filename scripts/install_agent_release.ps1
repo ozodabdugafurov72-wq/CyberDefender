@@ -237,7 +237,9 @@ function Inspect-ProtectedPathNative([string]$Path) {
     $acl=Get-Acl -LiteralPath $Path -ErrorAction Stop
     $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     Require (@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464') -contains $owner) 'ACL_OWNER_NOT_PRIVILEGED'
-    $privileged=@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    # OWNER RIGHTS (S-1-3-4) resolves to the object owner; the owner was
+    # already required to be SYSTEM, Administrators, or TrustedInstaller.
+    $privileged=@('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464','S-1-3-4')
     $writeMask=0x00000002 -bor 0x00000004 -bor 0x00000010 -bor 0x00000040 -bor 0x00000100 -bor 0x00010000 -bor 0x00040000 -bor 0x00080000 -bor 0x10000000 -bor 0x40000000
     $rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
     foreach($rule in $rules) {

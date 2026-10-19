@@ -413,6 +413,38 @@ try{{Inspect-ProtectedPathNative 'C:\\protected';throw 'EXPECTED_ACL_FAILURE'}}c
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("PASS", completed.stdout)
 
+    def test_native_acl_allows_owner_rights_when_owner_is_privileged(self) -> None:
+        start = self.source.index("function Inspect-ProtectedPathNative")
+        end = self.source.index("function Verify-ExtractedRuntime", start)
+        function = self.source[start:end]
+        body = f"""
+$ErrorActionPreference='Stop'
+function Require([bool]$Condition,[string]$Message){{if(-not $Condition){{throw $Message}}}}
+function Get-Acl{{
+    $rule=[pscustomobject]@{{
+        IdentityReference=[pscustomobject]@{{Value='S-1-3-4'}}
+        AccessControlType=[Security.AccessControl.AccessControlType]::Allow
+        FileSystemRights=[Security.AccessControl.FileSystemRights]::FullControl
+    }}
+    $acl=[pscustomobject]@{{Rule=$rule}}
+    $acl|Add-Member ScriptMethod GetOwner {{param($type)[pscustomobject]@{{Value='S-1-5-32-544'}}}}
+    $acl|Add-Member ScriptMethod GetAccessRules {{param($explicit,$inherited,$type)@($this.Rule)}}
+    return $acl
+}}
+{function}
+Inspect-ProtectedPathNative 'C:\protected'
+'PASS'
+"""
+        completed = subprocess.run(
+            [r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-Command", body],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("PASS", completed.stdout)
+
     def test_plan_acl_gate_is_native_strict_and_closed_vocabulary(self) -> None:
         start = self.source.index("function Inspect-ProtectedPath(")
         end = self.source.index("function Require-Administrator", start)
