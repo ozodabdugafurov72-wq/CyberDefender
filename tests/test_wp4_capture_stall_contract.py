@@ -71,6 +71,15 @@ class WP4CaptureStallContractTests(unittest.TestCase):
         self.assertIn("[string]$_", LAUNCHER)
         self.assertNotIn("stage_codes=$stageCodes", LAUNCHER)
 
+    def test_failure_summary_carries_exception_stage_gate_component(self) -> None:
+        for field in ("exception_class", "stage", "gate_code", "failing_component"):
+            self.assertIn(f"{field}=", LAUNCHER)
+        self.assertIn("RUNTIME_ARCHIVE_EXTRACTION", LAUNCHER)
+        self.assertIn("$failureSummaryPath=Join-Path $WorkRoot 'failure-summary.json'", LAUNCHER)
+        self.assertIn("$closedSummary|Set-Content -LiteralPath $failureSummaryPath", LAUNCHER)
+        self.assertIn("'runtime_extract' {$failureStage='RUNTIME_ARCHIVE_EXTRACTION';$failingComponent='runtime_zip'}", LAUNCHER)
+        self.assertIn("runtime_zip", LAUNCHER)
+
     def test_worker_has_progress_deadline_and_terminal_marker(self) -> None:
         for token in (
             "[int]$StageTimeoutSeconds=90",
