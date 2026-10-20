@@ -38,6 +38,7 @@ $PinnedBaselineCommit='c5030219ba3a996013b8ab0dda48f60743e5c665'
 $PinnedBaselineSourceSHA256='6240488d506d1fb7ebac264fa0a1dbc7c05e1a74c65d5a2667fc98603af346bf'
 $PinnedBaselineRuntimeSHA256='7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2'
 $PinnedBaselineBootstrapSHA256='acbacc73207152b3c766e03cb52f0ae5496c73c93bff36c47e2a42f17f2e232e'
+$PinnedBaselineBootstrapCRLFSHA256='aa7b49a1f1fa1a8276b533a1a20667f15b05763b82ef2ab4dc6ce8fab47a3d58'
 $PinnedBaselineRoot=Join-Path $Releases $PinnedBaselineCommit
 $StateBase=Join-Path $env:ProgramData 'CyberDefender'
 $RuntimeFile=Join-Path $StateBase 'state\dashboard_runtime.json'
@@ -432,8 +433,41 @@ function Resolve-AgentBaselineIdentity($Service) {
     }
     foreach($protected in ($PinnedBaselineRoot,$runtimeRoot,$python,$bootstrap)) { Inspect-ProtectedPath $protected }
     Require ((Get-Content -LiteralPath (Join-Path $PinnedBaselineRoot 'source_commit.txt') -Raw -Encoding Ascii).Trim() -eq $PinnedBaselineCommit) 'PINNED_BASELINE_COMMIT_MARKER_MISMATCH'
-    Require ((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant() -eq $PinnedBaselineBootstrapSHA256) 'PINNED_BASELINE_BOOTSTRAP_HASH_MISMATCH'
+    $bootstrapHash=(Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()
+    Require ($bootstrapHash -eq $PinnedBaselineBootstrapSHA256 -or $bootstrapHash -eq $PinnedBaselineBootstrapCRLFSHA256) 'PINNED_BASELINE_BOOTSTRAP_HASH_MISMATCH'
     return [pscustomobject]@{Kind='pinned';Executable=$python;ReleaseRoot=$PinnedBaselineRoot;RuntimeRoot=$runtimeRoot}
+}
+
+function Get-ManifestBootstrapBytes($Archive) {
+    $entry=$Archive.GetEntry('release/scripts/agent_release/agent_service_bootstrap.py')
+    Require ($null -ne $entry -and $entry.Length -le 1MB) 'ROOT_BOOTSTRAP_MANIFEST_MISSING'
+    $input=$entry.Open();$output=[IO.MemoryStream]::new()
+    try { $input.CopyTo($output); return ,$output.ToArray() }
+    finally { $input.Dispose();$output.Dispose() }
+}
+
+function Test-AllLFToCRLF([byte[]]$Expected,[byte[]]$Actual) {
+    if($Expected -contains 13){ return $false }
+    $converted=[IO.MemoryStream]::new()
+    try {
+        foreach($value in $Expected) { if($value -eq 10){$converted.WriteByte(13)};$converted.WriteByte($value) }
+        return ((Get-Sha256Hex $converted.ToArray()) -eq (Get-Sha256Hex $Actual))
+    } finally { $converted.Dispose() }
+}
+
+function Assert-RootBootstrapArchive($Archive,[string]$Root,[bool]$AllowLegacyCRLF) {
+    $expected=Get-ManifestBootstrapBytes $Archive
+    $actual=Read-BoundedFile (Join-Path $Root 'agent_service_bootstrap.py') 1MB
+    if((Get-Sha256Hex $expected) -eq (Get-Sha256Hex $actual)){ return }
+    Require ($AllowLegacyCRLF -and (Test-AllLFToCRLF $expected $actual)) 'ROOT_BOOTSTRAP_HASH_MISMATCH'
+}
+
+function Assert-RootBootstrapFromPackage([string]$Package,[string]$Root,[string]$ApprovedSha256,[bool]$AllowLegacyCRLF) {
+    $payload=Read-BoundedFile $Package (160MB)
+    Require ((Get-Sha256Hex $payload) -eq $ApprovedSha256.ToLowerInvariant()) 'PINNED_BASELINE_SOURCE_SHA_MISMATCH'
+    $memory=[IO.MemoryStream]::new($payload,$false);$archive=[IO.Compression.ZipArchive]::new($memory,[IO.Compression.ZipArchiveMode]::Read,$false)
+    try { Assert-RootBootstrapArchive $archive $Root $AllowLegacyCRLF }
+    finally { $archive.Dispose();$memory.Dispose() }
 }
 
 function Verify-InstalledPinnedBaseline([string]$Package,[string]$Root,[string]$ApprovedSha256) {
@@ -447,6 +481,7 @@ function Verify-InstalledPinnedBaseline([string]$Package,[string]$Root,[string]$
         $reader=[IO.StreamReader]::new($manifestEntry.Open(),[Text.Encoding]::UTF8,$true,4096,$false)
         try { $manifest=$reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop } finally { $reader.Dispose() }
         Require ($manifest.schema -eq 'cyberdefender.pinned-review-source.v1' -and $manifest.commit -eq $PinnedBaselineCommit) 'PINNED_BASELINE_MANIFEST_INVALID'
+        Assert-RootBootstrapArchive $archive $Root $true
         $allowed=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
         foreach($item in @($manifest.files)) {
             $relative=[string]$item.path; [void]$allowed.Add($relative)
@@ -494,11 +529,11 @@ function Set-AgentBinary([string]$Value) {
 }
 
 function Authorize-AgentProbe() {
-    Run-Checked $newPython @('-I',$newBootstrap,'--authorize-probe')
+    Run-Checked $newPython @('-I','-B',$newBootstrap,'--authorize-probe')
 }
 
 function Assert-AgentPreStartGates() {
-    Run-Checked $newPython @('-I',$newBootstrap,'--pre-start-check')
+    Run-Checked $newPython @('-I','-B',$newBootstrap,'--pre-start-check')
 }
 
 function Read-RuntimeSnapshot() {
@@ -807,15 +842,15 @@ try {
             Inspect-ProtectedPath (Split-Path $RemoteToken -Parent)
         }
     }
-    Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
-    Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+    Run-Checked $PreflightPython @('-I','-B',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+    Run-Checked $PreflightPython @('-I','-B',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
     if($baselineIdentity.Kind -eq 'pinned') {
-        Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
-        Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
+        Run-Checked $PreflightPython @('-I','-B',$Manager,'verify','--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
+        Run-Checked $PreflightPython @('-I','-B',$Provenance,'--repo',$SourceRoot,'--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
         Verify-InstalledPinnedBaseline $BaselineReleaseZip $baselineIdentity.ReleaseRoot $ApprovedBaselineZipSHA256
         Verify-ExtractedRuntime $runtimePackage $baselineIdentity.RuntimeRoot $baselineIdentity.RuntimeRoot
     }
-    Run-Checked $PreflightPython @('-I',$Bootstrap,'--recovery-plan-copy')
+    Run-Checked $PreflightPython @('-I','-B',$Bootstrap,'--recovery-plan-copy')
     Verify-Others $otherBaseline
     Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion snapshots verified.' -ForegroundColor Green
     if($Apply) {
@@ -824,8 +859,9 @@ try {
         New-Item -ItemType Directory -Path $Releases -Force | Out-Null
         Inspect-NoReparse $Releases
         Inspect-ProtectedPath $Releases
-        Run-Checked $PreflightPython @('-I',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot,'--bootstrap',$Bootstrap)
-        Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
+        Run-Checked $PreflightPython @('-I','-B',$Manager,'extract','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--dest',$NewRoot)
+        Assert-RootBootstrapFromPackage $ReleaseZip $NewRoot $ApprovedZipSHA256 $false
+        Run-Checked $PreflightPython @('-I','-B',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision,'--release-root',$NewRoot)
         Inspect-NoReparse $NewRoot
         Inspect-ProtectedPath $NewRoot
         $newRuntime=Join-Path $NewRoot 'runtime'
@@ -840,8 +876,8 @@ try {
         Require ([string]$pythonSignature.Status -eq 'Valid') 'PINNED_RUNTIME_SIGNATURE_INVALID'
         Require ([string]$pythonSignature.SignerCertificate.Subject -like '*Python Software Foundation*') 'PINNED_RUNTIME_SIGNER_INVALID'
         $newBootstrap=Join-Path $NewRoot 'agent_service_bootstrap.py'
-        Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')
-        Run-Checked $newPython @('-I',$Probe,$NewRoot,'--runtime')
+        Run-Checked $newPython @('-I','-B',$newBootstrap,'--dependency-probe')
+        Run-Checked $newPython @('-I','-B',$Probe,$NewRoot,'--runtime')
         Verify-Others $otherBaseline
     }
 } finally {

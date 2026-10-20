@@ -58,17 +58,19 @@ class ReleaseManagerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             base = Path(raw)
             package = base / "release.zip"
-            digest = make_release(package)
+            bootstrap_bytes = b"line_one\nline_two\n"
+            files = {name: b"VALUE=1\n" for name in release_manager.REQUIRED}
+            files[release_manager.BOOTSTRAP_RELATIVE] = bootstrap_bytes
+            digest = make_release(package, files)
             releases = base / "agent-releases"
             releases.mkdir()
             destination = releases / COMMIT
-            bootstrap = base / "agent_service_bootstrap.py"
-            bootstrap.write_text("pass\n", encoding="utf-8")
-            report = release_manager.unpack(package, destination, digest, COMMIT, bootstrap)
+            report = release_manager.unpack(package, destination, digest, COMMIT)
             self.assertEqual(report["status"], "RELEASE_EXTRACTED_NO_SERVICE_CHANGE")
             self.assertTrue((destination / "agent" / "main.py").is_file())
+            self.assertEqual((destination / "agent_service_bootstrap.py").read_bytes(), bootstrap_bytes)
             with self.assertRaises(FileExistsError):
-                release_manager.unpack(package, destination, digest, COMMIT, bootstrap)
+                release_manager.unpack(package, destination, digest, COMMIT)
 
     def test_archive_boundary_rejects_windows_and_escape_names(self) -> None:
         unsafe = (
@@ -314,7 +316,7 @@ if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
             "$RecoverStoppedAgent.IsPresent",
             "$AuthorizeRecoveryProbe",
             "$Revision=$ApprovedCommit.ToLowerInvariant()",
-            "Run-Checked $newPython @('-I',$newBootstrap,'--authorize-probe')",
+            "Run-Checked $newPython @('-I','-B',$newBootstrap,'--authorize-probe')",
             "HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED'",
         ):
             self.assertIn(required, self.source)
@@ -330,7 +332,7 @@ if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
         self.assertNotIn("-like $pinnedBin", resolver)
         body = rf"""
 $ErrorActionPreference='Stop'; function Require([bool]$c,[string]$m){{if(-not $c){{throw $m}}}}
-$LegacyPython='C:\legacy\python.exe';$Releases='C:\releases';$PinnedBaselineCommit='{commit}';$PinnedBaselineSourceSHA256='{source_sha}';$PinnedBaselineRuntimeSHA256='{runtime_sha}';$PinnedBaselineBootstrapSHA256='{'a' * 64}'
+$LegacyPython='C:\legacy\python.exe';$Releases='C:\releases';$PinnedBaselineCommit='{commit}';$PinnedBaselineSourceSHA256='{source_sha}';$PinnedBaselineRuntimeSHA256='{runtime_sha}';$PinnedBaselineBootstrapSHA256='{'a' * 64}';$PinnedBaselineBootstrapCRLFSHA256='{'b' * 64}'
 $PinnedBaselineRoot=Join-Path $Releases $PinnedBaselineCommit;$BaselineReleaseZip='C:\approved.zip';$ApprovedBaselineCommit=$PinnedBaselineCommit;$ApprovedBaselineZipSHA256=$PinnedBaselineSourceSHA256;$ApprovedRuntimeZipSHA256=$PinnedBaselineRuntimeSHA256;$script:reject=''
 function Test-Path{{param($LiteralPath,$PathType)$true}};function Get-Content{{param($LiteralPath,[switch]$Raw,$Encoding)$PinnedBaselineCommit}};function Get-FileHash{{param($LiteralPath,$Algorithm)[pscustomobject]@{{Hash=$PinnedBaselineBootstrapSHA256}}}}
 function Inspect-NoReparse([string]$p){{if($script:reject -eq 'reparse'){{throw 'REPARSE_PATH'}}}};function Inspect-ProtectedPath([string]$p){{if($script:reject -eq 'acl'){{throw 'ACL_VIOLATION'}}}}
@@ -358,12 +360,15 @@ $baselineIdentity.Executable='wrong';try{{{rollback};throw 'MISMATCH_ACCEPTED'}}
         rollback_run = subprocess.run([r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-Command", rollback_body], capture_output=True, text=True); self.assertEqual(rollback_run.returncode, 0, rollback_run.stdout + rollback_run.stderr)
 
     def test_installed_pinned_baseline_rejects_extra_hash_and_manifest(self) -> None:
-        start = self.source.index("function Verify-InstalledPinnedBaseline"); end = self.source.index("function Require-Administrator", start); function = self.source[start:end]
+        start = self.source.index("function Get-ManifestBootstrapBytes"); end = self.source.index("function Require-Administrator", start); function = self.source[start:end]
         commit = "c5030219ba3a996013b8ab0dda48f60743e5c665"
         with tempfile.TemporaryDirectory(prefix="cd-pinned-baseline-") as raw:
-            base, root, package = Path(raw), Path(raw) / commit, Path(raw) / "baseline.zip"; target = root / "agent" / "main.py"; target.parent.mkdir(parents=True); target.write_bytes(b"x")
-            manifest = {"schema": "cyberdefender.pinned-review-source.v1", "commit": commit, "files": [{"path": "agent/main.py", "length": 1, "sha256": hashlib.sha256(b"x").hexdigest()}]}
-            with zipfile.ZipFile(package, "w") as archive: archive.writestr("PINNED_MANIFEST.json", json.dumps(manifest)); archive.writestr("release/agent/main.py", b"x")
+            base, root, package = Path(raw), Path(raw) / commit, Path(raw) / "baseline.zip"; target = root / "agent" / "main.py"; target.parent.mkdir(parents=True); target.write_bytes(b"x"); (root / "agent_service_bootstrap.py").write_bytes(b"boot\n"); nested = root / "scripts" / "agent_release" / "agent_service_bootstrap.py"; nested.parent.mkdir(parents=True); nested.write_bytes(b"boot\n")
+            files = {"agent/main.py": b"x", "scripts/agent_release/agent_service_bootstrap.py": b"boot\n"}
+            manifest = {"schema": "cyberdefender.pinned-review-source.v1", "commit": commit, "files": [{"path": name, "length": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in files.items()]}
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr("PINNED_MANIFEST.json", json.dumps(manifest))
+                for name, data in files.items(): archive.writestr("release/" + name, data)
             digest = hashlib.sha256(package.read_bytes()).hexdigest(); ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
             body = rf"""$ErrorActionPreference='Stop';Add-Type -AssemblyName System.IO.Compression
 function Require([bool]$c,[string]$m){{if(-not $c){{throw $m}}}};function Read-BoundedFile([string]$p,[int64]$m){{,[IO.File]::ReadAllBytes($p)}}
@@ -371,10 +376,46 @@ function Get-Sha256Hex([byte[]]$b){{([BitConverter]::ToString(([Security.Cryptog
 $PinnedBaselineCommit='{commit}';{function}
 Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}'
 [IO.File]::WriteAllText((Join-Path '{root}' 'extra.py'),'x');try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'EXTRA_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'EXTRA_ACCEPTED'){{throw}}}};[IO.File]::Delete((Join-Path '{root}' 'extra.py'))
+[IO.Directory]::CreateDirectory((Join-Path '{root}' 'agent\__pycache__'))|Out-Null;[IO.File]::WriteAllText((Join-Path '{root}' 'agent\__pycache__\main.cpython-314.pyc'),'x');try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'PYC_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'PYC_ACCEPTED'){{throw}}}};[IO.Directory]::Delete((Join-Path '{root}' 'agent\__pycache__'),$true)
 [IO.File]::WriteAllText((Join-Path '{root}' 'agent\main.py'),'y');try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'HASH_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'HASH_ACCEPTED'){{throw}}}};[IO.File]::WriteAllText((Join-Path '{root}' 'agent\main.py'),'x')
 $PinnedBaselineCommit='0'*40;try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'MANIFEST_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'MANIFEST_ACCEPTED'){{throw}}}};'PASS'"""
             run = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command", body], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_root_bootstrap_legacy_crlf_is_bounded_and_new_release_is_exact(self) -> None:
+        start = self.source.index("function Get-ManifestBootstrapBytes")
+        end = self.source.index("function Require-Administrator", start)
+        functions = self.source[start:end]
+        commit = "c5030219ba3a996013b8ab0dda48f60743e5c665"
+        with tempfile.TemporaryDirectory(prefix="cd-bootstrap-layout-") as raw:
+            base, root, package = Path(raw), Path(raw) / commit, Path(raw) / "baseline.zip"
+            bootstrap = b"alpha\nbeta\n"
+            files = {"scripts/agent_release/agent_service_bootstrap.py": bootstrap}
+            root.mkdir(); (root / "agent_service_bootstrap.py").write_bytes(bootstrap)
+            manifest = {"schema": "cyberdefender.pinned-review-source.v1", "commit": commit, "files": [{"path": name, "length": len(data), "sha256": hashlib.sha256(data).hexdigest()} for name, data in files.items()]}
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr("PINNED_MANIFEST.json", json.dumps(manifest))
+                for name, data in files.items(): archive.writestr("release/" + name, data)
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            body = rf"""$ErrorActionPreference='Stop';Add-Type -AssemblyName System.IO.Compression
+function Require([bool]$c,[string]$m){{if(-not $c){{throw $m}}}};function Read-BoundedFile([string]$p,[int64]$m){{,[IO.File]::ReadAllBytes($p)}}
+function Get-Sha256Hex([byte[]]$b){{([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($b))).Replace('-','').ToLowerInvariant()}}
+{functions}
+$root='{root}';$package='{package}';$digest='{digest}';$target=Join-Path $root 'agent_service_bootstrap.py'
+Assert-RootBootstrapFromPackage $package $root $digest $true
+[IO.File]::WriteAllBytes($target,[Text.Encoding]::ASCII.GetBytes("alpha`r`nbeta`r`n"));Assert-RootBootstrapFromPackage $package $root $digest $true
+try{{Assert-RootBootstrapFromPackage $package $root $digest $false;throw 'NEW_CRLF_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'NEW_CRLF_ACCEPTED'){{throw}}}}
+foreach($bad in @("alpha`r`nbeta`n","alpha`r`nbeta`r`nextra")){{[IO.File]::WriteAllBytes($target,[Text.Encoding]::ASCII.GetBytes($bad));try{{Assert-RootBootstrapFromPackage $package $root $digest $true;throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}}}}
+'PASS'"""
+            run = subprocess.run([r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-Command", body], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_python_children_disable_bytecode_without_changing_service_binpath(self) -> None:
+        self.assertIn("sys.dont_write_bytecode = True", (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8"))
+        for line in self.source.splitlines():
+            if "Run-Checked $PreflightPython" in line or "Run-Checked $newPython" in line:
+                self.assertIn("@('-I','-B',", line)
+        self.assertIn("$newBin='\"' + $newPython + '\" -I \"' + $newBootstrap + '\" --service-run'", self.source)
 
     def test_pinned_protected_runtime_is_verified_before_scm_switch(self) -> None:
         for required in (
@@ -384,7 +425,7 @@ $PinnedBaselineCommit='0'*40;try{{Verify-InstalledPinnedBaseline '{package}' '{r
             "Expand-PinnedRuntimePackage $runtimePackage $newRuntime",
             "PINNED_RUNTIME_SIGNATURE_INVALID",
             "PINNED_RUNTIME_SIGNER_INVALID",
-            "Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')",
+            "Run-Checked $newPython @('-I','-B',$newBootstrap,'--dependency-probe')",
             "$newBin='\"' + $newPython + '\" -I \"' + $newBootstrap + '\" --service-run'",
         ):
             self.assertIn(required, self.source)
@@ -398,7 +439,7 @@ $PinnedBaselineCommit='0'*40;try{{Verify-InstalledPinnedBaseline '{package}' '{r
         self.assertIn("$privileged -notcontains $sid", self.source)
         self.assertIn("sys.argv = [\"service_crash_store\", \"authorize-probe\", \"--service\", \"CyberDefenderAgent\"]", (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8"))
         self.assertLess(
-            self.source.index("Run-Checked $newPython @('-I',$newBootstrap,'--dependency-probe')"),
+            self.source.index("Run-Checked $newPython @('-I','-B',$newBootstrap,'--dependency-probe')"),
             self.source.index("Set-AgentBinary $newBin"),
         )
 

@@ -17,6 +17,7 @@ import secrets
 import shutil
 import stat
 import sys
+sys.dont_write_bytecode = True
 import tempfile
 import threading
 from pathlib import Path

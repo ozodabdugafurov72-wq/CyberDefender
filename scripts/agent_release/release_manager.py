@@ -15,10 +15,11 @@ import sys
 import zipfile
 
 SCHEMA = 'cyberdefender.pinned-review-source.v1'
+BOOTSTRAP_RELATIVE = 'scripts/agent_release/agent_service_bootstrap.py'
 REQUIRED = frozenset({'agent/windows_service.py','agent/main.py','agent/service_lifecycle.py',
     'agent/service_crash_guard.py','agent/service_crash_store.py','agent/service_watchdog.py',
     'agent/service_runner.py','agent/fleet/client.py','agent/sensors/file_activity_collector.py',
-    'control_plane/fleet_protocol.py','control_plane/xdr_compat.py','requirements.txt'})
+    'control_plane/fleet_protocol.py','control_plane/xdr_compat.py','requirements.txt',BOOTSTRAP_RELATIVE})
 FILE_LIMIT = 1500
 TOTAL_LIMIT = 150 * 1024 * 1024
 PER_FILE_LIMIT = 30 * 1024 * 1024
@@ -132,12 +133,10 @@ def _verify_snapshot(payload: bytes, approved_sha: str, approved_commit: str) ->
 def verify(package: Path, approved_sha: str, approved_commit: str) -> dict:
     return _verify_snapshot(_load_snapshot(package, approved_sha), approved_sha, approved_commit)
 
-def unpack(package: Path, dest: Path, approved_sha: str, approved_commit: str, bootstrap: Path) -> dict:
+def unpack(package: Path, dest: Path, approved_sha: str, approved_commit: str) -> dict:
     payload = _load_snapshot(package,approved_sha)
     approved_commit = approved_commit.lower()
     result = _verify_snapshot(payload,approved_sha,approved_commit)
-    if not bootstrap.is_file() or bootstrap.name != 'agent_service_bootstrap.py':
-        raise ValueError('bootstrap unavailable')
     if dest.exists():
         raise FileExistsError('refusing to overwrite existing release directory')
     # Parent must be pre-created by a privileged operator, never be reparse/symlink.
@@ -159,8 +158,11 @@ def unpack(package: Path, dest: Path, approved_sha: str, approved_commit: str, b
                     shutil.copyfileobj(src, out, length=1 << 20)
                 if hashlib.sha256(tgt.read_bytes()).hexdigest() != entry['sha256']:
                     raise ValueError('post-write integrity failure')
+        bootstrap_bytes = (dest / BOOTSTRAP_RELATIVE).read_bytes()
         with (dest / 'agent_service_bootstrap.py').open('xb') as f:
-            f.write(bootstrap.read_bytes())
+            f.write(bootstrap_bytes)
+        if hashlib.sha256((dest / 'agent_service_bootstrap.py').read_bytes()).digest() != hashlib.sha256(bootstrap_bytes).digest():
+            raise ValueError('root bootstrap integrity failure')
         # These are audit records, not deployment authority.
         (dest / 'source_commit.txt').write_text(approved_commit+'\n', encoding='ascii')
         result['release_path'] = str(dest)
@@ -179,13 +181,12 @@ def main() -> int:
     parser.add_argument('--sha256',required=True)
     parser.add_argument('--commit',required=True)
     parser.add_argument('--dest',type=Path)
-    parser.add_argument('--bootstrap',type=Path)
     a=parser.parse_args()
     try:
         if a.mode=='verify': result=verify(a.zip,a.sha256,a.commit)
         else:
-            if a.dest is None or a.bootstrap is None: raise ValueError('destination and bootstrap required')
-            result=unpack(a.zip,a.dest,a.sha256,a.commit,a.bootstrap)
+            if a.dest is None: raise ValueError('destination required')
+            result=unpack(a.zip,a.dest,a.sha256,a.commit)
         print(json.dumps(result,sort_keys=True))
         return 0
     except Exception as exc:
