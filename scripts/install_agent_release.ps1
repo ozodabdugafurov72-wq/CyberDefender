@@ -7,6 +7,9 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ApprovedCommit,
     [Parameter(Mandatory=$true)][string]$RuntimeZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedRuntimeZipSHA256,
+    [string]$BaselineReleaseZip='',
+    [ValidatePattern('^$|^[a-fA-F0-9]{64}$')][string]$ApprovedBaselineZipSHA256='',
+    [ValidatePattern('^$|^[a-fA-F0-9]{40}$')][string]$ApprovedBaselineCommit='',
     [switch]$Apply,
     [ValidateSet('','AGENT_ONLY_AUTHORIZED')][string]$HostAcknowledgement='',
     [switch]$RecoverStoppedAgent,
@@ -31,6 +34,11 @@ $OldApp=Join-Path $ProductRoot 'app'
 $LegacyPython=Join-Path $OldApp '.venv\Scripts\python.exe'
 $Releases=Join-Path $ProductRoot 'agent-releases'
 $NewRoot=Join-Path $Releases $Revision
+$PinnedBaselineCommit='c5030219ba3a996013b8ab0dda48f60743e5c665'
+$PinnedBaselineSourceSHA256='6240488d506d1fb7ebac264fa0a1dbc7c05e1a74c65d5a2667fc98603af346bf'
+$PinnedBaselineRuntimeSHA256='7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2'
+$PinnedBaselineBootstrapSHA256='acbacc73207152b3c766e03cb52f0ae5496c73c93bff36c47e2a42f17f2e232e'
+$PinnedBaselineRoot=Join-Path $Releases $PinnedBaselineCommit
 $StateBase=Join-Path $env:ProgramData 'CyberDefender'
 $RuntimeFile=Join-Path $StateBase 'state\dashboard_runtime.json'
 $ReceiptDir=Join-Path $StateBase 'deploy-receipts'
@@ -253,13 +261,21 @@ function Inspect-ProtectedPathNative([string]$Path) {
 function Verify-ExtractedRuntime($Package,[string]$Destination,[string]$ApprovedDestination) {
     $destinationFull=[IO.Path]::GetFullPath($Destination)
     Require ($destinationFull -eq [IO.Path]::GetFullPath($ApprovedDestination)) 'RUNTIME_DESTINATION_INVALID'
+    $allowed=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     foreach($record in @($Package.Manifest.files)) {
+        [void]$allowed.Add(([string]$record.path).Replace('/','\'))
         $target=[IO.Path]::GetFullPath((Join-Path $destinationFull (([string]$record.path) -replace '/','\')))
         Require (Test-Path -LiteralPath $target -PathType Leaf) 'RUNTIME_POST_WRITE_FILE_MISSING'
+        Inspect-ProtectedPath $target
         $stream=[IO.File]::Open($target,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
         try { $digest=Get-StreamSha256Hex $stream }
         finally { $stream.Dispose() }
         Require ($digest -eq [string]$record.sha256) 'RUNTIME_POST_WRITE_HASH_INVALID'
+    }
+    $prefix=$destinationFull.TrimEnd('\')+'\'
+    foreach($file in Get-ChildItem -LiteralPath $destinationFull -Recurse -File -Force) {
+        $relative=$file.FullName.Substring($prefix.Length)
+        Require ($allowed.Contains($relative)) 'RUNTIME_POST_WRITE_FILE_SET_INVALID'
     }
 }
 
@@ -395,6 +411,59 @@ function Inspect-ProtectedPath([string]$Path) {
         }
         throw 'ACL_GATE_UNAVAILABLE'
     }
+}
+
+function Resolve-AgentBaselineIdentity($Service) {
+    $legacyBin='"' + $LegacyPython + '" -m agent.windows_service --service-run'
+    if([string]$Service.PathName -eq $legacyBin) {
+        return [pscustomobject]@{Kind='legacy';Executable=$LegacyPython;ReleaseRoot='';RuntimeRoot=''}
+    }
+    $runtimeRoot=Join-Path $PinnedBaselineRoot 'runtime'
+    $python=Join-Path $runtimeRoot 'python.exe'
+    $bootstrap=Join-Path $PinnedBaselineRoot 'agent_service_bootstrap.py'
+    $pinnedBin='"' + $python + '" -I "' + $bootstrap + '" --service-run'
+    Require ([string]$Service.PathName -eq $pinnedBin) 'AGENT_ORIGINAL_PATH_NOT_RECOGNIZED'
+    Require ($ApprovedBaselineCommit.ToLowerInvariant() -eq $PinnedBaselineCommit) 'PINNED_BASELINE_COMMIT_MISMATCH'
+    Require ($ApprovedBaselineZipSHA256.ToLowerInvariant() -eq $PinnedBaselineSourceSHA256) 'PINNED_BASELINE_SOURCE_SHA_MISMATCH'
+    Require ($ApprovedRuntimeZipSHA256.ToLowerInvariant() -eq $PinnedBaselineRuntimeSHA256) 'PINNED_BASELINE_RUNTIME_SHA_MISMATCH'
+    foreach($required in ($BaselineReleaseZip,$PinnedBaselineRoot,$runtimeRoot,$python,$bootstrap,(Join-Path $PinnedBaselineRoot 'source_commit.txt'))) {
+        Require (Test-Path -LiteralPath $required) 'PINNED_BASELINE_FILE_MISSING'
+        Inspect-NoReparse $required
+    }
+    foreach($protected in ($PinnedBaselineRoot,$runtimeRoot,$python,$bootstrap)) { Inspect-ProtectedPath $protected }
+    Require ((Get-Content -LiteralPath (Join-Path $PinnedBaselineRoot 'source_commit.txt') -Raw -Encoding Ascii).Trim() -eq $PinnedBaselineCommit) 'PINNED_BASELINE_COMMIT_MARKER_MISMATCH'
+    Require ((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant() -eq $PinnedBaselineBootstrapSHA256) 'PINNED_BASELINE_BOOTSTRAP_HASH_MISMATCH'
+    return [pscustomobject]@{Kind='pinned';Executable=$python;ReleaseRoot=$PinnedBaselineRoot;RuntimeRoot=$runtimeRoot}
+}
+
+function Verify-InstalledPinnedBaseline([string]$Package,[string]$Root,[string]$ApprovedSha256) {
+    $payload=Read-BoundedFile $Package (160MB)
+    Require ((Get-Sha256Hex $payload) -eq $ApprovedSha256.ToLowerInvariant()) 'PINNED_BASELINE_SOURCE_SHA_MISMATCH'
+    $memory=[IO.MemoryStream]::new($payload,$false)
+    $archive=[IO.Compression.ZipArchive]::new($memory,[IO.Compression.ZipArchiveMode]::Read,$false)
+    try {
+        $manifestEntry=$archive.GetEntry('PINNED_MANIFEST.json')
+        Require ($null -ne $manifestEntry -and $manifestEntry.Length -le 1MB) 'PINNED_BASELINE_MANIFEST_INVALID'
+        $reader=[IO.StreamReader]::new($manifestEntry.Open(),[Text.Encoding]::UTF8,$true,4096,$false)
+        try { $manifest=$reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop } finally { $reader.Dispose() }
+        Require ($manifest.schema -eq 'cyberdefender.pinned-review-source.v1' -and $manifest.commit -eq $PinnedBaselineCommit) 'PINNED_BASELINE_MANIFEST_INVALID'
+        $allowed=New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        foreach($item in @($manifest.files)) {
+            $relative=[string]$item.path; [void]$allowed.Add($relative)
+            $target=Join-Path $Root ($relative.Replace('/','\'))
+            Require (Test-Path -LiteralPath $target -PathType Leaf) 'PINNED_BASELINE_INSTALLED_FILE_MISSING'
+            Inspect-ProtectedPath $target
+            Require ((Get-Item -LiteralPath $target).Length -eq [int64]$item.length) 'PINNED_BASELINE_INSTALLED_LENGTH_MISMATCH'
+            Require ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -eq [string]$item.sha256) 'PINNED_BASELINE_INSTALLED_HASH_MISMATCH'
+        }
+        [void]$allowed.Add('agent_service_bootstrap.py'); [void]$allowed.Add('source_commit.txt')
+        $prefix=$Root.TrimEnd('\')+'\'; $runtimePrefix=(Join-Path $Root 'runtime').TrimEnd('\')+'\'
+        foreach($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force) {
+            if($file.FullName.StartsWith($runtimePrefix,[StringComparison]::OrdinalIgnoreCase)){continue}
+            $relative=$file.FullName.Substring($prefix.Length).Replace('\','/')
+            Require ($allowed.Contains($relative)) 'PINNED_BASELINE_FILE_SET_MISMATCH'
+        }
+    } finally { $archive.Dispose(); $memory.Dispose() }
 }
 
 function Require-Administrator() {
@@ -698,8 +767,7 @@ foreach($required in ($LegacyPython,$Manager,$Provenance,$Bootstrap,$Probe,$Rele
     Inspect-NoReparse $required
 }
 $agentBaseline=Capture-Service $AgentName
-$expectedInstalledBin='"' + $LegacyPython + '" -m agent.windows_service --service-run'
-Require ($agentBaseline.PathName -eq $expectedInstalledBin) 'AGENT_ORIGINAL_PATH_NOT_RECOGNIZED'
+$baselineIdentity=Resolve-AgentBaselineIdentity $agentBaseline
 Require ($agentBaseline.StartMode -eq 'Auto') 'AGENT_STARTMODE_NOT_AUTO'
 Require ($agentBaseline.StartName -eq 'LocalSystem') 'AGENT_IDENTITY_UNEXPECTED'
 if($agentBaseline.State -eq 'Running') {
@@ -741,6 +809,12 @@ try {
     }
     Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
     Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$ReleaseZip,'--sha256',$ApprovedZipSHA256,'--commit',$Revision)
+    if($baselineIdentity.Kind -eq 'pinned') {
+        Run-Checked $PreflightPython @('-I',$Manager,'verify','--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
+        Run-Checked $PreflightPython @('-I',$Provenance,'--repo',$SourceRoot,'--zip',$BaselineReleaseZip,'--sha256',$ApprovedBaselineZipSHA256,'--commit',$ApprovedBaselineCommit)
+        Verify-InstalledPinnedBaseline $BaselineReleaseZip $baselineIdentity.ReleaseRoot $ApprovedBaselineZipSHA256
+        Verify-ExtractedRuntime $runtimePackage $baselineIdentity.RuntimeRoot $baselineIdentity.RuntimeRoot
+    }
     Run-Checked $PreflightPython @('-I',$Bootstrap,'--recovery-plan-copy')
     Verify-Others $otherBaseline
     Write-Host 'PLAN_PASS: pinned release, Agent baseline and companion snapshots verified.' -ForegroundColor Green
@@ -811,8 +885,9 @@ try {
     if($agentBaseline.State -eq 'Running') {
         try {
             if($AuthorizeRecoveryProbe) { Authorize-AgentProbe }
+            $rollbackStartedAt=(Get-Date).ToUniversalTime()
             Start-Agent
-            [void](Verify-AgentProcess $agentBaseline.PathName)
+            [void](Verify-AgentProcess $agentBaseline.PathName $baselineIdentity.ReleaseRoot $rollbackStartedAt 5000 $baselineIdentity.Executable)
         } catch { $rollbackFailures+=('restore-running-state:' + $_.Exception.Message) }
     } else {
         try { Stop-Agent } catch { $rollbackFailures+=('restore-stopped-state:' + $_.Exception.Message) }

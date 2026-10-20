@@ -93,6 +93,13 @@ class ReleaseManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "SHA256"):
                 release_manager.verify(package, digest, COMMIT)
 
+    def test_wrong_manifest_commit_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            package = Path(raw) / "release.zip"
+            digest = make_release(package)
+            with self.assertRaisesRegex(ValueError, "wrong release identity"):
+                release_manager.verify(package, digest, "0" * 40)
+
 
 class RuntimeManagerTests(unittest.TestCase):
     def _runtime_zip(self, path: Path, extra: dict[str, bytes] | None = None) -> str:
@@ -312,6 +319,63 @@ if($agentPid -ne 4321 -or $receipt -ne 'receipt'){{throw 'SUCCESS_PATH_FAILED'}}
         ):
             self.assertIn(required, self.source)
 
+    def test_exact_pinned_baseline_and_rollback_tuple_contract(self) -> None:
+        start = self.source.index("function Resolve-AgentBaselineIdentity"); end = self.source.index("function Verify-InstalledPinnedBaseline", start); resolver = self.source[start:end]
+        commit, source_sha, runtime_sha = "c5030219ba3a996013b8ab0dda48f60743e5c665", "6240488d506d1fb7ebac264fa0a1dbc7c05e1a74c65d5a2667fc98603af346bf", "7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2"
+        for required in (commit, source_sha, runtime_sha, "PINNED_BASELINE_COMMIT_MISMATCH",
+                         "PINNED_BASELINE_SOURCE_SHA_MISMATCH", "PINNED_BASELINE_RUNTIME_SHA_MISMATCH"):
+            self.assertIn(required, self.source)
+        for required in ("Verify-InstalledPinnedBaseline $BaselineReleaseZip $baselineIdentity.ReleaseRoot", "Verify-ExtractedRuntime $runtimePackage $baselineIdentity.RuntimeRoot", "Verify-AgentProcess $agentBaseline.PathName $baselineIdentity.ReleaseRoot $rollbackStartedAt 5000 $baselineIdentity.Executable", "PINNED_BASELINE_MANIFEST_INVALID"):
+            self.assertIn(required, self.source)
+        self.assertNotIn("-like $pinnedBin", resolver)
+        body = rf"""
+$ErrorActionPreference='Stop'; function Require([bool]$c,[string]$m){{if(-not $c){{throw $m}}}}
+$LegacyPython='C:\legacy\python.exe';$Releases='C:\releases';$PinnedBaselineCommit='{commit}';$PinnedBaselineSourceSHA256='{source_sha}';$PinnedBaselineRuntimeSHA256='{runtime_sha}';$PinnedBaselineBootstrapSHA256='{'a' * 64}'
+$PinnedBaselineRoot=Join-Path $Releases $PinnedBaselineCommit;$BaselineReleaseZip='C:\approved.zip';$ApprovedBaselineCommit=$PinnedBaselineCommit;$ApprovedBaselineZipSHA256=$PinnedBaselineSourceSHA256;$ApprovedRuntimeZipSHA256=$PinnedBaselineRuntimeSHA256;$script:reject=''
+function Test-Path{{param($LiteralPath,$PathType)$true}};function Get-Content{{param($LiteralPath,[switch]$Raw,$Encoding)$PinnedBaselineCommit}};function Get-FileHash{{param($LiteralPath,$Algorithm)[pscustomobject]@{{Hash=$PinnedBaselineBootstrapSHA256}}}}
+function Inspect-NoReparse([string]$p){{if($script:reject -eq 'reparse'){{throw 'REPARSE_PATH'}}}};function Inspect-ProtectedPath([string]$p){{if($script:reject -eq 'acl'){{throw 'ACL_VIOLATION'}}}}
+{resolver}
+$legacy='"'+$LegacyPython+'" -m agent.windows_service --service-run';if((Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$legacy}})).Kind -ne 'legacy'){{throw 'LEGACY_REJECTED'}}
+$python=Join-Path $PinnedBaselineRoot 'runtime\python.exe';$bootstrap=Join-Path $PinnedBaselineRoot 'agent_service_bootstrap.py';$pinned='"'+$python+'" -I "'+$bootstrap+'" --service-run'
+if((Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$pinned}})).Kind -ne 'pinned'){{throw 'PINNED_REJECTED'}}
+foreach($bad in @($pinned+' extra',$pinned.Replace($PinnedBaselineCommit,'c503021-prefix'),$pinned.Replace('agent-releases','other'))){{try{{Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$bad}});throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}}}}
+foreach($bad in @('reparse','acl')){{$script:reject=$bad;try{{Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$pinned}});throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}};$script:reject=''}}
+$ApprovedBaselineCommit='0'*40; try{{Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$pinned}});throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}}
+$ApprovedBaselineCommit=$PinnedBaselineCommit; $ApprovedBaselineZipSHA256='0'*64; try{{Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$pinned}});throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}}
+$ApprovedBaselineZipSHA256=$PinnedBaselineSourceSHA256; $ApprovedRuntimeZipSHA256='0'*64; try{{Resolve-AgentBaselineIdentity ([pscustomobject]@{{PathName=$pinned}});throw 'BAD_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'BAD_ACCEPTED'){{throw}}}}
+'PASS'
+"""
+        completed = subprocess.run([r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-Command", body], capture_output=True, text=True); self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        rollback = "[void](Verify-AgentProcess $agentBaseline.PathName $baselineIdentity.ReleaseRoot $rollbackStartedAt 5000 $baselineIdentity.Executable)"
+        rollback_body = f"""
+$ErrorActionPreference='Stop';$agentBaseline=[pscustomobject]@{{PathName='pinned-bin'}}
+$baselineIdentity=[pscustomobject]@{{ReleaseRoot='pinned-root';Executable='pinned-python'}};$rollbackStartedAt=[datetime]::UtcNow
+function Verify-AgentProcess([string]$bin,[string]$root,[datetime]$started,[int]$timeout,[string]$exe){{if($bin -ne 'pinned-bin' -or $root -ne 'pinned-root' -or $exe -ne 'pinned-python' -or $timeout -ne 5000){{throw 'ROLLBACK_TUPLE_MISMATCH'}};return 42}}
+{rollback}
+$baselineIdentity.Executable='wrong';try{{{rollback};throw 'MISMATCH_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'MISMATCH_ACCEPTED'){{throw}}}}
+'PASS'
+"""
+        rollback_run = subprocess.run([r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-NoProfile", "-NonInteractive", "-Command", rollback_body], capture_output=True, text=True); self.assertEqual(rollback_run.returncode, 0, rollback_run.stdout + rollback_run.stderr)
+
+    def test_installed_pinned_baseline_rejects_extra_hash_and_manifest(self) -> None:
+        start = self.source.index("function Verify-InstalledPinnedBaseline"); end = self.source.index("function Require-Administrator", start); function = self.source[start:end]
+        commit = "c5030219ba3a996013b8ab0dda48f60743e5c665"
+        with tempfile.TemporaryDirectory(prefix="cd-pinned-baseline-") as raw:
+            base, root, package = Path(raw), Path(raw) / commit, Path(raw) / "baseline.zip"; target = root / "agent" / "main.py"; target.parent.mkdir(parents=True); target.write_bytes(b"x")
+            manifest = {"schema": "cyberdefender.pinned-review-source.v1", "commit": commit, "files": [{"path": "agent/main.py", "length": 1, "sha256": hashlib.sha256(b"x").hexdigest()}]}
+            with zipfile.ZipFile(package, "w") as archive: archive.writestr("PINNED_MANIFEST.json", json.dumps(manifest)); archive.writestr("release/agent/main.py", b"x")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest(); ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+            body = rf"""$ErrorActionPreference='Stop';Add-Type -AssemblyName System.IO.Compression
+function Require([bool]$c,[string]$m){{if(-not $c){{throw $m}}}};function Read-BoundedFile([string]$p,[int64]$m){{,[IO.File]::ReadAllBytes($p)}}
+function Get-Sha256Hex([byte[]]$b){{([BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($b))).Replace('-','').ToLowerInvariant()}};function Get-FileHash{{param($LiteralPath,$Algorithm)[pscustomobject]@{{Hash=(Get-Sha256Hex ([IO.File]::ReadAllBytes($LiteralPath)))}}}};function Inspect-ProtectedPath([string]$p){{}}
+$PinnedBaselineCommit='{commit}';{function}
+Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}'
+[IO.File]::WriteAllText((Join-Path '{root}' 'extra.py'),'x');try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'EXTRA_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'EXTRA_ACCEPTED'){{throw}}}};[IO.File]::Delete((Join-Path '{root}' 'extra.py'))
+[IO.File]::WriteAllText((Join-Path '{root}' 'agent\main.py'),'y');try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'HASH_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'HASH_ACCEPTED'){{throw}}}};[IO.File]::WriteAllText((Join-Path '{root}' 'agent\main.py'),'x')
+$PinnedBaselineCommit='0'*40;try{{Verify-InstalledPinnedBaseline '{package}' '{root}' '{digest}';throw 'MANIFEST_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'MANIFEST_ACCEPTED'){{throw}}}};'PASS'"""
+            run = subprocess.run([ps, "-NoProfile", "-NonInteractive", "-Command", body], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
     def test_pinned_protected_runtime_is_verified_before_scm_switch(self) -> None:
         for required in (
             "[Parameter(Mandatory=$true)][string]$RuntimeZip",
@@ -356,10 +420,13 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
 $NewRoot='{escaped_root}'
 {functions}
+function Inspect-ProtectedPath([string]$Path){{}}
 $package=Read-PinnedRuntimePackage '{escaped_package}' '{digest}'
 $runtime=Join-Path $NewRoot 'runtime'
 [void](New-Item -ItemType Directory -Path $runtime -Force)
 Expand-PinnedRuntimePackage $package $runtime $runtime
+Verify-ExtractedRuntime $package $runtime $runtime;[IO.File]::WriteAllText((Join-Path $runtime 'extra.py'),'x')
+try{{Verify-ExtractedRuntime $package $runtime $runtime;throw 'EXTRA_RUNTIME_ACCEPTED'}}catch{{if($_.Exception.Message -eq 'EXTRA_RUNTIME_ACCEPTED'){{throw}}}}
 if(-not (Test-Path -LiteralPath (Join-Path $NewRoot 'runtime\\python.exe') -PathType Leaf)){{throw 'RUNTIME_NOT_EXTRACTED'}}
 'PASS'
 """
