@@ -53,15 +53,12 @@ $candidateRoot=Join-Path $runtimeVerifyParent $commitLower
 $runtimeRoot=Join-Path $candidateRoot 'runtime'
 [void](New-Item -ItemType Directory -Path $runtimeVerifyParent -ErrorAction Stop)
 try {
-    $bootstrapPlaceholder=Join-Path $runtimeVerifyParent 'agent_service_bootstrap.py'
-    [IO.File]::WriteAllText($bootstrapPlaceholder,"# inert extraction placeholder`n",(New-Object Text.UTF8Encoding($false)))
     [void](Invoke-PythonJson @(
         $releaseManager,'extract','--zip',$zipA,'--sha256',$shaA,'--commit',$commitLower,
-        '--dest',$candidateRoot,'--bootstrap',$bootstrapPlaceholder
+        '--dest',$candidateRoot
     ))
     $trackedBootstrap=Join-Path $candidateRoot 'scripts\agent_release\agent_service_bootstrap.py'
     $rootBootstrap=Join-Path $candidateRoot 'agent_service_bootstrap.py'
-    [IO.File]::WriteAllBytes($rootBootstrap,[IO.File]::ReadAllBytes($trackedBootstrap))
     if((Get-FileHash -Algorithm SHA256 -LiteralPath $rootBootstrap).Hash -ne
        (Get-FileHash -Algorithm SHA256 -LiteralPath $trackedBootstrap).Hash){throw 'BOOTSTRAP_PROVENANCE_MISMATCH'}
     $runtime=Invoke-PythonJson @($runtimeManager,'extract','--zip',$RuntimeZip,'--sha256',$RuntimeSHA256,'--dest',$runtimeRoot)
@@ -70,7 +67,7 @@ try {
     $savedPythonPath=$env:PYTHONPATH
     try {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
-        $closureOutput=& $runtimePython -I $closureScript --release-root $candidateRoot
+        $closureOutput=& $runtimePython -I -B $closureScript --release-root $candidateRoot
         if($LASTEXITCODE -ne 0){throw 'IMPORT_CLOSURE_FAILED'}
         $closure=($closureOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
         if($closure.status -ne 'IMPORT_CLOSURE_PASS'){throw 'IMPORT_CLOSURE_FAILED'}

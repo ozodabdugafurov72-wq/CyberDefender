@@ -82,9 +82,7 @@ class GitZipProvenanceTests(unittest.TestCase):
         parent = self.root / "agent-releases"
         parent.mkdir()
         dest = parent / self.commit
-        bootstrap = self.root / "agent_service_bootstrap.py"
-        bootstrap.write_bytes(b"# bootstrap only\n")
-        release_manager.unpack(self.archive, dest, self.sha, self.commit, bootstrap)
+        release_manager.unpack(self.archive, dest, self.sha, self.commit)
         result = verify_provenance(self.repo, self.archive, self.commit, self.sha, dest)
         self.assertEqual(result["status"], "GIT_ZIP_RELEASE_PROVENANCE_PASS")
 
@@ -92,9 +90,7 @@ class GitZipProvenanceTests(unittest.TestCase):
         parent = self.root / "agent-releases"
         parent.mkdir()
         dest = parent / self.commit
-        bootstrap = self.root / "agent_service_bootstrap.py"
-        bootstrap.write_bytes(b"# bootstrap only\n")
-        release_manager.unpack(self.archive, dest, self.sha, self.commit, bootstrap)
+        release_manager.unpack(self.archive, dest, self.sha, self.commit)
         with (dest / "agent/storage/durable_spool.py").open("ab") as f:
             f.write(b"# modified by unapproved installer\n")
         with self.assertRaisesRegex(ProvenanceError, "GIT_INSTALLED_BYTE_MISMATCH"):
@@ -104,9 +100,7 @@ class GitZipProvenanceTests(unittest.TestCase):
         parent = self.root / "agent-releases"
         parent.mkdir()
         dest = parent / self.commit
-        bootstrap = self.root / "agent_service_bootstrap.py"
-        bootstrap.write_bytes(b"# bootstrap only\n")
-        release_manager.unpack(self.archive, dest, self.sha, self.commit, bootstrap)
+        release_manager.unpack(self.archive, dest, self.sha, self.commit)
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "untrusted.py").write_text("raise SystemExit\n", encoding="utf-8")

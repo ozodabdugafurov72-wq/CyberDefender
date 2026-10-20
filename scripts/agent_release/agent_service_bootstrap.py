@@ -6,6 +6,8 @@ immutable Agent release directory.
 """
 from __future__ import annotations
 
+import sys
+sys.dont_write_bytecode = True
 import importlib.util
 import importlib
 import copy
@@ -16,8 +18,6 @@ import runpy
 import secrets
 import shutil
 import stat
-import sys
-sys.dont_write_bytecode = True
 import tempfile
 import threading
 from pathlib import Path

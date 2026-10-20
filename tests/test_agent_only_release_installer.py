@@ -411,7 +411,9 @@ foreach($bad in @("alpha`r`nbeta`n","alpha`r`nbeta`r`nextra")){{[IO.File]::Write
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
     def test_python_children_disable_bytecode_without_changing_service_binpath(self) -> None:
-        self.assertIn("sys.dont_write_bytecode = True", (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8"))
+        bootstrap = (TOOLS / "agent_service_bootstrap.py").read_text(encoding="utf-8")
+        self.assertLess(bootstrap.index("import sys"), bootstrap.index("import importlib"))
+        self.assertLess(bootstrap.index("sys.dont_write_bytecode = True"), bootstrap.index("import importlib"))
         for line in self.source.splitlines():
             if "Run-Checked $PreflightPython" in line or "Run-Checked $newPython" in line:
                 self.assertIn("@('-I','-B',", line)
