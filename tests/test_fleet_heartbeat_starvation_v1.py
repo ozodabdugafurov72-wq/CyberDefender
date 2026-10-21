@@ -27,7 +27,14 @@ class Runtime:
         self.cycles += 1
 
     def health_snapshot(self):
-        return {"runtime": {"status": "HEALTHY"}, "resource_guard": {"state": "NORMAL"}}
+        return {
+            "runtime": {
+                "status": "HEALTHY",
+                "running": True,
+                "component_failures": 0,
+            },
+            "resource_guard": {"state": "NORMAL"},
+        }
 
     def stop(self, _reason):
         pass
@@ -63,7 +70,7 @@ slow_runtime = Runtime(delay=0.15)
 slow_client = Client()
 slow_runner = ServiceRunner(lambda: slow_runtime, interval_seconds=0.02, telemetry_client=slow_client)
 slow_runner.RUNTIME_FRESHNESS_SECONDS = 0.05
-slow_runner.run(max_cycles=1)
+slow_runner.run(max_cycles=3)
 assert any(item["health_state"] == "DEGRADED" and item["last_error"] == "RUNTIME_CYCLE_STALE" for item in slow_client.heartbeats)
 assert slow_client.heartbeats[-1]["health_state"] == "HEALTHY"
 
