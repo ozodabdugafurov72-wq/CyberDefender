@@ -4164,6 +4164,16 @@ class CyberDefenderRuntime:
 
         return bool(current_degraded)
 
+    @staticmethod
+    def _persistence_failure_active(*, health, logger_failures):
+        """Use current state health while retaining historical counters."""
+        state_health = health.get("state_manager", {})
+        return (
+            not isinstance(state_health, dict)
+            or state_health.get("status") != "HEALTHY"
+            or logger_failures > 0
+        )
+
 
     # ========================================================
     # HEALTH SNAPSHOT
@@ -4795,9 +4805,9 @@ class CyberDefenderRuntime:
 
                 break
 
-        persistence_failure = (
-            self.state_failures > 0
-            or self.logger_failures > 0
+        persistence_failure = self._persistence_failure_active(
+            health=health,
+            logger_failures=self.logger_failures,
         )
         safety_status = str(
             health.get("safety_core", {}).get("status", "UNKNOWN")
