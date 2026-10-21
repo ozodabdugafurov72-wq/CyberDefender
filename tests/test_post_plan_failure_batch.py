@@ -116,6 +116,22 @@ class PostPlanFailureBatchTests(unittest.TestCase):
             self.assertTrue(result.is_file())
             self.assertRegex(result.read_text(encoding="utf-8"), r"^PLAN_FAIL:[A-Z0-9_]+\nINSTALLER_EXIT=1\n$")
 
+    def test_plan_wrapper_forwards_complete_pinned_baseline_tuple(self):
+        source = (
+            ROOT / "scripts/agent_release/run_installer_plan.ps1"
+        ).read_text(encoding="utf-8")
+        for marker in (
+            "[string]$BaselineReleaseZip=''",
+            "[string]$ApprovedBaselineZipSHA256=''",
+            "[string]$ApprovedBaselineCommit=''",
+            "BASELINE_PINSET_INCOMPLETE",
+            "Require-PinnedFile $BaselineReleaseZip $ApprovedBaselineZipSHA256 'BASELINE_ZIP_SHA256_MISMATCH'",
+            "'-BaselineReleaseZip',$BaselineReleaseZip",
+            "'-ApprovedBaselineZipSHA256',$ApprovedBaselineZipSHA256",
+            "'-ApprovedBaselineCommit',$ApprovedBaselineCommit",
+        ):
+            self.assertIn(marker, source)
+
 
 if __name__ == "__main__":
     unittest.main()

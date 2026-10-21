@@ -8,6 +8,9 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$ApprovedCommit,
     [Parameter(Mandatory=$true)][string]$RuntimeZip,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ApprovedRuntimeZipSHA256,
+    [string]$BaselineReleaseZip='',
+    [ValidatePattern('^$|^[a-fA-F0-9]{64}$')][string]$ApprovedBaselineZipSHA256='',
+    [ValidatePattern('^$|^[a-fA-F0-9]{40}$')][string]$ApprovedBaselineCommit='',
     [Parameter(Mandatory=$true)][string]$ResultPath,
     [switch]$RecoverStoppedAgent,
     [switch]$AcknowledgeCompanionDegraded
@@ -42,6 +45,11 @@ try {
     Require-PinnedFile $InstallerPath $ApprovedInstallerSHA256 'INSTALLER_SHA256_MISMATCH'
     Require-PinnedFile $ReleaseZip $ApprovedZipSHA256 'RELEASE_ZIP_SHA256_MISMATCH'
     Require-PinnedFile $RuntimeZip $ApprovedRuntimeZipSHA256 'RUNTIME_ZIP_SHA256_MISMATCH'
+    $baselineProvided=([bool]$BaselineReleaseZip -or [bool]$ApprovedBaselineZipSHA256 -or [bool]$ApprovedBaselineCommit)
+    if($baselineProvided) {
+        Require ([bool]$BaselineReleaseZip -and [bool]$ApprovedBaselineZipSHA256 -and [bool]$ApprovedBaselineCommit) 'BASELINE_PINSET_INCOMPLETE'
+        Require-PinnedFile $BaselineReleaseZip $ApprovedBaselineZipSHA256 'BASELINE_ZIP_SHA256_MISMATCH'
+    }
     foreach($path in @($ResultPath,$stdoutPath,$stderrPath)) {
         Require (-not (Test-Path -LiteralPath $path)) 'RESULT_PATH_ALREADY_EXISTS'
     }
@@ -53,6 +61,13 @@ try {
         '-ApprovedCommit',$ApprovedCommit,'-RuntimeZip',$RuntimeZip,
         '-ApprovedRuntimeZipSHA256',$ApprovedRuntimeZipSHA256
     )
+    if($baselineProvided) {
+        $arguments+=@(
+            '-BaselineReleaseZip',$BaselineReleaseZip,
+            '-ApprovedBaselineZipSHA256',$ApprovedBaselineZipSHA256,
+            '-ApprovedBaselineCommit',$ApprovedBaselineCommit
+        )
+    }
     if($RecoverStoppedAgent.IsPresent){$arguments+='-RecoverStoppedAgent'}
     if($AcknowledgeCompanionDegraded.IsPresent){$arguments+='-AcknowledgeCompanionDegraded'}
     $process=Start-Process -FilePath $powershell -ArgumentList $arguments -Wait -PassThru -NoNewWindow `
