@@ -92,6 +92,7 @@ class PostPlanFailureBatchTests(unittest.TestCase):
             "RecoverStoppedAgent",
             "PLAN_FAIL:",
             "PLAN_PASS",
+            "PINNED_BASELINE_FILE_SET_MISMATCH",
         ):
             self.assertIn(marker, source)
         self.assertNotIn("-Verb RunAs", source)
