@@ -541,16 +541,66 @@ function Read-RuntimeSnapshot() {
     return Get-Content -LiteralPath $RuntimeFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 }
 
+function Test-JsonProperty($Object,[string]$Name) {
+    return ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name])
+}
+
+function Test-StrictIntegerProperty($Object,[string]$Name,[long]$Minimum=0) {
+    if(-not (Test-JsonProperty $Object $Name)){ return $false }
+    $value=$Object.$Name
+    if(-not ($value -is [byte] -or $value -is [sbyte] -or $value -is [int16] -or $value -is [uint16] -or $value -is [int32] -or $value -is [uint32] -or $value -is [int64])){ return $false }
+    try { return ([long]$value -ge $Minimum) } catch { return $false }
+}
+
+function Test-StrictNumberProperty($Object,[string]$Name) {
+    if(-not (Test-JsonProperty $Object $Name)){ return $false }
+    $value=$Object.$Name
+    return ($value -is [byte] -or $value -is [sbyte] -or $value -is [int16] -or $value -is [uint16] -or $value -is [int32] -or $value -is [uint32] -or $value -is [int64] -or $value -is [single] -or $value -is [double] -or $value -is [decimal])
+}
+
 function Runtime-IsHealthy($Snapshot) {
-    if($null -eq $Snapshot.runtime){ return $false }
-    $resource=$Snapshot.runtime.resource_snapshot
+    if(-not (Test-JsonProperty $Snapshot 'runtime')){ return $false }
+    $runtime=$Snapshot.runtime
+    if(-not (Test-JsonProperty $runtime 'resource_snapshot')){ return $false }
+    $resource=$runtime.resource_snapshot
     return (
-        $Snapshot.runtime.status -eq 'HEALTHY' -and
-        $Snapshot.runtime.running -eq $true -and
-        [int]$Snapshot.runtime.component_failures -eq 0 -and
+        (Test-JsonProperty $runtime 'status') -and $runtime.status -is [string] -and $runtime.status -ceq 'HEALTHY' -and
+        (Test-JsonProperty $runtime 'running') -and $runtime.running -is [bool] -and $runtime.running -eq $true -and
+        (Test-StrictIntegerProperty $runtime 'component_failures' 0) -and [long]$runtime.component_failures -eq 0 -and
+        (Test-StrictIntegerProperty $runtime 'cycle_count' 0) -and
+        (Test-StrictIntegerProperty $runtime 'events_acked' 0) -and
+        (Test-StrictIntegerProperty $runtime 'events_persisted_deferred' 0) -and
+        (Test-StrictNumberProperty $runtime 'started_at') -and
         $null -ne $resource -and
-        $resource.state -eq 'NORMAL'
+        (Test-JsonProperty $resource 'state') -and $resource.state -is [string] -and $resource.state -ceq 'NORMAL'
     )
+}
+
+function Get-AgentProcessStartUtc([int]$ProcessId) {
+    Require ($ProcessId -gt 0) 'AGENT_PID_MISSING'
+    $process=Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ProcessId) -ErrorAction Stop
+    Require ($null -ne $process -and [int]$process.ProcessId -eq $ProcessId) 'AGENT_PROCESS_IDENTITY_MISSING'
+    Require ($null -ne $process.CreationDate) 'AGENT_PROCESS_CREATION_MISSING'
+    return ([datetime]$process.CreationDate).ToUniversalTime()
+}
+
+function Assert-RuntimeBootIdentity($Snapshot,[datetime]$ProcessStartedUtc,[datetime]$ObservedUtc,$ExpectedStartedAt=$null) {
+    Require (Test-JsonProperty $Snapshot 'runtime') 'RUNTIME_OBJECT_MISSING'
+    $runtime=$Snapshot.runtime
+    Require (Test-JsonProperty $runtime 'started_at') 'RUNTIME_STARTED_AT_MISSING'
+    Require (Test-StrictNumberProperty $runtime 'started_at') 'RUNTIME_STARTED_AT_TYPE_INVALID'
+    $startedAt=[double]$runtime.started_at
+    Require (-not [double]::IsNaN($startedAt) -and -not [double]::IsInfinity($startedAt)) 'RUNTIME_STARTED_AT_TYPE_INVALID'
+    try {
+        $millis=[long][Math]::Round($startedAt * 1000.0,[MidpointRounding]::AwayFromZero)
+        $runtimeStartedUtc=[DateTimeOffset]::FromUnixTimeMilliseconds($millis).UtcDateTime
+    } catch { throw 'RUNTIME_STARTED_AT_RANGE_INVALID' }
+    Require ($runtimeStartedUtc -ge $ProcessStartedUtc.ToUniversalTime().AddSeconds(-2)) 'RUNTIME_BOOT_IDENTITY_STALE'
+    Require ($runtimeStartedUtc -le $ObservedUtc.ToUniversalTime().AddSeconds(5)) 'RUNTIME_BOOT_IDENTITY_FUTURE'
+    if($null -ne $ExpectedStartedAt) {
+        Require ([Math]::Abs($startedAt - [double]$ExpectedStartedAt) -le 0.001) 'RUNTIME_BOOT_IDENTITY_CHANGED'
+    }
+    return $startedAt
 }
 
 function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int]$MinimumSnapshotSpacingSeconds=60,[int]$StableSeconds=900) {
@@ -559,6 +609,9 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
     $lastStamp=[datetime]::MinValue
     $initialPid=[int](Service-Info $AgentName).ProcessId
     Require ($initialPid -gt 0) 'AGENT_PID_MISSING'
+    $processStartedUtc=Get-AgentProcessStartUtc $initialPid
+    Require ($processStartedUtc -ge $AfterUtc.ToUniversalTime().AddSeconds(-2)) 'AGENT_PROCESS_PREDATES_START'
+    $runtimeStartedAt=$null
     while((Get-Date).ToUniversalTime() -lt $deadline) {
         $service=Service-Info $AgentName
         Require ($service.State -eq 'Running') 'AGENT_SERVICE_NOT_RUNNING'
@@ -571,6 +624,8 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
                 try {
                     $snapshot=Read-RuntimeSnapshot
                     if(Runtime-IsHealthy $snapshot) {
+                        $candidateStartedAt=Assert-RuntimeBootIdentity $snapshot $processStartedUtc (Get-Date).ToUniversalTime() $runtimeStartedAt
+                        if($null -eq $runtimeStartedAt){ $runtimeStartedAt=$candidateStartedAt }
                         if($observations.Count -eq 0 -or ($stamp-$observations[-1].file_timestamp_utc).TotalSeconds -ge $MinimumSnapshotSpacingSeconds) {
                             $observations+=,[pscustomobject]@{
                                 observed_at=(Get-Date).ToUniversalTime().ToString('o')
@@ -610,6 +665,7 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
         Require ((((Get-Date).ToUniversalTime()-$stableItem.LastWriteTimeUtc).TotalSeconds -le 30)) 'RUNTIME_SUSTAINED_STATE_STALE'
         $stableSnapshot=Read-RuntimeSnapshot
         Require (Runtime-IsHealthy $stableSnapshot) 'RUNTIME_SUSTAINED_HEALTH_FAILED'
+        [void](Assert-RuntimeBootIdentity $stableSnapshot $processStartedUtc (Get-Date).ToUniversalTime() $runtimeStartedAt)
         if($stableItem.LastWriteTimeUtc -gt $stableStamp) {
             Require ([int]$stableSnapshot.runtime.cycle_count -gt $stableCycle) 'RUNTIME_CYCLE_NOT_ADVANCING'
             $stableStamp=$stableItem.LastWriteTimeUtc
@@ -622,6 +678,7 @@ function Await-HealthyRuntime([datetime]$AfterUtc,[int]$TimeoutSeconds=1200,[int
     Require ((((Get-Date).ToUniversalTime()-$finalItem.LastWriteTimeUtc).TotalSeconds -le 30)) 'RUNTIME_SUSTAINED_STATE_STALE'
     $final=Read-RuntimeSnapshot
     Require (Runtime-IsHealthy $final) 'RUNTIME_SUSTAINED_HEALTH_FAILED'
+    [void](Assert-RuntimeBootIdentity $final $processStartedUtc (Get-Date).ToUniversalTime() $runtimeStartedAt)
     $last=$observations[-1]
     Require ([int]$final.runtime.cycle_count -gt $stableInitialCycle) 'RUNTIME_CYCLE_NOT_ADVANCING'
     Require ([int]$final.runtime.events_persisted_deferred -le ([int]$last.deferred + 1)) 'UNACKNOWLEDGED_OUTBOX_GROWTH'

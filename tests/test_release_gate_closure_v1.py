@@ -48,7 +48,7 @@ class ReleaseGateClosureTests(unittest.TestCase):
 
     def test_health_gate_ignores_early_healthy_snapshots_and_rejects_degraded_stability(self):
         source = (ROOT / "scripts/install_agent_release.ps1").read_text(encoding="utf-8")
-        start = source.index("function Runtime-IsHealthy")
+        start = source.index("function Test-JsonProperty")
         end = source.index("function Get-PathIdentityEvidence", start)
         functions = source[start:end]
         body = rf'''
@@ -57,6 +57,7 @@ $AgentName='CyberDefenderAgent';$RuntimeFile='C:\fake\runtime.json'
 $script:Now=[datetime]'2026-01-01T00:00:00Z';$script:Cycle=0;$script:Mode='healthy'
 function Require([bool]$Condition,[string]$Message){{if(-not $Condition){{throw $Message}}}}
 function Service-Info([string]$Name){{[pscustomobject]@{{State='Running';ProcessId=42}}}}
+function Get-CimInstance{{param($ClassName,$Filter,$ErrorAction)[pscustomobject]@{{ProcessId=42;CreationDate=[datetime]'2026-01-01T00:00:00Z'}}}}
 function Test-Path{{param($LiteralPath,$PathType)[bool]$true}}
 function Get-Date{{$script:Now}}
 function Get-Item{{param($LiteralPath,$ErrorAction)[pscustomobject]@{{LastWriteTimeUtc=$script:Now}}}}
@@ -64,9 +65,10 @@ function Start-Sleep{{param([int]$Seconds)$script:Now=$script:Now.AddSeconds($Se
 function Read-RuntimeSnapshot{{
   $script:Cycle++
   $healthy=($script:Mode -eq 'healthy' -or $script:Cycle -le 3)
-  [pscustomobject]@{{runtime=[pscustomobject]@{{status=$(if($healthy){{'HEALTHY'}}else{{'DEGRADED'}});running=$healthy;component_failures=$(if($healthy){{0}}else{{1}});cycle_count=$script:Cycle;events_acked=0;events_persisted_deferred=0;resource_snapshot=[pscustomobject]@{{state=$(if($healthy){{'NORMAL'}}else{{'DEGRADED'}})}}}}}}
+  [pscustomobject]@{{runtime=[pscustomobject]@{{status=$(if($healthy){{'HEALTHY'}}else{{'DEGRADED'}});running=$healthy;component_failures=$(if($healthy){{0}}else{{1}});cycle_count=$script:Cycle;events_acked=0;events_persisted_deferred=0;started_at=1767225600.0;resource_snapshot=[pscustomobject]@{{state=$(if($healthy){{'NORMAL'}}else{{'DEGRADED'}})}}}}}}
 }}
 {functions}
+function Get-AgentProcessStartUtc([int]$ProcessId){{[datetime]'2026-01-01T00:00:00Z'}}
 $ok=Await-HealthyRuntime $script:Now 300 60 0
 if($ok.observations.Count -ne 3){{throw 'EARLY_HEALTHY_SNAPSHOT_HANDLING_FAILED'}}
 $script:Now=[datetime]'2026-01-01T00:00:00Z';$script:Cycle=0;$script:Mode='degrade'
