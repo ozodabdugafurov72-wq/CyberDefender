@@ -93,6 +93,7 @@ class PostPlanFailureBatchTests(unittest.TestCase):
             "PLAN_FAIL:",
             "PLAN_PASS",
             "PINNED_BASELINE_FILE_SET_MISMATCH",
+            "RUNTIME_POST_WRITE_FILE_SET_INVALID",
         ):
             self.assertIn(marker, source)
         self.assertNotIn("-Verb RunAs", source)
