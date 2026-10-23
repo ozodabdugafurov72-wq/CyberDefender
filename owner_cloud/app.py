@@ -126,16 +126,24 @@ class Application:
 
         session = self._session(request)
         if session is None:
-            if method == "GET" and path in {"/", "/owner"}:
+            if method == "GET" and path in {"/", "/owner", "/admin"}:
                 return self._redirect("/login")
+            self._audit(request_id, "anonymous", "", "authentication", "DENIED", request, path[:128])
             return self._json(401, {"error": "AUTHENTICATION_REQUIRED"})
         if not self.api_limiter.allow("session:" + session["token_hash"]):
+            self._audit(request_id, session["username"], session["role"], "api.rate_limit", "DENIED", request, path[:128])
             return self._json(429, {"error": "RATE_LIMITED"}).add_header("Retry-After", "60")
 
         if method == "GET" and path == "/":
-            return self._redirect("/owner")
+            return self._redirect("/owner" if session["role"] == ROLE_OWNER else "/admin")
         if method == "GET" and path == "/owner":
-            return self._dashboard_page(session)
+            if session["role"] != ROLE_OWNER:
+                return self._forbidden(request_id, session, request, "owner.page.read")
+            return self._dashboard_page(session, surface="owner")
+        if method == "GET" and path == "/admin":
+            if session["role"] != ROLE_ADMIN:
+                return self._forbidden(request_id, session, request, "admin.page.read")
+            return self._dashboard_page(session, surface="admin")
         if method == "GET" and path == "/api/v1/session":
             return self._json(
                 200,
@@ -146,29 +154,15 @@ class Application:
                     "expires_at": session["expires_at"],
                 },
             )
-        if method == "GET" and path == "/api/v1/state":
-            if session["role"] not in {ROLE_OWNER, ROLE_ADMIN}:
-                return self._forbidden(request_id, session, request, "state.read")
-            upstream = self.distribution.state()
-            return self._json(
-                200,
-                {
-                    "status": "HEALTHY",
-                    "mode": "READ_ONLY",
-                    "environment": self.config.environment,
-                    "actor": {"username": session["username"], "role": session["role"]},
-                    "distribution": upstream,
-                    "security": {
-                        "authentication": "ENFORCED",
-                        "mfa": "TOTP_ENFORCED",
-                        "server_side_rbac": "ENFORCED",
-                        "csrf": "ENFORCED",
-                        "privileged_actions": "DISABLED_READ_ONLY",
-                        "risk_is_authorization": False,
-                        "secure_session_cookie": self.config.secure_cookies,
-                    },
-                },
-            )
+        if method == "GET" and path in {"/api/v1/state", "/api/v1/owner/state", "/api/v1/admin/state"}:
+            expected_role = None
+            if path == "/api/v1/owner/state":
+                expected_role = ROLE_OWNER
+            elif path == "/api/v1/admin/state":
+                expected_role = ROLE_ADMIN
+            if expected_role is not None and session["role"] != expected_role:
+                return self._forbidden(request_id, session, request, f"{expected_role.lower()}.state.read")
+            return self._json(200, self._state_payload(session))
         if method == "GET" and path == "/api/v1/audit":
             if session["role"] != ROLE_OWNER:
                 return self._forbidden(request_id, session, request, "audit.read")
@@ -267,9 +261,9 @@ class Application:
         error_html = f'<p class="error" role="alert">{safe_error}</p>' if safe_error else ""
         page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CyberDefender Owner Login</title><link rel="stylesheet" href="/static/app.css"></head>
-<body class="login-body"><main class="login-card"><div class="brand-mark">CD</div>
-<p class="eyebrow">CYBERDEFENDER CONTROL PLANE</p><h1>Owner access</h1>
+<title>TENQORVA Secure Login</title><link rel="stylesheet" href="/static/app.css"></head>
+<body class="login-body"><main class="login-card"><div class="brand-mark">TQ</div>
+<p class="eyebrow">TENQORVA · CYBERDEFENDER CONTROL PLANE</p><h1>Secure access</h1>
 <p class="muted">Authorized Owner and Admin accounts only.</p>{error_html}
 <form method="post" action="/login" autocomplete="on">
 <input type="hidden" name="csrf_token" value="{html.escape(csrf_token, quote=True)}">
@@ -286,6 +280,7 @@ class Application:
     def _login(self, request: Request, request_id: str) -> Response:
         client_hash = self._client_hash(request)
         if not self.login_limiter.allow("login:" + client_hash):
+            self._audit(request_id, "unknown", "", "session.login", "RATE_LIMITED", request)
             return self._json(429, {"error": "RATE_LIMITED"}).add_header("Retry-After", "60")
         form = self._form(request)
         username = form.get("username", "").strip().lower()[:64]
@@ -300,6 +295,7 @@ class Application:
         allowed, locked_until = self.store.login_allowed(subject_hash, client_hash, now=float(self.clock()))
         if not allowed:
             retry = max(1, int(locked_until - float(self.clock())))
+            self._audit(request_id, username or "unknown", "", "session.login", "LOCKED", request)
             return self._json(429, {"error": "LOGIN_LOCKED"}).add_header("Retry-After", str(retry))
         account = self.config.accounts.get(username)
         password_hash = account.password_hash if account is not None else self._dummy_password_hash
@@ -339,7 +335,7 @@ class Application:
         )
         self._audit(request_id, account.username, account.role, "session.login", "SUCCESS", request)
         return (
-            self._redirect("/owner")
+            self._redirect("/owner" if account.role == ROLE_OWNER else "/admin")
             .add_header(
                 "Set-Cookie",
                 self._cookie(
@@ -357,48 +353,76 @@ class Application:
             provided = self._form(request).get("csrf_token", "")
         return bool(provided and hmac.compare_digest(token_hash(provided), str(session["csrf_hash"])))
 
-    def _dashboard_page(self, session: dict) -> Response:
+    def _state_payload(self, session: dict) -> dict:
+        upstream = self.distribution.state()
+        capabilities = upstream.get("capabilities", {}) if isinstance(upstream, dict) else {}
+        available = isinstance(upstream, dict) and upstream.get("status") == "HEALTHY"
+        return {
+            "status": "HEALTHY" if available else "UNAVAILABLE",
+            "mode": "READ_ONLY",
+            "environment": self.config.environment,
+            "surface": session["role"].lower(),
+            "actor": {"username": session["username"], "role": session["role"]},
+            "distribution": upstream,
+            "integrations": {
+                "endpoint_diagnostics": {
+                    "status": "AVAILABLE" if capabilities.get("endpoint_diagnostics") else "UNAVAILABLE",
+                    "reason": "" if capabilities.get("endpoint_diagnostics") else "NOT_EXPOSED_BY_FLEET_API",
+                },
+                "event_investigation": {
+                    "status": "AVAILABLE" if capabilities.get("event_investigation") else "UNAVAILABLE",
+                    "reason": "" if capabilities.get("event_investigation") else "NOT_EXPOSED_BY_FLEET_API",
+                },
+                "quarantine_detail": {
+                    "status": "EVENT_METADATA_ONLY" if capabilities.get("event_investigation") else "UNAVAILABLE",
+                    "reason": "NO_AUTHENTICATED_QUARANTINE_DETAIL_API",
+                },
+                "sensor_plane": {"status": "UNAVAILABLE", "reason": "NO_AUTHENTICATED_SENSOR_API"},
+                "process_graph": {"status": "UNAVAILABLE", "reason": "NO_AUTHENTICATED_PROCESSGRAPH_API"},
+                "persistence_detail": {"status": "UNAVAILABLE", "reason": "NO_AUTHENTICATED_PERSISTENCE_API"},
+            },
+            "security": {
+                "authentication": "ENFORCED",
+                "mfa": "TOTP_ENFORCED",
+                "server_side_rbac": "ENFORCED",
+                "csrf": "ENFORCED",
+                "privileged_actions": "DISABLED_READ_ONLY",
+                "risk_is_authorization": False,
+                "secure_session_cookie": self.config.secure_cookies,
+            },
+        }
+
+    def _dashboard_page(self, session: dict, *, surface: str) -> Response:
         csrf_token = new_token()
         if not self.store.rotate_session_csrf(session["token_hash"], token_hash(csrf_token)):
             return self._json(401, {"error": "AUTHENTICATION_REQUIRED"})
+        title = "Owner command view" if surface == "owner" else "Admin operations view"
+        eyebrow = "OWNER SECURITY CONTROL" if surface == "owner" else "ADMIN OPERATIONS"
+        state_url = f"/api/v1/{surface}/state"
+        audit_panel = """
+<section class="panel owner-only" id="auditPanel"><div class="panel-title"><div><p class="kicker">OWNER ONLY</p><h2>Security access audit</h2></div><span id="auditStatus" class="status loading">LOADING</span></div><div id="audit" class="table-shell"><p class="empty">Loading audited access events…</p></div></section>""" if surface == "owner" else ""
         page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CyberDefender Owner Control</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/response.css"></head>
-<body><header class="topbar"><div><span class="brand-mark small">CD</span><b>CyberDefender</b>
-<span class="badge">READ ONLY</span></div><div class="identity"><span>{html.escape(session["username"])}</span>
-<strong>{html.escape(session["role"])}</strong><form method="post" action="/logout">
+<title>TENQORVA · {html.escape(title)}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><header class="topbar"><a class="brand" href="/{surface}" aria-label="TENQORVA {surface} dashboard"><span class="brand-mark small">TQ</span><span><b>TENQORVA</b><small>CyberDefender control plane</small></span></a>
+<nav aria-label="Dashboard sections"><a href="#overview">Overview</a><a href="#fleet">Fleet</a><a href="#events">Events</a><a href="#diagnostics">Diagnostics</a></nav>
+<div class="identity"><span>{html.escape(session["username"])}</span><strong>{html.escape(session["role"])}</strong><form method="post" action="/logout">
 <input type="hidden" name="csrf_token" value="{html.escape(csrf_token, quote=True)}">
 <button class="ghost" type="submit">Logout</button></form></div></header>
-<main class="dashboard" data-role="{html.escape(session["role"], quote=True)}">
-<section class="hero"><p class="eyebrow">SECURE OWNER DASHBOARD</p><h1>Fleet control overview</h1>
-<p>Authenticated monitoring through the Railway private service boundary.</p></section>
-<section class="grid" id="metrics"><article><span>Environment</span><b>{html.escape(self.config.environment.upper())}</b></article>
-<article><span>Mode</span><b>READ ONLY</b></article><article><span>Distribution</span><b id="distributionStatus">LOADING</b></article>
-<article><span>Transport</span><b id="transport">PRIVATE</b></article></section>
-<section class="panel"><div class="panel-title"><h2>Fleet summary</h2><span id="updated">Awaiting private API</span></div>
-<div class="grid compact"><article><span>Endpoints</span><b id="endpoints">—</b></article>
-<article><span>Online</span><b id="online">—</b></article><article><span>Offline</span><b id="offline">—</b></article>
-<article><span>Degraded</span><b id="degraded">—</b></article><article><span>Critical</span><b id="critical">—</b></article>
-<article><span>Downloads</span><b id="downloads">—</b></article></div></section>
-<section class="panel"><div class="panel-title"><h2>Authenticated endpoint evidence</h2><span id="fleetEvidenceStatus">AWAITING VERIFIED TELEMETRY</span></div>
-<div id="fleetEvidence" class="response-list"><p class="muted">No authenticated endpoint evidence received.</p></div></section>
-<section class="panel"><div class="panel-title"><h2>Security event summary</h2><span>AGGREGATED · READ ONLY</span></div>
-<div id="eventSummary" class="event-list"><p class="muted">No authenticated security events received.</p></div></section>
-<section class="panel"><h2>XDR interoperability</h2><ul class="gates">
-<li><b>Compatibility</b><span id="xdrStatus">CHECKING</span></li><li><b>Schema</b><span id="xdrSchema">—</span></li>
-<li><b>Signed ingest</b><span id="xdrSigned">CHECKING</span></li><li><b>Replay protection</b><span id="xdrReplay">CHECKING</span></li>
-<li><b>Runtime contract</b><span id="xdrValidation">CHECKING</span></li></ul></section>
-<section class="panel"><div class="panel-title"><h2>Verified response evidence</h2><span id="responseStatus">AWAITING SIGNED EVIDENCE</span></div>
-<div class="grid compact"><article><span>Verified responses</span><b id="responseTotal">0</b></article>
-<article><span>Quarantined</span><b id="responseQuarantined">0</b></article><article><span>Restored</span><b id="responseRestored">0</b></article>
-<article><span>Max response</span><b id="responseLatency">—</b></article></div>
-<div id="responseEvidence" class="response-list"><p class="muted">No signed endpoint response evidence received.</p></div></section>
-<section class="panel"><h2>Security gates</h2><ul class="gates">
-<li><b>Authentication</b><span id="authGate">CHECKING</span></li><li><b>MFA</b><span id="mfaGate">CHECKING</span></li><li><b>Server-side RBAC</b><span id="rbacGate">CHECKING</span></li>
-<li><b>CSRF</b><span id="csrfGate">CHECKING</span></li><li><b>Privileged actions</b><span id="actionGate">CHECKING</span></li>
-<li><b>Risk ≠ Authorization</b><span id="trustGate">CHECKING</span></li></ul></section>
-<section class="panel owner-only" id="auditPanel" hidden><h2>Recent access audit</h2><div id="audit">Loading…</div></section>
-</main><script src="/static/app.js" defer></script></body></html>"""
+<main class="dashboard" data-role="{html.escape(session["role"], quote=True)}" data-surface="{surface}" data-state-url="{state_url}">
+<section class="hero" id="overview"><div><p class="eyebrow">{eyebrow}</p><h1>{html.escape(title)}</h1><p>Authenticated, tenant-scoped visibility through the Railway private service boundary.</p></div><div class="read-only-seal"><span>CONTROL MODE</span><b>READ ONLY</b><small>No endpoint actions enabled</small></div></section>
+<div id="globalState" class="notice loading" role="status">Loading authenticated fleet state…</div>
+<section class="metric-grid" aria-label="Fleet metrics"><article><span>Registered</span><b id="endpoints">—</b><small>tenant endpoints</small></article><article class="good"><span>Online</span><b id="online">—</b><small>verified heartbeat</small></article><article><span>Offline</span><b id="offline">—</b><small>outside freshness window</small></article><article class="warn"><span>Degraded</span><b id="degraded">—</b><small>reported health</small></article><article class="danger"><span>Critical</span><b id="critical">—</b><small>reported health</small></article><article><span>Unknown</span><b id="unknown">—</b><small>incomplete state</small></article></section>
+<section class="panel" id="fleet"><div class="panel-title"><div><p class="kicker">FLEET</p><h2>Endpoint health &amp; runtime</h2></div><span id="fleetEvidenceStatus" class="status loading">LOADING</span></div><div class="freshness"><span>Data generated <b id="generatedAt">—</b></span><span>Freshness window <b id="freshnessWindow">—</b></span><span>Transport <b id="transport">—</b></span></div><div id="fleetEvidence" class="table-shell"><p class="empty">Awaiting verified endpoint telemetry…</p></div></section>
+<section class="split" id="events"><section class="panel"><div class="panel-title"><div><p class="kicker">DETECTION</p><h2>Security event summary</h2></div><span class="status neutral">AGGREGATED</span></div><div id="eventSummary" class="event-summary"><p class="empty">Awaiting signed event totals…</p></div></section><section class="panel"><div class="panel-title"><div><p class="kicker">CORRELATION</p><h2>Threat visibility</h2></div><span id="correlationStatus" class="status loading">LOADING</span></div><div class="mini-grid"><div><span>Detections</span><b id="detectionCount">—</b></div><div><span>Incidents</span><b id="incidentCount">—</b></div><div><span>Attack graph</span><b id="graphCount">—</b></div><div><span>Risk signals</span><b id="riskCount">—</b></div></div></section></section>
+<section class="panel"><div class="panel-title"><div><p class="kicker">INVESTIGATION</p><h2>Recent event evidence</h2></div><span id="investigationStatus" class="status loading">LOADING</span></div><div id="recentEvents" class="table-shell"><p class="empty">Awaiting authenticated event metadata…</p></div></section>
+<section class="panel"><div class="panel-title"><div><p class="kicker">CONTAINMENT</p><h2>Quarantine visibility</h2></div><span id="quarantineStatus" class="status loading">LOADING</span></div><p id="quarantineMessage" class="integration-copy">Checking authenticated quarantine contracts…</p></section>
+<section class="panel" id="diagnostics"><div class="panel-title"><div><p class="kicker">OPERATIONS</p><h2>Spool, persistence &amp; ACK diagnostics</h2></div><span id="diagnosticsStatus" class="status loading">LOADING</span></div><div id="diagnosticsTable" class="table-shell"><p class="empty">Awaiting trusted endpoint diagnostics…</p></div></section>
+<section class="split"><section class="panel"><div class="panel-title"><div><p class="kicker">OBSERVABILITY</p><h2>Sensor &amp; ProcessGraph</h2></div><span class="status neutral">CONTRACT STATUS</span></div><ul class="integration-list"><li><span>Sensor plane</span><b id="sensorPlane">CHECKING</b><small id="sensorReason"></small></li><li><span>ProcessGraph</span><b id="processGraph">CHECKING</b><small id="processReason"></small></li><li><span>Persistence detail</span><b id="persistenceDetail">CHECKING</b><small id="persistenceReason"></small></li></ul></section><section class="panel"><div class="panel-title"><div><p class="kicker">RELEASE</p><h2>Installed versions</h2></div><span class="status neutral">REPORTED</span></div><div id="versions" class="version-list"><p class="empty">Awaiting runtime versions…</p></div></section></section>
+<section class="split"><section class="panel"><div class="panel-title"><div><p class="kicker">INTEROPERABILITY</p><h2>XDR contract</h2></div><span id="xdrStatus" class="status loading">CHECKING</span></div><ul class="integration-list"><li><span>Schema</span><b id="xdrSchema">—</b></li><li><span>Signed ingest</span><b id="xdrSigned">CHECKING</b></li><li><span>Replay protection</span><b id="xdrReplay">CHECKING</b></li><li><span>Runtime validation</span><b id="xdrValidation">CHECKING</b></li></ul></section><section class="panel"><div class="panel-title"><div><p class="kicker">SECURITY</p><h2>Control-plane gates</h2></div><span class="status good">ENFORCED</span></div><ul class="integration-list"><li><span>Authentication</span><b id="authGate">CHECKING</b></li><li><span>Server-side RBAC</span><b id="rbacGate">CHECKING</b></li><li><span>CSRF</span><b id="csrfGate">CHECKING</b></li><li><span>Risk ≠ authorization</span><b id="trustGate">CHECKING</b></li></ul></section></section>
+<section class="panel"><div class="panel-title"><div><p class="kicker">RESPONSE EVIDENCE</p><h2>Verified containment records</h2></div><span id="responseStatus" class="status loading">CHECKING</span></div><div class="mini-grid response-metrics"><div><span>Total</span><b id="responseTotal">—</b></div><div><span>Quarantined</span><b id="responseQuarantined">—</b></div><div><span>Restored</span><b id="responseRestored">—</b></div><div><span>Max response</span><b id="responseLatency">—</b></div></div><div id="responseEvidence" class="table-shell"><p class="empty">Awaiting signed response evidence…</p></div></section>
+<section class="panel"><div class="panel-title"><div><p class="kicker">SESSION</p><h2>Security &amp; session boundary</h2></div><span class="status good">READ ONLY</span></div><div class="session-grid"><div><span>User</span><b>{html.escape(session["username"])}</b></div><div><span>Role</span><b>{html.escape(session["role"])}</b></div><div><span>Expires</span><b id="sessionExpiry">—</b></div><div><span>Environment</span><b>{html.escape(self.config.environment.upper())}</b></div><div><span>MFA</span><b id="mfaGate">CHECKING</b></div><div><span>Privileged actions</span><b id="actionGate">CHECKING</b></div></div></section>
+{audit_panel}</main><script src="/static/app.js" defer></script></body></html>"""
         return self._html(200, page)
 
     def _forbidden(self, request_id: str, session: dict, request: Request, action: str) -> Response:

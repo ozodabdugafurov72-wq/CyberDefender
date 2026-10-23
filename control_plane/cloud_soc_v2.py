@@ -643,6 +643,10 @@ class CloudSocRepository:
             event_rows = self._conn.execute(
                 """SELECT event_type,priority,COUNT(*) count FROM cloud_events WHERE tenant_id=?
                    GROUP BY event_type,priority""", (tenant_id,)).fetchall()
+            recent_event_rows = self._conn.execute(
+                """SELECT event_id,endpoint_id,observed_at,received_at,event_type,priority
+                   FROM cloud_events WHERE tenant_id=?
+                   ORDER BY received_at DESC, sequence DESC LIMIT 100""", (tenant_id,)).fetchall()
         endpoints = []
         for row in rows:
             active = row["state"] == "ENROLLED"
@@ -658,6 +662,10 @@ class CloudSocRepository:
                 "cycle": row["cycle"], "cpu_percent": row["cpu_percent"] if fresh else None,
                 "memory_percent": row["memory_percent"] if fresh else None,
                 "telemetry_status": row["spool_status"] if fresh else "STALE",
+                "spool_pending": row["spool_pending"],
+                "spool_bytes": row["spool_bytes"],
+                "spool_status": row["spool_status"] if fresh else "STALE",
+                "accepted_through": row["last_sequence"],
             })
         counts = {"total": len(endpoints), "online": 0, "offline": 0, "degraded": 0, "critical": 0}
         for endpoint in endpoints:
@@ -667,7 +675,8 @@ class CloudSocRepository:
         return {"schema": "cyberdefender.fleet-read-model.v2", "tenant_id": tenant_id,
                 "generated_at": current, "online_after_seconds": current - cutoff,
                 "summary": counts, "endpoints": endpoints,
-                "event_summary": [dict(row) for row in event_rows], "read_only": True,
+                "event_summary": [dict(row) for row in event_rows],
+                "recent_events": [dict(row) for row in recent_event_rows], "read_only": True,
                 "privileged_actions": "DISABLED"}
 
     def close(self) -> None:

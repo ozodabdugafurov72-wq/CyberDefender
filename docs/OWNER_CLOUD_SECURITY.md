@@ -41,6 +41,8 @@ URL in staging and production.
 
 - `CYBERDEFENDER_ENVIRONMENT=staging|production`
 - `CYBERDEFENDER_OWNER_ACCOUNTS_JSON=<secret JSON>`
+- `CYBERDEFENDER_OWNER_TOTP_SECRETS_JSON=<secret JSON>`
+- `CYBERDEFENDER_OWNER_TENANT_ID=<canonical tenant id>`
 - `CYBERDEFENDER_DISTRIBUTION_PRIVATE_URL=http://cyberdefender.railway.internal:8080`
 - `CYBERDEFENDER_DISTRIBUTION_READ_TOKEN=<secret>`
 - `CYBERDEFENDER_OWNER_DB=/data/owner.db`
@@ -54,3 +56,12 @@ URL in staging and production.
 - `CYBERDEFENDER_PACKAGE_CHANNEL=stable`
 
 No variable value belongs in Git, logs, build arguments, or image layers.
+
+## Role-scoped cloud routes
+
+- `/owner` and `/api/v1/owner/state` require `OWNER`.
+- `/admin` and `/api/v1/admin/state` require `ADMIN`.
+- `/api/v1/audit` requires `OWNER` and is not included in the Admin page.
+- `/api/v1/state` remains a backward-compatible authenticated read-only alias.
+
+The tenant fleet read model exposes only signed/persisted endpoint facts and bounded event metadata. When an authenticated API does not expose Sensor Plane, ProcessGraph, persistence or quarantine detail, the browser renders `UNAVAILABLE`; it does not infer or simulate those states.

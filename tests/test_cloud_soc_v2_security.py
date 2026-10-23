@@ -193,8 +193,12 @@ class CloudSocV2SecurityTests(unittest.TestCase):
         tenant_b = self.repo.tenant_snapshot("tenant-b", now=self.now[0])
         self.assertEqual(tenant_a["summary"]["online"], 1)
         self.assertEqual(sum(row["count"] for row in tenant_a["event_summary"]), 2)
+        self.assertEqual({row["event_id"] for row in tenant_a["recent_events"]}, {"event-3", "event-2"})
+        self.assertEqual(tenant_a["endpoints"][0]["accepted_through"], 3)
+        self.assertEqual(tenant_a["endpoints"][0]["spool_status"], "HEALTHY")
         self.assertEqual(tenant_b["summary"]["total"], 0)
         self.assertEqual(tenant_b["event_summary"], [])
+        self.assertEqual(tenant_b["recent_events"], [])
 
         self.repo.close()
         self.repo = CloudSocRepository(self.db)

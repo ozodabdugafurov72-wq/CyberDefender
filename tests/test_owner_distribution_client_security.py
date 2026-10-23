@@ -138,6 +138,21 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         value = valid_v2_state() if type(self).mode.startswith("v2") else valid_state()
+        if type(self).mode == "v2-diagnostics":
+            value["endpoints"][0].update({
+                "spool_pending": 2,
+                "spool_bytes": 4096,
+                "spool_status": "DEGRADED",
+                "accepted_through": 17,
+            })
+            value["recent_events"] = [{
+                "event_id": "event-17",
+                "endpoint_id": "11111111-1111-4111-8111-111111111111",
+                "observed_at": 1_900_000_000.0,
+                "received_at": 1_900_000_001.0,
+                "event_type": "DETECTION",
+                "priority": "HIGH",
+            }]
         if type(self).mode == "v2-cross-tenant":
             value["tenant_id"] = "tenant-b"
         if type(self).mode == "v2-false-online":
@@ -255,6 +270,21 @@ class OwnerDistributionClientSecurityTests(unittest.TestCase):
 
         UpstreamHandler.mode = "v2-stale-online"
         self.assertEqual(client.state(), {"status": "UNAVAILABLE", "reason": "UPSTREAM_UNAVAILABLE"})
+
+    def test_v2_trusted_diagnostics_and_event_metadata_are_preserved(self):
+        UpstreamHandler.mode = "v2-diagnostics"
+        client = DistributionClient(
+            self.base_url,
+            "read-token-0123456789-abcdef-0123456789",
+            tenant_id="tenant-a",
+        )
+        state = client.state()
+        self.assertEqual(state["status"], "HEALTHY")
+        self.assertTrue(state["capabilities"]["endpoint_diagnostics"])
+        self.assertTrue(state["capabilities"]["event_investigation"])
+        self.assertEqual(state["endpoints"][0]["accepted_through"], 17)
+        self.assertEqual(state["endpoints"][0]["spool_pending"], 2)
+        self.assertEqual(state["recent_events"][0]["event_id"], "event-17")
 
 
 if __name__ == "__main__":

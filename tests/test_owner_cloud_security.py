@@ -180,7 +180,11 @@ class OwnerCloudSecurityTests(unittest.TestCase):
     def test_admin_rbac_and_privileged_action_are_server_side_denied(self):
         session_cookie, _ = self.login("admin", "Admin-Test-Password-42!")
         self.assertEqual(self.request("GET", "/api/v1/audit", cookie=session_cookie).status, 403)
-        page = self.request("GET", "/owner", cookie=session_cookie)
+        self.assertEqual(self.request("GET", "/owner", cookie=session_cookie).status, 403)
+        self.assertEqual(self.request("GET", "/api/v1/owner/state", cookie=session_cookie).status, 403)
+        page = self.request("GET", "/admin", cookie=session_cookie)
+        self.assertEqual(page.status, 200)
+        self.assertNotIn(b"auditPanel", page.body)
         csrf = self.csrf(page)
         denied = self.request(
             "POST",
@@ -190,6 +194,17 @@ class OwnerCloudSecurityTests(unittest.TestCase):
         )
         self.assertEqual(denied.status, 403)
         self.assertEqual(json.loads(denied.body)["error"], "READ_ONLY_MODE")
+
+    def test_owner_and_admin_surfaces_are_strictly_separated(self):
+        owner_cookie, _ = self.login()
+        self.assertEqual(self.request("GET", "/owner", cookie=owner_cookie).status, 200)
+        self.assertEqual(self.request("GET", "/admin", cookie=owner_cookie).status, 403)
+        self.assertEqual(self.request("GET", "/api/v1/admin/state", cookie=owner_cookie).status, 403)
+
+        self.now[0] += 31
+        admin_cookie, login_response = self.login("admin", "Admin-Test-Password-42!")
+        self.assertEqual(login_response.values("Location"), ["/admin"])
+        self.assertEqual(self.request("GET", "/api/v1/admin/state", cookie=admin_cookie).status, 200)
 
     def test_csrf_is_required_for_login_logout_and_denied_action(self):
         body = urlencode({"username": "owner", "password": "Owner-Test-Password-42!"})

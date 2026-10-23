@@ -186,6 +186,13 @@ class DistributionClient:
             "summary": summary,
             "endpoints": endpoints,
             "responses": responses,
+            "recent_events": [],
+            "event_summary": [],
+            "capabilities": {
+                "endpoint_diagnostics": False,
+                "event_investigation": False,
+                "response_evidence": True,
+            },
             "read_only": True,
             "xdr": xdr,
         }
@@ -220,14 +227,18 @@ class DistributionClient:
         if not isinstance(raw_endpoints, list) or len(raw_endpoints) > 100:
             raise ValueError("invalid endpoint list")
         endpoints = []
-        endpoint_fields = {
+        legacy_endpoint_fields = {
             "endpoint_id", "hostname", "status", "health_state", "service_state", "resource_state",
             "runtime_version", "last_verified_heartbeat", "last_observed_at", "component_failures",
             "cycle", "cpu_percent", "memory_percent", "telemetry_status",
         }
+        diagnostic_fields = {"spool_pending", "spool_bytes", "spool_status", "accepted_through"}
+        endpoint_diagnostics_available = "recent_events" in value
         for item in raw_endpoints:
-            if not isinstance(item, dict) or set(item) != endpoint_fields:
+            if not isinstance(item, dict) or frozenset(item) not in {frozenset(legacy_endpoint_fields), frozenset(legacy_endpoint_fields | diagnostic_fields)}:
                 raise ValueError("invalid endpoint fields")
+            has_diagnostics = diagnostic_fields.issubset(item)
+            endpoint_diagnostics_available = endpoint_diagnostics_available and has_diagnostics
             endpoint_id = validate_endpoint_id(item.get("endpoint_id"))
             hostname = validate_hostname(item.get("hostname"))
             if item.get("status") not in {"ONLINE", "OFFLINE", "REVOKED"}:
@@ -240,6 +251,11 @@ class DistributionClient:
                 current = item.get(name)
                 if isinstance(current, bool) or not isinstance(current, int) or current < 0:
                     raise ValueError("invalid endpoint counter")
+            if has_diagnostics:
+                for name in ("spool_pending", "spool_bytes", "accepted_through"):
+                    current = item.get(name)
+                    if isinstance(current, bool) or not isinstance(current, int) or current < 0:
+                        raise ValueError("invalid endpoint diagnostic")
             for name in ("last_verified_heartbeat", "last_observed_at", "cpu_percent", "memory_percent"):
                 current = item.get(name)
                 if current is not None and (isinstance(current, bool) or not isinstance(current, (int, float)) or
@@ -263,7 +279,12 @@ class DistributionClient:
             telemetry = item.get("telemetry_status")
             if telemetry not in {"HEALTHY", "DEGRADED", "BLOCKED", "STALE"}:
                 raise ValueError("invalid telemetry status")
-            endpoints.append({**item, "endpoint_id": endpoint_id, "hostname": hostname,
+            if has_diagnostics and item.get("spool_status") not in {"HEALTHY", "DEGRADED", "BLOCKED", "STALE"}:
+                raise ValueError("invalid spool status")
+            endpoints.append({**item, **({} if has_diagnostics else {
+                                  "spool_pending": None, "spool_bytes": None,
+                                  "spool_status": "UNAVAILABLE", "accepted_through": None,
+                              }), "endpoint_id": endpoint_id, "hostname": hostname,
                               "runtime_version": validate_runtime_version(item.get("runtime_version"))})
         actual = {
             "total": len(endpoints),
@@ -285,6 +306,32 @@ class DistributionClient:
                     isinstance(row["count"], bool) or not isinstance(row["count"], int) or row["count"] < 0):
                 raise ValueError("invalid event summary")
             normalized_events.append(dict(row))
+        recent_events_available = "recent_events" in value
+        recent_events = value.get("recent_events", [])
+        if not isinstance(recent_events, list) or len(recent_events) > 100:
+            raise ValueError("invalid recent events")
+        normalized_recent = []
+        recent_fields = {"event_id", "endpoint_id", "observed_at", "received_at", "event_type", "priority"}
+        event_types = {"DETECTION", "INCIDENT", "ATTACK_GRAPH", "RISK", "QUARANTINE", "AUDIT"}
+        for row in recent_events:
+            if not isinstance(row, dict) or set(row) != recent_fields:
+                raise ValueError("invalid recent event fields")
+            event_id = str(row.get("event_id", ""))
+            if not event_id or len(event_id) > 128:
+                raise ValueError("invalid recent event id")
+            endpoint_id = validate_endpoint_id(row.get("endpoint_id"))
+            if row.get("event_type") not in event_types or row.get("priority") not in {"LOW", "NORMAL", "HIGH", "CRITICAL"}:
+                raise ValueError("invalid recent event classification")
+            normalized = dict(row)
+            normalized["event_id"] = event_id
+            normalized["endpoint_id"] = endpoint_id
+            for name in ("observed_at", "received_at"):
+                current = normalized.get(name)
+                if (isinstance(current, bool) or not isinstance(current, (int, float)) or
+                        not math.isfinite(float(current)) or float(current) < 0):
+                    raise ValueError("invalid recent event timestamp")
+                normalized[name] = float(current)
+            normalized_recent.append(normalized)
         return {
             "status": "HEALTHY",
             "tenant_id": tenant_id,
@@ -300,6 +347,12 @@ class DistributionClient:
             "endpoints": endpoints,
             "responses": [],
             "event_summary": normalized_events,
+            "recent_events": normalized_recent,
+            "capabilities": {
+                "endpoint_diagnostics": endpoint_diagnostics_available,
+                "event_investigation": recent_events_available,
+                "response_evidence": False,
+            },
             "read_only": True,
             "generated_at": float(generated),
             "xdr": {
