@@ -1,0 +1,196 @@
+"""Pinned release ZIP verification and safe extraction for a disposable Windows VM.
+
+Does NOT execute code, manipulate services, touch credentials or call Git/network.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import io
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+import sys
+import zipfile
+
+SCHEMA = 'cyberdefender.pinned-review-source.v1'
+BOOTSTRAP_RELATIVE = 'scripts/agent_release/agent_service_bootstrap.py'
+REQUIRED = frozenset({'agent/windows_service.py','agent/main.py','agent/service_lifecycle.py',
+    'agent/service_crash_guard.py','agent/service_crash_store.py','agent/service_watchdog.py',
+    'agent/service_runner.py','agent/fleet/client.py','agent/sensors/file_activity_collector.py',
+    'control_plane/fleet_protocol.py','control_plane/xdr_compat.py','requirements.txt',BOOTSTRAP_RELATIVE})
+FILE_LIMIT = 1500
+TOTAL_LIMIT = 150 * 1024 * 1024
+PER_FILE_LIMIT = 30 * 1024 * 1024
+SECRET_PARTS = frozenset({'.env','secrets','secret','credentials','.ssh'})
+SECRET_EXTS = frozenset({'.pem','.key','.pfx','.p12'})
+# DOS device names are reserved on Windows even when followed by an extension.
+# COM/LPT superscript variants are included because Win32 treats them as devices.
+DOS_NAMES = frozenset({'CON','PRN','AUX','NUL','CONIN$','CONOUT$'} |
+                      {f'{prefix}{digit}' for prefix in ('COM','LPT')
+                       for digit in '123456789¹²³'})
+
+
+
+def safe_path(name: str) -> bool:
+    if not isinstance(name, str) or not name or name.startswith(('/','\\')) or '\\' in name or ':' in name:
+        return False
+    p = PurePosixPath(name)
+    if str(p) != name or p.is_absolute() or any(c in ('','.','..') for c in name.split('/')):
+        return False
+    if any(re.search(r'[<>|?*\x00-\x1f]', c) or c.endswith((' ','.')) for c in p.parts):
+        return False
+    if any(c.split('.', 1)[0].upper() in DOS_NAMES for c in p.parts):
+        return False
+    if any(c.lower() in SECRET_PARTS or c.lower().startswith('.env') for c in p.parts):
+        return False
+    if p.suffix.lower() in SECRET_EXTS:
+        return False
+    return True
+
+
+def _load_snapshot(package: Path, approved_sha: str) -> bytes:
+    if not re.fullmatch(r'[0-9a-fA-F]{64}', approved_sha):
+        raise ValueError('approved SHA-256 must be 64 hex digits')
+    if not package.is_file():
+        raise ValueError('ZIP missing')
+    if package.stat().st_size > TOTAL_LIMIT + 10 * 1024 * 1024:
+        raise ValueError('ZIP exceeds bounded size')
+    # Work from ONE immutable in-memory snapshot: no verify/extract TOCTOU.
+    with package.open('rb') as f:
+        payload = f.read(TOTAL_LIMIT + 10 * 1024 * 1024 + 1)
+    if len(payload) > TOTAL_LIMIT + 10 * 1024 * 1024:
+        raise ValueError('ZIP exceeds bounded size')
+    if hashlib.sha256(payload).hexdigest().lower() != approved_sha.lower():
+        raise ValueError('ZIP SHA256 mismatch')
+    return payload
+
+def _verify_snapshot(payload: bytes, approved_sha: str, approved_commit: str) -> dict:
+    if not re.fullmatch(r'[0-9a-fA-F]{40}', approved_commit):
+        raise ValueError('approved Git commit must be 40 hex digits')
+    approved_commit = approved_commit.lower()
+    with zipfile.ZipFile(io.BytesIO(payload)) as z:
+        entries = z.infolist()
+        if len(entries) > FILE_LIMIT + 1:
+            raise ValueError('excess archive entries')
+        names = [i.filename for i in entries]
+        if len(set(n.casefold() for n in names)) != len(names):
+            raise ValueError('duplicate case-insensitive names')
+        if 'PINNED_MANIFEST.json' not in names:
+            raise ValueError('missing manifest')
+        if z.getinfo('PINNED_MANIFEST.json').file_size > 1 << 20:
+            raise ValueError('oversized manifest')
+        meta = json.loads(z.read('PINNED_MANIFEST.json'))
+        if meta.get('schema') != SCHEMA or meta.get('commit') != approved_commit:
+            raise ValueError('wrong release identity')
+        manifest = meta.get('files')
+        if not isinstance(manifest, list) or not 0 < len(manifest) <= FILE_LIMIT:
+            raise ValueError('invalid manifest list')
+        seen, verified, size_total = set(), [], 0
+        for item in manifest:
+            name, sha, length = item['path'], item['sha256'], item['length']
+            if not safe_path(name) or name.casefold() in seen:
+                raise ValueError('unsafe or duplicate path')
+            if not isinstance(length,int) or isinstance(length,bool) or length < 0 or length > PER_FILE_LIMIT:
+                raise ValueError('invalid file length')
+            if not isinstance(sha,str) or not re.fullmatch('[0-9a-fA-F]{64}',sha):
+                raise ValueError('invalid digest')
+            info = z.getinfo('release/' + name)
+            if info.is_dir() or info.file_size != length:
+                raise ValueError('unexpected ZIP member type or length')
+            if info.flag_bits & 0x1:
+                raise ValueError('encrypted ZIP member not allowed')
+            # Only ordinary files. A ZIP entry generated by Windows may omit Unix
+            # type bits; accept that, but reject any explicitly special inode.
+            file_type = (info.external_attr >> 16) & 0o170000
+            if file_type not in (0, 0o100000):
+                raise ValueError('nonregular ZIP member not allowed')
+            with z.open(info, 'r') as src:
+                digest = hashlib.sha256()
+                total = 0
+                while True:
+                    data = src.read(1 << 20)
+                    if not data: break
+                    digest.update(data)
+                    total += len(data)
+                    if total > PER_FILE_LIMIT: raise ValueError('member expanded beyond limit')
+            if total != length or digest.hexdigest() != sha.lower():
+                raise ValueError('member hash mismatch: '+name)
+            size_total += total
+            if size_total > TOTAL_LIMIT: raise ValueError('ZIP total expanded beyond limit')
+            seen.add(name.casefold())
+            verified.append(name)
+        if set(names) != {'PINNED_MANIFEST.json'} | {'release/' + name for name in verified}:
+            raise ValueError('unmanifested members')
+        if size_total != meta.get('total_bytes') or len(verified) != meta.get('file_count'):
+            raise ValueError('manifest total mismatch')
+        if not REQUIRED.issubset(verified):
+            raise ValueError('required modules missing')
+    return {'status':'PINNED_ZIP_VERIFIED','commit':approved_commit,'files':len(verified),'bytes':size_total,
+            'sha256':approved_sha.lower(),'services_untouched':True,'secrets_untouched':True}
+
+def verify(package: Path, approved_sha: str, approved_commit: str) -> dict:
+    return _verify_snapshot(_load_snapshot(package, approved_sha), approved_sha, approved_commit)
+
+def unpack(package: Path, dest: Path, approved_sha: str, approved_commit: str) -> dict:
+    payload = _load_snapshot(package,approved_sha)
+    approved_commit = approved_commit.lower()
+    result = _verify_snapshot(payload,approved_sha,approved_commit)
+    if dest.exists():
+        raise FileExistsError('refusing to overwrite existing release directory')
+    # Parent must be pre-created by a privileged operator, never be reparse/symlink.
+    parent = dest.parent
+    if not parent.is_dir() or parent.is_symlink() or dest.name != approved_commit:
+        raise ValueError('unexpected destination parent or revision')
+    made = False
+    try:
+        dest.mkdir(mode=0o700)
+        made = True
+        with zipfile.ZipFile(io.BytesIO(payload)) as z:
+            meta = json.loads(z.read('PINNED_MANIFEST.json'))
+            for entry in meta['files']:
+                rel = Path(*PurePosixPath(entry['path']).parts)
+                tgt = dest / rel
+                tgt.parent.mkdir(parents=True, exist_ok=True)
+                if tgt.is_symlink(): raise ValueError('unexpected symlink in release directory')
+                with z.open('release/' + entry['path']) as src, tgt.open('xb') as out:
+                    shutil.copyfileobj(src, out, length=1 << 20)
+                if hashlib.sha256(tgt.read_bytes()).hexdigest() != entry['sha256']:
+                    raise ValueError('post-write integrity failure')
+        bootstrap_bytes = (dest / BOOTSTRAP_RELATIVE).read_bytes()
+        with (dest / 'agent_service_bootstrap.py').open('xb') as f:
+            f.write(bootstrap_bytes)
+        if hashlib.sha256((dest / 'agent_service_bootstrap.py').read_bytes()).digest() != hashlib.sha256(bootstrap_bytes).digest():
+            raise ValueError('root bootstrap integrity failure')
+        # These are audit records, not deployment authority.
+        (dest / 'source_commit.txt').write_text(approved_commit+'\n', encoding='ascii')
+        result['release_path'] = str(dest)
+        result['status'] = 'RELEASE_EXTRACTED_NO_SERVICE_CHANGE'
+        return result
+    except Exception:
+        if made:
+            shutil.rmtree(dest, ignore_errors=True)
+        raise
+
+
+def main() -> int:
+    parser=argparse.ArgumentParser()
+    parser.add_argument('mode',choices=['verify','extract'])
+    parser.add_argument('--zip',type=Path,required=True)
+    parser.add_argument('--sha256',required=True)
+    parser.add_argument('--commit',required=True)
+    parser.add_argument('--dest',type=Path)
+    a=parser.parse_args()
+    try:
+        if a.mode=='verify': result=verify(a.zip,a.sha256,a.commit)
+        else:
+            if a.dest is None: raise ValueError('destination required')
+            result=unpack(a.zip,a.dest,a.sha256,a.commit)
+        print(json.dumps(result,sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(json.dumps({'status':'BLOCKED','reason':f'{type(exc).__name__}: {str(exc)[:160]}'}))
+        return 1
+
+if __name__=='__main__': sys.exit(main())
