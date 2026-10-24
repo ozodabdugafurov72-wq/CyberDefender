@@ -6,8 +6,8 @@ Status: REVIEW-ONLY. No PLAN, APPLY, probe, restart, or service mutation has bee
 
 | Item | Value |
 |---|---|
-| Source commit | `4a6f7b49cd9eb2ef366d66d4aaa84720d4da0fad` |
-| Candidate ZIP | `564e0bf3d715048aa6dd16f35846f8556bf288d462e0384dc07af838e3fa0533` |
+| Source commit | `bda8126b517a6c46c6078996c148d5d32164c4d0` |
+| Candidate ZIP | `106398453f5c0d7d4056e58838c3c847b1d75b02473e199cb5511fe6cea7bd7d` |
 | Runtime ZIP | `7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2` |
 | Installer | `6917043b433cc4eac884300ee301f230d54d436c4b4f500fcb9864c2b6a49d86` |
 | Agent-only wrapper | `a329287270b32c53d05ef7404475733901c78c10f0cc99e851f2dc94adac818f` |

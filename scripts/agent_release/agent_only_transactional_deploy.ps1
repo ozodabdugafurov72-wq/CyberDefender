@@ -20,8 +20,8 @@ param(
 # This wrapper is deliberately pinned to one reviewed candidate.  It delegates
 # installation and rollback to install_agent_release.ps1; it never changes SCM
 # configuration itself and never passes a recovery-probe switch.
-$PinnedCommit='4a6f7b49cd9eb2ef366d66d4aaa84720d4da0fad'
-$PinnedZipSHA256='564e0bf3d715048aa6dd16f35846f8556bf288d462e0384dc07af838e3fa0533'
+$PinnedCommit='bda8126b517a6c46c6078996c148d5d32164c4d0'
+$PinnedZipSHA256='106398453f5c0d7d4056e58838c3c847b1d75b02473e199cb5511fe6cea7bd7d'
 $PinnedRuntimeSHA256='7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2'
 $PinnedInstallerSHA256='6917043b433cc4eac884300ee301f230d54d436c4b4f500fcb9864c2b6a49d86'
 $PinnedBaselineCommit='c5030219ba3a996013b8ab0dda48f60743e5c665'

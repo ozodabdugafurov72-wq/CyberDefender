@@ -26,8 +26,8 @@ def test_wrapper_is_default_read_only_and_agent_only():
 def test_wrapper_has_exact_candidate_and_baseline_pins():
     text = SCRIPT.read_text(encoding="utf-8")
     for value in (
-        "4a6f7b49cd9eb2ef366d66d4aaa84720d4da0fad",
-        "564e0bf3d715048aa6dd16f35846f8556bf288d462e0384dc07af838e3fa0533",
+        "bda8126b517a6c46c6078996c148d5d32164c4d0",
+        "106398453f5c0d7d4056e58838c3c847b1d75b02473e199cb5511fe6cea7bd7d",
         "7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2",
         "6917043b433cc4eac884300ee301f230d54d436c4b4f500fcb9864c2b6a49d86",
         "c5030219ba3a996013b8ab0dda48f60743e5c665",
@@ -43,5 +43,5 @@ def test_isolated_package_has_transactional_inputs():
         assert "release/scripts/agent_release/agent_service_bootstrap.py" in names
         assert "release/native/process_sensor_v0_5_1/target/release/cyberdefender-process-sensor.exe" in names
         manifest = json.loads(archive.read("PINNED_MANIFEST.json"))
-        assert manifest["commit"] == "4a6f7b49cd9eb2ef366d66d4aaa84720d4da0fad"
+        assert manifest["commit"] == "bda8126b517a6c46c6078996c148d5d32164c4d0"
         assert manifest["purpose"] == "REVIEW_AND_PREFLIGHT_ONLY_NOT_AN_INSTALLER"
