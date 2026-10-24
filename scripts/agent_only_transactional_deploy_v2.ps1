@@ -24,7 +24,7 @@ param(
 $PinnedCommit='837e6a0b5336bb69888eef13a2e40a352ca6ad29'
 $PinnedZipSHA256='51729553d6d533959e389c15c0b58d40306056e7e9b5e82abe5ac7b7ae29874a'
 $PinnedRuntimeSHA256='7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2'
-$PinnedInstallerSHA256='0df0f26299a899da0099015f6e6c251a50ae4b560e2a8908db2463f75a59e0ef'
+$PinnedInstallerSHA256='df881581929d47570ab3db6c47abe50f3c8fd2f47a0da38e6b7a1cba82ced327'
 $PinnedBaselineCommit='c5030219ba3a996013b8ab0dda48f60743e5c665'
 $PinnedBaselineSHA256='6240488d506d1fb7ebac264fa0a1dbc7c05e1a74c65d5a2667fc98603af346bf'
 $AgentName='CyberDefenderAgent'
@@ -185,5 +185,6 @@ try {
     if(Test-Path -LiteralPath $tmpRoot){ Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 exit $exitCode
+
 
 
