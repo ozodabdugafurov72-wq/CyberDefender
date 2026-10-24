@@ -278,6 +278,47 @@ def _guard_admission_preview(record: dict, *, authorize: bool) -> dict:
     }
 
 
+def _validate_spool_copy_health(health: dict, policy, *, require_live_safe: bool) -> None:
+    """Accept bounded saturation only for an isolated recovery-plan copy."""
+    if type(health) is not dict:
+        raise RuntimeError("RECOVERY_SPOOL_COPY_SCHEMA_REJECTED")
+    required = {
+        "status": str,
+        "bounded": bool,
+        "capacity_status": str,
+        "terminal_state_safe": bool,
+        "pending": int,
+        "pending_active_bytes": int,
+        "pending_physical_bytes": int,
+        "max_pending_events": int,
+        "max_pending_bytes": int,
+        "max_terminal_records": int,
+        "max_terminal_state_bytes": int,
+    }
+    if any(key not in health or type(health[key]) is not expected for key, expected in required.items()):
+        raise RuntimeError("RECOVERY_SPOOL_COPY_SCHEMA_REJECTED")
+    if (
+        health["bounded"] is not True
+        or health["terminal_state_safe"] is not True
+        or health["max_pending_events"] != policy.max_pending_events
+        or health["max_pending_bytes"] != policy.max_pending_bytes
+        or health["max_terminal_records"] != policy.max_terminal_records
+        or health["max_terminal_state_bytes"] != policy.max_terminal_state_bytes
+        or not 0 <= health["pending"] <= policy.max_pending_events
+        or not 0 <= health["pending_active_bytes"] <= policy.max_pending_bytes
+        or not 0 <= health["pending_physical_bytes"] <= policy.max_recovery_scan_bytes
+    ):
+        raise RuntimeError("RECOVERY_SPOOL_COPY_BOUNDS_REJECTED")
+    normal = health["status"] == "HEALTHY" and health["capacity_status"] in {"NORMAL", "PRESSURE"}
+    saturated_copy = (
+        not require_live_safe
+        and health["status"] == "DEGRADED"
+        and health["capacity_status"] == "SATURATED"
+    )
+    if not normal and not saturated_copy:
+        raise RuntimeError("RECOVERY_SPOOL_COPY_UNHEALTHY")
+
+
 def _recovery_gate(*, authorize_preview: bool, require_live_safe: bool) -> dict:
     from agent.service_crash_store import FileCrashStore, default_root
     from agent.storage.durable_spool import DurableEventSpool, DurableSpoolPolicy
@@ -302,8 +343,7 @@ def _recovery_gate(*, authorize_preview: bool, require_live_safe: bool) -> dict:
         checked = DurableEventSpool(copied)
         health = checked.health_check()
         pending_after = {item["event_id"] for item in checked.pending_records()}
-        if health["status"] != "HEALTHY" or not health["terminal_state_safe"]:
-            raise RuntimeError("RECOVERY_SPOOL_COPY_UNHEALTHY")
+        _validate_spool_copy_health(health, policy, require_live_safe=require_live_safe)
         if pending_before != pending_after:
             raise RuntimeError("RECOVERY_PENDING_SET_CHANGED")
         for name, expected in hashes.items():
@@ -320,7 +360,8 @@ def _recovery_gate(*, authorize_preview: bool, require_live_safe: bool) -> dict:
             "pending_before": len(pending_before),
             "pending_after": len(pending_after),
             "pending_preserved": True,
-            "copy_health": "HEALTHY",
+            "copy_health": health["status"],
+            "copy_capacity_status": health["capacity_status"],
             "live_hashes_unchanged": True,
         },
     }
