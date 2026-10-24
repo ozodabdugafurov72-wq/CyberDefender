@@ -107,6 +107,25 @@ def validate_record(r, service):
     if r["cumulative_failures"] < len(r["recent_failures"]): raise CrashStoreError("STORE_HISTORY_COUNT_REJECTED")
 
 
+def authorize_probe_transition(record):
+    """Return the authenticated authorize-probe candidate without writing state."""
+    if type(record) is not dict or type(record.get("service")) is not str:
+        raise CrashStoreError("STORE_SCHEMA_REJECTED")
+    validate_record(record, record["service"])
+    candidate=copy.deepcopy(record)
+    if candidate["active_attempt"]:
+        candidate["cumulative_failures"]+=1
+        candidate["recent_failures"]=(candidate["recent_failures"]+[dict(
+            generation=candidate["generation"],boot=candidate["boot"],
+            code="PREVIOUS_ATTEMPT_INTERRUPTED",tick=candidate["last_progress"])])[-32:]
+    candidate["repair_count"]+=1
+    candidate["probes_used"]=0
+    candidate["state"]="LATCHED"
+    candidate["active_attempt"]=False
+    validate_record(candidate, candidate["service"])
+    return candidate
+
+
 def atomic_write(path, data):
     if len(data) > MAX_BYTES: raise CrashStoreError("STORE_WRITE_SIZE_REJECTED")
     temporary=path.with_name(path.name + ".pending")
@@ -205,14 +224,7 @@ class FileCrashStore:
     def authorize_probe(self):
         """Authenticated administrator repair under exclusive stopped-host lock."""
         with self._mutex:
-            r=self.load()
-            if r["active_attempt"]:
-                r["cumulative_failures"]+=1
-                r["recent_failures"]=(r["recent_failures"]+[dict(generation=r["generation"],boot=r["boot"],
-                    code="PREVIOUS_ATTEMPT_INTERRUPTED",tick=r["last_progress"])])[-32:]
-            r["repair_count"]+=1; r["probes_used"]=0
-            r["state"]="LATCHED"; r["active_attempt"]=False
-            return self.write(r)
+            return self.write(authorize_probe_transition(self.load()))
 
 
 def provision(root: Path, *, path_validator=protected_path):
