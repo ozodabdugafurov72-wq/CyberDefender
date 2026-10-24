@@ -4142,6 +4142,7 @@ class CyberDefenderRuntime:
         cycle_failures,
         component_failures,
         last_error,
+        tenant_binding_pending=0,
     ):
         """
         Resolve CURRENT runtime health without losing fail-closed semantics.
@@ -4154,7 +4155,7 @@ class CyberDefenderRuntime:
         Active safety/security degradation always wins.
         """
 
-        if active_degradation:
+        if active_degradation or tenant_binding_pending > 0:
             return True
 
         if current_degraded and not last_error:
@@ -4830,6 +4831,7 @@ class CyberDefenderRuntime:
             cycle_failures=self.cycle_failures,
             component_failures=self.component_failures,
             last_error=self.last_error,
+            tenant_binding_pending=self.tenant_binding_pending,
         )
 
         health["runtime"]["status"] = (
