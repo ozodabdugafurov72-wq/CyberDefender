@@ -31,7 +31,7 @@ $AgentName='CyberDefenderAgent'
 $CompanionNames=@('CyberDefenderControlPlane','CyberDefenderOwnerUI')
 $SpoolRoot=Join-Path $env:ProgramData 'CyberDefender\state\spool'
 $EvidenceHelper=Join-Path $PSScriptRoot 'agent_release\agent_only_error_evidence.ps1'
-$EvidenceHelperSHA256='fdeaa70cf5b895537f aeee518155d1a4603f286bbf3b13379fb722e80845ae33'.Replace(' ','')
+$EvidenceHelperSHA256='7a45859a11dcd9103ffcd7b6ac504c7db97bc4229d2450e2071cc057ac6b38ad'
 $ErrorActionPreference='Stop'
 
 function Require([bool]$Condition,[string]$Code) { if(-not $Condition){ throw $Code } }
@@ -91,6 +91,9 @@ $companionBaseline=@{}
 $spoolBefore=''
 $companionsUnchanged=$false
 $spoolUnchanged=$false
+$agentAfter=$null
+$agentUnchanged=$false
+$CaptureLimit=65536
 
 function Write-Result([string]$Status,[string]$Code,[int]$ExitCode) {
     $artifacts=@{
@@ -104,7 +107,9 @@ function Write-Result([string]$Status,[string]$Code,[int]$ExitCode) {
     }
     $evidence=New-AgentOnlyEvidenceObject -Status $Status -Code $Code -ExitCode $ExitCode -Apply ([bool]$Apply) `
         -ChildExitCode $childExit -ChildStdout $childOut -ChildStderr $childErr -Artifacts $artifacts `
-        -CompanionsUnchanged:$companionsUnchanged -SpoolUnchanged:$spoolUnchanged
+        -CompanionsUnchanged:$companionsUnchanged -SpoolUnchanged:$spoolUnchanged `
+        -AgentUnchanged:$agentUnchanged -AgentBefore $agentBefore -AgentAfter $agentAfter `
+        -LiveMutationPerformed ([bool]$Apply)
     if([string]::IsNullOrWhiteSpace($ResultPath)) {
         $ResultPath=Join-Path $EvidenceRoot ('agent-only-plan-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '.json')
     }
@@ -136,8 +141,6 @@ try {
 
     if($Apply.IsPresent){ Require ($HostAcknowledgement -eq 'AGENT_ONLY_AUTHORIZED') 'AGENT_ONLY_ACK_REQUIRED' }
     [void](New-Item -ItemType Directory -Path $tmpRoot -Force)
-    $stdoutPath=Join-Path $tmpRoot 'installer.stdout.log'
-    $stderrPath=Join-Path $tmpRoot 'installer.stderr.log'
     $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$InstallerPath,
         '-ReleaseZip',$ReleaseZip,'-ApprovedZipSHA256',$ApprovedZipSHA256,'-ApprovedCommit',$ApprovedCommit,
         '-RuntimeZip',$RuntimeZip,'-ApprovedRuntimeZipSHA256',$ApprovedRuntimeZipSHA256,
@@ -147,15 +150,18 @@ try {
     if($AcknowledgeCompanionDegraded.IsPresent){ $arguments += '-AcknowledgeCompanionDegraded' }
     if($Apply.IsPresent){ $arguments += @('-HostAcknowledgement','AGENT_ONLY_AUTHORIZED','-Apply') }
 
-    $p=Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-    $childExit=[int]$p.ExitCode
-    if(Test-Path -LiteralPath $stdoutPath){ $childOut=[IO.File]::ReadAllText($stdoutPath) }
-    if(Test-Path -LiteralPath $stderrPath){ $childErr=[IO.File]::ReadAllText($stderrPath) }
+    $child=Invoke-AgentOnlyBoundedChild -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $arguments -MaximumChars $CaptureLimit
+    $childExit=[int]$child.ExitCode
+    $childOut=[string]$child.Stdout
+    $childErr=[string]$child.Stderr
 
     Assert-CompanionsUnchanged $companionBaseline
     $companionsUnchanged=$true
     Require ((Snapshot-Digest $SpoolRoot) -eq $spoolBefore) 'SPOOL_CHANGED'
     $spoolUnchanged=$true
+    $agentAfter=Service-Snapshot $AgentName
+    if(-not $Apply.IsPresent){ Assert-AgentOnlySnapshotUnchanged -Before $agentBefore -After $agentAfter }
+    $agentUnchanged=$true
     if($childExit -ne 0){ throw ('INSTALLER_FAILED:' + $childExit) }
     if($Apply.IsPresent){ Require ($childOut -match '(?m)^AGENT_RELEASE_PASS:') 'AGENT_RELEASE_PASS_MISSING' }
     else { Require ($childOut -match '(?m)^PLAN_PASS:') 'PLAN_PASS_MISSING' }
@@ -170,7 +176,7 @@ try {
             $companionsUnchanged=$true
             Require ((Snapshot-Digest $SpoolRoot) -eq $spoolBefore) 'POST_FAILURE_STATE_CHANGED'
             $spoolUnchanged=$true
-        } catch { $code += '|ROLLBACK_READBACK:' + $_.Exception.Message }
+        } catch { $code=Sanitize-AgentOnlyDiagnosticText ($code + '|ROLLBACK_READBACK:' + $_.Exception.Message) 4096 }
     }
     $status='FAIL'; $exitCode=1
 } finally {
