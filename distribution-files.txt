@@ -201,6 +201,7 @@ native/go/ndr_edge_v0_2/go.mod
 native/process_sensor_v0_5_1/Cargo.lock
 native/process_sensor_v0_5_1/Cargo.toml
 native/process_sensor_v0_5_1/src/main.rs
+native/process_sensor_v0_5_1/target/release/cyberdefender-process-sensor.exe
 native/rust/probabilistic_security_intelligence_v0_1/Cargo.lock
 native/rust/probabilistic_security_intelligence_v0_1/Cargo.toml
 native/rust/probabilistic_security_intelligence_v0_1/src/lib.rs
@@ -434,6 +435,8 @@ tests/test_process_sensor_authority_foundation_v1.py
 tests/test_process_sensor_authority_runtime_integration_v1.py
 tests/test_process_sensor_canary_runtime_integration_v1.py
 tests/test_process_sensor_runtime_config_v1.py
+tests/test_runtime_tenant_binding_health_gate_v1.py
+tests/test_tenantless_quarantine_durability_v1.py
 tests/test_psi_polyglot_contract_v0_1.py
 tests/test_psi_polyglot_contract_v0_2.py
 tests/test_quarantine_data_fidelity_v1.py
