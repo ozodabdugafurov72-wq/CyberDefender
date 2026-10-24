@@ -19,6 +19,7 @@ import os
 import socket
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -258,6 +259,33 @@ class RuntimeBootstrapError(RuntimeError):
     """
 
     pass
+
+
+def _trusted_event_failure_detail(exc: BaseException, stage: str) -> str:
+    """Return bounded, sanitized trusted-event failure evidence."""
+    name = type(exc).__name__
+    if not name.isidentifier() or len(name) > 64:
+        name = "UNSAFE_EXCEPTION_CLASS"
+    if not isinstance(stage, str) or not stage.isidentifier() or len(stage) > 64:
+        stage = "UNKNOWN_STAGE"
+
+    location = "UNAVAILABLE"
+    project_root = Path(__file__).resolve().parent.parent
+    try:
+        frames = traceback.extract_tb(exc.__traceback__)
+    except Exception:
+        frames = []
+    for frame in reversed(frames):
+        try:
+            path = Path(frame.filename).resolve()
+            path.relative_to(project_root)
+        except Exception:
+            continue
+        filename = path.name
+        function = frame.name if frame.name.isidentifier() else "UNKNOWN_FUNCTION"
+        location = f"{filename}:{function}:{int(frame.lineno)}"
+        break
+    return f"trusted_event:{name}:{stage}:{location}"[:512]
 
 
 # ============================================================
@@ -1746,6 +1774,7 @@ class CyberDefenderRuntime:
         ):
             return
 
+        failure_stage = "DELIVERY_BINDING"
         try:
 
             # Only pipeline-issued, one-use delivery bindings reach the bridge.
@@ -1758,6 +1787,7 @@ class CyberDefenderRuntime:
             # Detection bridge
             # ------------------------------------------------
 
+            failure_stage = "BRIDGE"
             detection = bridge.to_detection(
                 event
             )
@@ -1766,6 +1796,7 @@ class CyberDefenderRuntime:
             # Correlation
             # ------------------------------------------------
 
+            failure_stage = "CORRELATION"
             if not isinstance(
                 detection,
                 dict,
@@ -1781,6 +1812,7 @@ class CyberDefenderRuntime:
             # ACK ONLY AFTER SUCCESS
             # ------------------------------------------------
 
+            failure_stage = "ACK"
             if pipeline.ack(event.event_id) is not True:
                 raise RuntimeBootstrapError("durable ACK failed")
             self.events_acked += 1
@@ -1789,10 +1821,7 @@ class CyberDefenderRuntime:
 
             self.component_failures += 1
 
-            self.last_error = (
-                f"trusted_event:"
-                f"{type(exc).__name__}"
-            )
+            self.last_error = _trusted_event_failure_detail(exc, failure_stage)
 
             if isinstance(event, SecurityEvent):
                 report_failure = getattr(pipeline, "consumer_failed", None)
