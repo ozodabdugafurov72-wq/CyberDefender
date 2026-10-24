@@ -79,6 +79,7 @@ class CorrelationAdapter:
         self._acked = 0
         self._ack_failed = 0
         self._outbox_failures = 0
+        self._last_error_code: str | None = None
 # =========================================================
     # HEALTH
     # =========================================================
@@ -125,6 +126,7 @@ class CorrelationAdapter:
         if not isinstance(event, dict) or event.get("event_type") != "DETECTION":
             self._ignored += 1
             return False
+        self._last_error_code = None
         event_id = event.get("event_id")
         if not isinstance(event_id, str) or not event_id.strip():
             self._ignored += 1
@@ -138,6 +140,7 @@ class CorrelationAdapter:
             if self.incident_outbox is not None and (
                 not isinstance(tenant_id, str) or not tenant_id.strip()
             ):
+                self._last_error_code = "TENANT_IDENTITY_REQUIRED"
                 raise ValueError("tenant identity required for durable incident outbox")
 
             published_before = self._published
@@ -173,6 +176,8 @@ class CorrelationAdapter:
             self._failed += 1
             if self.incident_outbox is not None:
                 self._outbox_failures += 1
+            if self._last_error_code is None:
+                self._last_error_code = "CORRELATION_CONSUMPTION_FAILED"
             return False
 
     def _publish_incident(self, incident: dict) -> bool:
@@ -281,6 +286,11 @@ class CorrelationAdapter:
             self._ack_failed += 1
             return False
 
+    @property
+    def last_error_code(self) -> str | None:
+        """Return bounded diagnostic code for the most recent event."""
+        return self._last_error_code
+
     # =========================================================
     # STATS
     # =========================================================
@@ -296,6 +306,7 @@ class CorrelationAdapter:
             "acked": self._acked,
             "ack_failed": self._ack_failed,
             "outbox_failures": self._outbox_failures,
+            "last_error_code": self._last_error_code,
             "ack_enabled": (
                 self.ack_callback is not None
             ),

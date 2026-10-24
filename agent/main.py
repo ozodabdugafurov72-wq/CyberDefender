@@ -425,6 +425,7 @@ class CyberDefenderRuntime:
         self.admission_failures = 0
         self.dispatch_failures = 0
         self.correlation_failures = 0
+        self.tenant_binding_pending = 0
         self.state_failures = 0
         self.logger_failures = 0
         self.recovery_failures = 0
@@ -1806,6 +1807,9 @@ class CyberDefenderRuntime:
                 )
 
             if correlation_adapter.handle_event(detection) is not True:
+                if getattr(correlation_adapter, "last_error_code", None) == "TENANT_IDENTITY_REQUIRED":
+                    self.tenant_binding_pending += 1
+                    return
                 raise RuntimeBootstrapError("correlation consumption failed")
 
             # ------------------------------------------------
@@ -4232,6 +4236,9 @@ class CyberDefenderRuntime:
 
                 "correlation_failures":
                     self.correlation_failures,
+
+                "tenant_binding_pending":
+                    self.tenant_binding_pending,
 
                 "state_failures":
                     self.state_failures,
