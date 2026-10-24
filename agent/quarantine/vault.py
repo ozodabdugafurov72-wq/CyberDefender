@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -105,6 +107,43 @@ class SecureQuarantineVault:
 
         return None
 
+    @staticmethod
+    def _atomic_write(
+        path: Path,
+        content: bytes,
+    ) -> None:
+        """Publish evidence or metadata only after a durable temp write."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=path.name + ".",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            flags = getattr(os, "O_DIRECTORY", 0)
+            try:
+                directory_fd = os.open(str(path.parent), os.O_RDONLY | flags)
+            except (OSError, ValueError):
+                directory_fd = None
+            if directory_fd is not None:
+                try:
+                    os.fsync(directory_fd)
+                except OSError:
+                    pass
+                finally:
+                    os.close(directory_fd)
+        finally:
+            try:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            except OSError:
+                pass
+
     def quarantine(
         self,
         raw_record: bytes,
@@ -161,8 +200,9 @@ class SecureQuarantineVault:
             / metadata_filename
         )
 
-        evidence_path.write_bytes(
-            raw_record
+        self._atomic_write(
+            evidence_path,
+            raw_record,
         )
 
         stored = (
@@ -220,10 +260,9 @@ class SecureQuarantineVault:
                 "QUARANTINED",
         }
 
-        metadata_path.write_bytes(
-            self._canonical_json(
-                metadata
-            )
+        self._atomic_write(
+            metadata_path,
+            self._canonical_json(metadata),
         )
 
         self._quarantined += 1

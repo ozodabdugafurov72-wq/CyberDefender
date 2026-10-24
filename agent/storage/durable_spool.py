@@ -1121,7 +1121,7 @@ class DurableEventSpool:
             )
 
         except Exception:
-
+            self._terminal_state_safe = False
             return False
 
         self._quarantined[
@@ -1193,58 +1193,11 @@ class DurableEventSpool:
         if persisted:
             return True
 
-        # -----------------------------------------------------
-        # Extremely important fallback:
-        #
-        # If Vault already says QUARANTINED but local
-        # terminal-state persistence fails, we still keep the
-        # event out of delivery for this process.
-        #
-        # Do NOT count this as successful durable persistence.
-        # -----------------------------------------------------
-
-        self._quarantined[
-            event_id
-        ] = {
-            "event_id":
-                event_id,
-
-            "quarantine_id":
-                metadata.get(
-                    "quarantine_id"
-                ),
-
-            "status":
-                "QUARANTINED",
-
-            "failure_type":
-                metadata.get(
-                    "failure_type",
-                    "UNKNOWN",
-                ),
-
-            "reason":
-                metadata.get(
-                    "reason",
-                    "UNKNOWN",
-                ),
-
-            "raw_sha256":
-                metadata.get(
-                    "raw_sha256"
-                ),
-
-            "source":
-                metadata.get(
-                    "source",
-                    "SecureQuarantineVault",
-                ),
-        }
-        if event_id not in self._quarantine_order:
-            self._quarantine_order.append(event_id)
-        self._mark_pending_terminal(event_id)
-
-        return True
+        # A Vault record alone is not enough to make the spool terminal.
+        # Keep the event pending until the local terminal state is durable;
+        # otherwise a restart would resurrect an unaccounted transition.
+        self._terminal_state_safe = False
+        return False
 
     # =========================================================
     # SYNCHRONIZE ALL VAULT QUARANTINES
@@ -1272,21 +1225,9 @@ class DurableEventSpool:
             if self._persist_quarantine_state(event_id, metadata):
                 synchronized += 1
             else:
-                # Vault remains authoritative for this process even when the
-                # compatibility journal cannot be updated.
-                self._quarantined[event_id] = {
-                    "event_id": event_id,
-                    "quarantine_id": metadata.get("quarantine_id"),
-                    "status": "QUARANTINED",
-                    "failure_type": metadata.get("failure_type", "UNKNOWN"),
-                    "reason": metadata.get("reason", "UNKNOWN"),
-                    "raw_sha256": metadata.get("raw_sha256"),
-                    "source": metadata.get("source", "SecureQuarantineVault"),
-                }
-                if event_id not in self._quarantine_order:
-                    self._quarantine_order.append(event_id)
-                self._mark_pending_terminal(event_id)
-                synchronized += 1
+                # Persistence failure is fail-closed: the event remains
+                # pending and terminal_state_safe is already false.
+                continue
         return synchronized
 
     # =========================================================

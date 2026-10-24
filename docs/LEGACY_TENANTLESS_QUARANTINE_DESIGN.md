@@ -16,7 +16,8 @@ are prohibited.
 
 The operation must read a pending record through the `DurableEventSpool` API
 and preserve the exact canonical record bytes before any state transition.
-The quarantine vault record must contain only bounded metadata: schema version,
+The quarantine vault record is the bounded audit receipt and must contain only
+metadata: schema version,
 quarantine id, event id when present, reason, failure type, source, UTC
 timestamp, raw byte count, SHA-256 of the original bytes, evidence filename,
 and `QUARANTINED` status. The raw canonical bytes are stored as protected
@@ -66,5 +67,8 @@ terminal-state failure leaves the record pending; ACK/quarantine exclusivity;
 and the reconciliation equation above across restart. Existing tenant,
 replay, persistence-before-ACK, and compaction tests must remain passing.
 
-**Implementation status:** not implemented, not executed, and not applied to
-the installed agent.
+**Implementation status:** source durability and fail-closed terminal-state
+handling are implemented in the current isolated branch. Automatic tenantless
+quarantine remains disabled: the runtime still leaves an unbound event pending
+with no ACK until a separately authorized product operation exists. No live
+operation has been executed or applied to the installed agent.
