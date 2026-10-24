@@ -31,6 +31,7 @@ def main() -> int:
     )
 
     CyberDefenderRuntime._handle_trusted_event(runtime, event)
+    assert adapter.last_error_code == "TENANT_IDENTITY_REQUIRED"
     assert runtime.component_failures == 0
     assert runtime.tenant_binding_pending == 1
     assert runtime.events_acked == 0
