@@ -21,8 +21,8 @@ param(
 # This wrapper is deliberately pinned to one reviewed candidate.  It delegates
 # installation and rollback to install_agent_release.ps1; it never changes SCM
 # configuration itself and never passes a recovery-probe switch.
-$PinnedCommit='837e6a0b5336bb69888eef13a2e40a352ca6ad29'
-$PinnedZipSHA256='51729553d6d533959e389c15c0b58d40306056e7e9b5e82abe5ac7b7ae29874a'
+$PinnedCommit='0f476e534c16d8590c1fcbd3b466dd3dda79016a'
+$PinnedZipSHA256='946b2ca51559c97f79b2b38e9b7e90f31f3a4939a42276017d95f74c74ef8515'
 $PinnedRuntimeSHA256='7368ccfc91f605b3f3aa96de804a950d1797699021a5236b66a607e643878bb2'
 $PinnedInstallerSHA256='df881581929d47570ab3db6c47abe50f3c8fd2f47a0da38e6b7a1cba82ced327'
 $PinnedBaselineCommit='c5030219ba3a996013b8ab0dda48f60743e5c665'
@@ -185,6 +185,7 @@ try {
     if(Test-Path -LiteralPath $tmpRoot){ Remove-Item -LiteralPath $tmpRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 exit $exitCode
+
 
 
 
