@@ -7,3 +7,26 @@
 .demo-artifact-link{display:inline-block;margin-top:10px;color:var(--accent);text-decoration:none;border:1px solid #28584e;border-radius:7px;padding:7px 9px;font-size:8px;font-weight:800;letter-spacing:.06em}.demo-artifact-link:hover{border-color:var(--accent);background:rgba(67,215,180,.05)}
 .quarantine-panel{margin-bottom:15px}.quarantine-guard{padding:11px 20px;border-bottom:1px solid var(--line);background:rgba(69,215,180,.035);color:#75909a;font-size:8px;line-height:1.5}.quarantine-metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);border-bottom:1px solid var(--line)}.quarantine-metrics>div{background:#0a1821;padding:14px 13px}.quarantine-metrics span{display:block;color:#5f7b86;font-size:7px;letter-spacing:.1em}.quarantine-metrics b{display:block;font-size:18px;margin-top:7px}.quarantine-fleet-head,.quarantine-fleet-row{display:grid;grid-template-columns:1.25fr 1fr 1fr .65fr 1.1fr 1fr .8fr;gap:9px;align-items:center}.quarantine-fleet-head{padding:10px 20px;color:#526d79;font-size:6.5px;letter-spacing:.11em;border-bottom:1px solid var(--line)}.quarantine-fleet-list{max-height:360px;overflow:auto;padding:0 20px 12px}.quarantine-fleet-row{width:100%;padding:11px 0;border:0;border-bottom:1px solid var(--line);background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;font-size:8px}.quarantine-fleet-row:hover{background:rgba(67,215,180,.05)}.quarantine-fleet-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quarantine-fleet-row span:nth-child(4),.quarantine-fleet-row span:nth-child(5){color:var(--accent)}.quarantine-fleet-row.q-bad{border-left:3px solid var(--danger);padding-left:7px;background:rgba(239,106,116,.06)}.quarantine-fleet-row.q-bad span{color:var(--danger)}.quarantine-empty{padding:22px;color:var(--muted);text-align:center}@media(max-width:1100px){.quarantine-metrics{grid-template-columns:repeat(3,1fr)}.quarantine-fleet-head,.quarantine-fleet-row{grid-template-columns:1.3fr 1fr 1fr .8fr 1fr 1fr}}@media(max-width:700px){.quarantine-metrics{grid-template-columns:1fr 1fr}.quarantine-fleet-head{display:none}.quarantine-fleet-row{grid-template-columns:1.3fr 1fr 1fr .8fr}.quarantine-fleet-row span:nth-child(n+5){display:none}}
 .quarantine-auth-strip{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 20px;border-bottom:1px solid var(--line);background:#081720}.quarantine-auth-strip>div{border:1px solid var(--line);border-radius:8px;padding:10px 12px}.quarantine-auth-strip span{display:block;color:var(--muted);font-size:7px;letter-spacing:.1em}.quarantine-auth-strip b{display:block;margin-top:5px;color:var(--accent);font-size:10px}.quarantine-fleet-head,.quarantine-fleet-row{grid-template-columns:1.2fr .85fr .8fr .6fr 1.1fr 1fr 1fr .8fr .8fr}.quarantine-fleet-head{font-size:6px}.quarantine-empty{padding:22px;color:var(--muted);text-align:center}@media(max-width:1100px){.quarantine-auth-strip{grid-template-columns:1fr}.quarantine-fleet-head,.quarantine-fleet-row{grid-template-columns:1.2fr .85fr .8fr .6fr 1.1fr 1fr}}@media(max-width:700px){.quarantine-fleet-head{display:none}.quarantine-fleet-row{grid-template-columns:1.2fr .9fr .8fr .7fr}.quarantine-fleet-row span:nth-child(n+5){display:none}}
+
+
+/* Owner UI accessibility / small-screen refinement — 2026-11-02.
+   Presentation only: never changes endpoint or action authority. */
+:where(button,a,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+:where(button,a){-webkit-tap-highlight-color:transparent}
+:where(.section-label,.brand small,.plane small,.operator small,.eyebrow){font-size:max(10px,1em)}
+:where(.quarantine-fleet-head,.quarantine-auth-strip span){font-size:10px}
+:where(.quarantine-fleet-row){font-size:11px}
+@media(max-width:700px){
+  .app{min-width:0}
+  .main{min-width:0}
+  .sidebar{min-width:0}
+  .topbar{flex-wrap:wrap;gap:12px}
+  .top-right{flex-wrap:wrap}
+  :where(.panel,.hero,.hero-main){min-width:0}
+  :where(.panel,.hero){overflow-wrap:anywhere}
+  :where(button,.nav){min-height:40px}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
